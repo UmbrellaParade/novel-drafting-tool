@@ -937,15 +937,11 @@ h1 {
 .page-break {
   position: relative;
   display: block;
-  height: 0;
+  height: 1px;
   margin: 0;
   border: 0;
   break-after: column;
   overflow: visible;
-}
-
-.page-break + * {
-  break-before: column;
 }
 
 .page-break::before {

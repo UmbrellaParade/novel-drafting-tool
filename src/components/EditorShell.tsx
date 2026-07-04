@@ -519,6 +519,50 @@ export function EditorShell() {
     setMobileTab("draft");
   };
 
+  const updateQrLinkTemplate = async (id: string, template: QrCardTemplateId) => {
+    const nextTemplate = getQrCardTemplateId(template);
+    const link = project.qrLinks.find((item) => item.id === id);
+
+    updateProject((previous) => ({
+      ...previous,
+      qrLinks: previous.qrLinks.map((item) => (item.id === id ? { ...item, template: nextTemplate } : item))
+    }));
+
+    if (!link || !activeEditor) {
+      return;
+    }
+
+    const src = await QRCode.toDataURL(link.url, {
+      margin: 1,
+      width: 420,
+      color: { dark: QR_CARD_TEMPLATES[nextTemplate].qrDark, light: "#ffffff" }
+    });
+
+    activeEditor
+      .chain()
+      .command(({ state, tr }) => {
+        let updated = false;
+        state.doc.descendants((node, position) => {
+          if (node.type.name !== "qrCard") {
+            return;
+          }
+
+          const sameUrl = node.attrs.url === link.url;
+          const sameTitle = !link.name || node.attrs.title === link.name;
+          if (sameUrl && sameTitle) {
+            tr.setNodeMarkup(position, undefined, {
+              ...node.attrs,
+              src,
+              template: nextTemplate
+            });
+            updated = true;
+          }
+        });
+        return updated;
+      })
+      .run();
+  };
+
   const openQrLibrary = () => {
     setMobileTab("check");
     setStatusText("QRリンクパネルを開きました");
@@ -657,10 +701,7 @@ export function EditorShell() {
             links={project.qrLinks}
             onAdd={addQrLink}
             onInsert={insertQrLink}
-            onTemplateChange={(id, template) => updateProject((previous) => ({
-              ...previous,
-              qrLinks: previous.qrLinks.map((link) => (link.id === id ? { ...link, template } : link))
-            }))}
+            onTemplateChange={updateQrLinkTemplate}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
           />
           <CheckPanel project={project} checks={checks} />
@@ -866,9 +907,7 @@ function QrLibraryPanel({
 }) {
   const [newQr, setNewQr] = useState<QrDraft>(EMPTY_QR_DRAFT);
   const handleAdd = (mode: "save" | "insert") => {
-    if (onAdd(newQr, mode)) {
-      setNewQr(EMPTY_QR_DRAFT);
-    }
+    onAdd(newQr, mode);
   };
 
   return (
@@ -1091,14 +1130,10 @@ function printStyle(project: ManuscriptProject) {
       }
 
       .print-flow .page-break {
-        height: 0 !important;
+        height: 1px !important;
         margin: 0 !important;
         border: 0 !important;
         break-after: column !important;
-      }
-
-      .print-flow .page-break + * {
-        break-before: column !important;
       }
 
       .print-flow .page-break::before {
