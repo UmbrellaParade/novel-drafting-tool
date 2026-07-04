@@ -74,6 +74,7 @@ export function EditorShell() {
   }, [project]);
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
+  const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
 
   const updateProject = useCallback((updater: (previous: ManuscriptProject) => ManuscriptProject) => {
     setProject((previous) => {
@@ -404,7 +405,10 @@ export function EditorShell() {
             <span className="chapter-meta">{countManuscriptCharacters({ ...project, chapters: [activeChapter] }).toLocaleString("ja-JP")}字</span>
           </div>
           <div className="page-stage">
-            <article className={`paper-page ${project.pageSettings.showBleedGuide ? "has-bleed-guide" : ""} ${project.pageSettings.showSafeArea ? "has-safe-area" : ""}`}>
+            <article
+              className={`paper-page ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${project.pageSettings.showBleedGuide ? "has-bleed-guide" : ""} ${project.pageSettings.showSafeArea ? "has-safe-area" : ""}`}
+              data-estimated-pages={estimatedPages}
+            >
               <TiptapEditor key={activeChapter.id} content={activeChapter.content} onChange={updateActiveChapterContent} onReady={setActiveEditor} />
               {project.pageSettings.showPageNumber ? <footer className="page-number">1</footer> : null}
             </article>
