@@ -1,0 +1,226 @@
+import type { ManuscriptCheck, ManuscriptProject, PagePresetId, PageSettings } from "./types";
+
+export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageSettings }> = {
+  kindle: {
+    label: "Kindle",
+    settings: {
+      preset: "kindle",
+      pageWidthMm: 148,
+      pageHeightMm: 210,
+      marginTopMm: 18,
+      marginBottomMm: 18,
+      marginLeftMm: 18,
+      marginRightMm: 18,
+      fontSizePt: 11,
+      rubySizePt: 6,
+      lineHeight: 1.75,
+      paragraphSpacingMm: 1.5,
+      showPageNumber: false,
+      showBleedGuide: false,
+      showSafeArea: false
+    }
+  },
+  "shimauma-a6": {
+    label: "しまうまA6",
+    settings: {
+      preset: "shimauma-a6",
+      pageWidthMm: 105,
+      pageHeightMm: 148,
+      marginTopMm: 10,
+      marginBottomMm: 12,
+      marginLeftMm: 9,
+      marginRightMm: 9,
+      fontSizePt: 8.8,
+      rubySizePt: 4.6,
+      lineHeight: 1.72,
+      paragraphSpacingMm: 1,
+      showPageNumber: true,
+      showBleedGuide: true,
+      showSafeArea: true
+    }
+  },
+  "shimauma-a5": {
+    label: "しまうまA5",
+    settings: {
+      preset: "shimauma-a5",
+      pageWidthMm: 148,
+      pageHeightMm: 210,
+      marginTopMm: 13,
+      marginBottomMm: 15,
+      marginLeftMm: 12,
+      marginRightMm: 12,
+      fontSizePt: 10,
+      rubySizePt: 5.2,
+      lineHeight: 1.76,
+      paragraphSpacingMm: 1.2,
+      showPageNumber: true,
+      showBleedGuide: true,
+      showSafeArea: true
+    }
+  },
+  custom: {
+    label: "カスタム",
+    settings: {
+      preset: "custom",
+      pageWidthMm: 105,
+      pageHeightMm: 148,
+      marginTopMm: 10,
+      marginBottomMm: 12,
+      marginLeftMm: 9,
+      marginRightMm: 9,
+      fontSizePt: 9,
+      rubySizePt: 4.8,
+      lineHeight: 1.7,
+      paragraphSpacingMm: 1,
+      showPageNumber: true,
+      showBleedGuide: true,
+      showSafeArea: true
+    }
+  }
+};
+
+const sampleContent = `
+<h2>第一章：雨の記憶</h2>
+<p>雨音が窓の縁をなぞる夜、主人公は古いノートを開いた。そこには、まだ名前のない町と、まだ会ったことのない誰かへの手紙が残されていた。</p>
+<p>「ここから、物語を始めよう」</p>
+<p>このエディタでは本文を見たまま整えながら、ページ設定に合わせた原稿を作れます。</p>
+`.trim();
+
+export function createDefaultProject(): ManuscriptProject {
+  const now = new Date().toISOString();
+  const firstChapterId = crypto.randomUUID();
+
+  return {
+    schemaVersion: 1,
+    id: crypto.randomUUID(),
+    title: "Umbrella Parade 原稿",
+    subtitle: "雨の中で踊る、未完成の物語",
+    author: "Umbrella Parade",
+    pageSettings: { ...PAGE_PRESETS["shimauma-a6"].settings },
+    chapters: [
+      {
+        id: firstChapterId,
+        title: "第一章：雨の記憶",
+        content: sampleContent
+      }
+    ],
+    activeChapterId: firstChapterId,
+    qrLinks: [
+      {
+        id: crypto.randomUUID(),
+        name: "Umbrella Parade 公式サイト",
+        url: "https://example.com",
+        description: "作品情報やお知らせへのリンク",
+        category: "公式"
+      }
+    ],
+    updatedAt: now
+  };
+}
+
+export function applyPreset(settings: PageSettings, preset: PagePresetId): PageSettings {
+  if (preset === "custom") {
+    return { ...settings, preset: "custom" };
+  }
+
+  return { ...PAGE_PRESETS[preset].settings };
+}
+
+export function stripHtml(html: string): string {
+  if (typeof window === "undefined") {
+    return html.replace(/<[^>]*>/g, " ");
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll("rt").forEach((rt) => {
+    rt.replaceWith(`(${rt.textContent ?? ""})`);
+  });
+  return template.content.textContent?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+export function countManuscriptCharacters(project: ManuscriptProject): number {
+  return project.chapters
+    .map((chapter) => stripHtml(chapter.content))
+    .join("")
+    .replace(/\s/g, "").length;
+}
+
+export function estimatePageCount(project: ManuscriptProject): number {
+  const settings = project.pageSettings;
+  const textWidthMm = Math.max(20, settings.pageWidthMm - settings.marginLeftMm - settings.marginRightMm);
+  const textHeightMm = Math.max(30, settings.pageHeightMm - settings.marginTopMm - settings.marginBottomMm);
+  const fontMm = settings.fontSizePt * 0.352778;
+  const charsPerLine = Math.max(12, Math.floor(textWidthMm / fontMm));
+  const linesPerPage = Math.max(8, Math.floor(textHeightMm / (fontMm * settings.lineHeight)));
+  const charsPerPage = charsPerLine * linesPerPage;
+  const characters = countManuscriptCharacters(project);
+  const blockCount = (project.chapters.map((chapter) => chapter.content).join("").match(/data-type="qr-card"|<img/gi) ?? []).length;
+  const chapterBreakPages = Math.max(0, project.chapters.length - 1);
+
+  return Math.max(1, Math.ceil(characters / charsPerPage + blockCount * 0.45 + chapterBreakPages * 0.35));
+}
+
+export function runManuscriptChecks(project: ManuscriptProject): ManuscriptCheck[] {
+  const checks: ManuscriptCheck[] = [];
+  const charCount = countManuscriptCharacters(project);
+  const html = project.chapters.map((chapter) => chapter.content).join("\n");
+  const qrCount = (html.match(/data-type="qr-card"/g) ?? []).length;
+  const imageCount = (html.match(/<img/g) ?? []).length - qrCount;
+  const hasEmptyChapter = project.chapters.some((chapter) => stripHtml(chapter.content).length === 0);
+  const unsafeQr = [...html.matchAll(/data-url="([^"]*)"/g)].some((match) => !isValidUrl(match[1]));
+
+  checks.push({
+    id: "characters",
+    label: "文字数",
+    detail: `${charCount.toLocaleString("ja-JP")}字 / 推定${estimatePageCount(project)}ページ`,
+    level: "ok"
+  });
+
+  checks.push({
+    id: "chapters",
+    label: "章",
+    detail: hasEmptyChapter ? "空の章があります" : `${project.chapters.length}章`,
+    level: hasEmptyChapter ? "warning" : "ok"
+  });
+
+  checks.push({
+    id: "media",
+    label: "画像・QR",
+    detail: `画像${Math.max(0, imageCount)}点 / QR${qrCount}点`,
+    level: "ok"
+  });
+
+  checks.push({
+    id: "qr",
+    label: "QRリンク",
+    detail: unsafeQr ? "URL形式を確認してください" : "URL形式OK",
+    level: unsafeQr ? "danger" : "ok"
+  });
+
+  checks.push({
+    id: "page",
+    label: "紙面",
+    detail: `${project.pageSettings.pageWidthMm}mm x ${project.pageSettings.pageHeightMm}mm`,
+    level: project.pageSettings.pageWidthMm < 80 || project.pageSettings.pageHeightMm < 100 ? "warning" : "ok"
+  });
+
+  return checks;
+}
+
+export function isValidUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeFileName(value: string): string {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, "_")
+    .slice(0, 80) || "manuscript";
+}
