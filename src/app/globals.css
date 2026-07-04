@@ -75,9 +75,13 @@ button:disabled {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .topbar {
@@ -831,6 +835,12 @@ h1 {
     height: auto;
     overflow: visible;
     padding: 10px;
+  }
+
+  .app-shell {
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .mobile-panel {
