@@ -21,6 +21,8 @@ type PdfImageBlock = {
   kind: "image";
   src: string;
   alt: string;
+  width?: number;
+  height?: number;
 };
 
 type PdfQrBlock = {
@@ -390,7 +392,9 @@ async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Prom
   const image = await embedImage(state.pdfDoc, block.src);
   const maxWidth = state.contentWidth;
   const maxHeight = Math.min(mmToPt(state.project.pageSettings.imageMaxHeightMm), state.contentTop - state.contentBottom);
-  const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+  const requestedWidth = block.width ? Math.min(maxWidth, block.width * 0.75) : maxWidth;
+  const requestedHeight = block.height ? Math.min(maxHeight, block.height * 0.75) : maxHeight;
+  const scale = Math.min(requestedWidth / image.width, requestedHeight / image.height, maxHeight / image.height, 1);
   const width = image.width * scale;
   const height = image.height * scale;
 
@@ -611,7 +615,9 @@ function parsePdfBlocks(html: string): PdfBlock[] {
       blocks.push({
         kind: "image",
         src: element.getAttribute("src") ?? "",
-        alt: element.getAttribute("alt") ?? element.getAttribute("title") ?? ""
+        alt: element.getAttribute("alt") ?? element.getAttribute("title") ?? "",
+        width: parseHtmlDimension(element.getAttribute("width")),
+        height: parseHtmlDimension(element.getAttribute("height"))
       });
       return;
     }
@@ -636,6 +642,15 @@ function parsePdfBlocks(html: string): PdfBlock[] {
   }
 
   return blocks;
+}
+
+function parseHtmlDimension(value: string | null): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | "pageBreak"; text: string }> {
