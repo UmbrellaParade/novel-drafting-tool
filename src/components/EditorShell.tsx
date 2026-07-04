@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
-  ArrowDown,
-  ArrowUp,
   CheckCircle2,
   Cloud,
   Download,
@@ -34,13 +32,88 @@ type DriveClient = Awaited<ReturnType<typeof connectGoogleDrive>>;
 
 const tabLabels: Record<MobileTab, string> = {
   draft: "本文",
-  chapters: "章",
+  chapters: "目次",
   check: "確認",
   export: "出力"
 };
 
 const PAGE_GAP_MM = 14;
 const MAX_PAGE_FRAMES = 160;
+const DOCUMENT_CHAPTER_TITLE = "本文";
+
+type OutlineItem = {
+  id: string;
+  title: string;
+  index: number;
+};
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function chapterStartsWithH1(content: string): boolean {
+  return /^\s*<h1[\s>]/i.test(content);
+}
+
+function normalizeDocumentProject(project: ManuscriptProject): ManuscriptProject {
+  const savedChapters = Array.isArray(project.chapters) ? project.chapters : [];
+  const chapters = savedChapters.length
+    ? savedChapters
+    : [{ id: crypto.randomUUID(), title: DOCUMENT_CHAPTER_TITLE, content: "<p></p>" }];
+
+  if (chapters.length === 1) {
+    const [chapter] = chapters;
+    return {
+      ...project,
+      chapters: [{ ...chapter, title: DOCUMENT_CHAPTER_TITLE }],
+      activeChapterId: chapter.id
+    };
+  }
+
+  const documentId = chapters[0].id || crypto.randomUUID();
+  const content = chapters
+    .map((chapter) => {
+      const title = (chapter.title ?? "").trim() || DOCUMENT_CHAPTER_TITLE;
+      const body = (chapter.content ?? "").trim() || "<p></p>";
+      return chapterStartsWithH1(body) ? body : `<h1>${escapeHtml(title)}</h1>${body}`;
+    })
+    .join("");
+
+  return {
+    ...project,
+    chapters: [
+      {
+        id: documentId,
+        title: DOCUMENT_CHAPTER_TITLE,
+        content
+      }
+    ],
+    activeChapterId: documentId
+  };
+}
+
+function extractOutlineItems(html: string): OutlineItem[] {
+  if (typeof document === "undefined") {
+    return [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match, index) => ({
+      id: `heading-${index}`,
+      title: match[1].replace(/<[^>]*>/g, "").trim() || `見出し ${index + 1}`,
+      index
+    }));
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return [...template.content.querySelectorAll("h1")].map((heading, index) => ({
+    id: `heading-${index}`,
+    title: heading.textContent?.trim() || `見出し ${index + 1}`,
+    index
+  }));
+}
 
 export function EditorShell() {
   const [project, setProject] = useState<ManuscriptProject | null>(null);
@@ -61,14 +134,14 @@ export function EditorShell() {
         if (!isMounted) {
           return;
         }
-        setProject(restored ?? createDefaultProject());
+        setProject(normalizeDocumentProject(restored ?? createDefaultProject()));
         setStatusText(restored ? "ブラウザ保存から復元" : "新規原稿");
       })
       .catch(() => {
         if (!isMounted) {
           return;
         }
-        setProject(createDefaultProject());
+        setProject(normalizeDocumentProject(createDefaultProject()));
         setStatusText("新規原稿");
       });
 
@@ -100,8 +173,11 @@ export function EditorShell() {
     if (!project) {
       return null;
     }
-    return project.chapters.find((chapter) => chapter.id === project.activeChapterId) ?? project.chapters[0] ?? null;
+    return project.chapters[0] ?? null;
   }, [project]);
+  const activeChapterContent = activeChapter?.content ?? "";
+  const outlineItems = useMemo(() => extractOutlineItems(activeChapterContent), [activeChapterContent]);
+  const activeSectionTitle = outlineItems[0]?.title ?? DOCUMENT_CHAPTER_TITLE;
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
   const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
@@ -133,12 +209,21 @@ export function EditorShell() {
 
   const updateActiveChapterContent = useCallback(
     (content: string) => {
-      updateProject((previous) => ({
-        ...previous,
-        chapters: previous.chapters.map((chapter) =>
-          chapter.id === previous.activeChapterId ? { ...chapter, content } : chapter
-        )
-      }));
+      updateProject((previous) => {
+        const documentId = previous.chapters[0]?.id ?? crypto.randomUUID();
+        return {
+          ...previous,
+          chapters: [
+            {
+              ...(previous.chapters[0] ?? { id: documentId, title: DOCUMENT_CHAPTER_TITLE }),
+              id: documentId,
+              title: DOCUMENT_CHAPTER_TITLE,
+              content
+            }
+          ],
+          activeChapterId: documentId
+        };
+      });
     },
     [updateProject]
   );
@@ -223,64 +308,13 @@ export function EditorShell() {
     "--paged-content-width": `calc(${pageFrameCount} * (var(--page-width) - var(--margin-left) - var(--margin-right)) + ${pageFrameCount - 1} * (var(--margin-left) + var(--margin-right) + var(--page-gap)))`
   } as React.CSSProperties;
 
-  const setActiveChapter = (chapterId: string) => {
-    updateProject((previous) => ({ ...previous, activeChapterId: chapterId }));
+  const jumpToHeading = (index: number) => {
     setMobileTab("draft");
-  };
-
-  const addChapter = () => {
-    const id = crypto.randomUUID();
-    const chapter: Chapter = {
-      id,
-      title: `第${project.chapters.length + 1}章`,
-      content: "<p></p>"
-    };
-    updateProject((previous) => ({
-      ...previous,
-      chapters: [...previous.chapters, chapter],
-      activeChapterId: id
-    }));
-    setMobileTab("draft");
-  };
-
-  const deleteChapter = (chapterId: string) => {
-    if (project.chapters.length === 1) {
-      window.alert("章は1つ以上必要です。");
-      return;
-    }
-    if (!window.confirm("この章を削除しますか？")) {
-      return;
-    }
-
-    updateProject((previous) => {
-      const chapters = previous.chapters.filter((chapter) => chapter.id !== chapterId);
-      return {
-        ...previous,
-        chapters,
-        activeChapterId: chapters[0].id
-      };
+    window.requestAnimationFrame(() => {
+      const headings = pageStageRef.current?.querySelectorAll<HTMLElement>(".manuscript-prose h1");
+      const target = headings?.[index];
+      target?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
     });
-  };
-
-  const moveChapter = (chapterId: string, direction: -1 | 1) => {
-    updateProject((previous) => {
-      const index = previous.chapters.findIndex((chapter) => chapter.id === chapterId);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= previous.chapters.length) {
-        return previous;
-      }
-      const chapters = [...previous.chapters];
-      const [chapter] = chapters.splice(index, 1);
-      chapters.splice(nextIndex, 0, chapter);
-      return { ...previous, chapters };
-    });
-  };
-
-  const updateChapterTitle = (chapterId: string, title: string) => {
-    updateProject((previous) => ({
-      ...previous,
-      chapters: previous.chapters.map((chapter) => (chapter.id === chapterId ? { ...chapter, title } : chapter))
-    }));
   };
 
   const handlePreset = (preset: PagePresetId) => {
@@ -318,7 +352,7 @@ export function EditorShell() {
   const importJson = async (file: File) => {
     try {
       const imported = await readJsonFile(file);
-      setProject({ ...imported, updatedAt: new Date().toISOString() });
+      setProject(normalizeDocumentProject({ ...imported, updatedAt: new Date().toISOString() }));
       setStatusText("JSONを読み込み");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "JSONを読み込めませんでした。");
@@ -440,7 +474,7 @@ export function EditorShell() {
     if (!window.confirm("新規原稿を作成しますか？現在のブラウザ保存は上書きされます。")) {
       return;
     }
-    setProject(createDefaultProject());
+    setProject(normalizeDocumentProject(createDefaultProject()));
     setStatusText("新規原稿");
   };
 
@@ -507,6 +541,7 @@ export function EditorShell() {
 
       <div className="workspace-grid">
         <aside className={`left-rail mobile-panel ${mobileTab === "chapters" ? "is-mobile-active" : ""}`}>
+          <OutlinePanel items={outlineItems} onJump={jumpToHeading} />
           <ProjectPanel
             project={project}
             onProjectChange={updateProject}
@@ -514,26 +549,15 @@ export function EditorShell() {
             onPageChange={updatePageSetting}
             onReset={resetProject}
           />
-          <ChapterPanel
-            chapters={project.chapters}
-            activeChapterId={project.activeChapterId}
-            onAdd={addChapter}
-            onDelete={deleteChapter}
-            onMove={moveChapter}
-            onSelect={setActiveChapter}
-            onTitleChange={updateChapterTitle}
-          />
         </aside>
 
         <section className={`editor-column mobile-panel ${mobileTab === "draft" ? "is-mobile-active" : ""}`} aria-label="本文編集">
           <div className="chapter-heading-row">
-            <input
-              className="chapter-title-input"
-              value={activeChapter.title}
-              onChange={(event) => updateChapterTitle(activeChapter.id, event.target.value)}
-              aria-label="章タイトル"
-            />
-            <span className="chapter-meta">{countManuscriptCharacters({ ...project, chapters: [activeChapter] }).toLocaleString("ja-JP")}字</span>
+            <div className="document-title-label">
+              <FileText size={16} />
+              <span>{project.title}</span>
+            </div>
+            <span className="chapter-meta">{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
           </div>
           <TiptapToolbar editor={activeEditor} onOpenQrLibrary={openQrLibrary} />
           <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
@@ -547,7 +571,7 @@ export function EditorShell() {
                   <section key={pageIndex} className="page-frame">
                     <header className="page-frame-header">
                       <span>{project.title}</span>
-                      <span>{activeChapter.title}</span>
+                      <span>{activeSectionTitle}</span>
                     </header>
                     {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
                     {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
@@ -578,12 +602,22 @@ export function EditorShell() {
           <ExportPanel project={project} onJson={exportJson} onPdf={exportPdf} onDocx={exportDocx} onDrive={saveToDrive} />
         </aside>
       </div>
-      <PrintDocument project={project} chapter={activeChapter} pageCount={pageFrameCount} />
+      <PrintDocument project={project} chapter={activeChapter} sectionTitle={activeSectionTitle} pageCount={pageFrameCount} />
     </main>
   );
 }
 
-function PrintDocument({ project, chapter, pageCount }: { project: ManuscriptProject; chapter: Chapter; pageCount: number }) {
+function PrintDocument({
+  project,
+  chapter,
+  sectionTitle,
+  pageCount
+}: {
+  project: ManuscriptProject;
+  chapter: Chapter;
+  sectionTitle: string;
+  pageCount: number;
+}) {
   const page = project.pageSettings;
   const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
   const pagePitchMm = contentWidthMm + page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
@@ -594,7 +628,7 @@ function PrintDocument({ project, chapter, pageCount }: { project: ManuscriptPro
         <section key={pageIndex} className="print-page">
           <header className="print-page-header">
             <span>{project.title}</span>
-            <span>{chapter.title}</span>
+            <span>{sectionTitle}</span>
           </header>
           {page.showBleedGuide ? <div className="print-bleed-guide" /> : null}
           {page.showSafeArea ? <div className="print-safe-guide" /> : null}
@@ -701,50 +735,25 @@ function ProjectPanel({
   );
 }
 
-function ChapterPanel({
-  chapters,
-  activeChapterId,
-  onAdd,
-  onDelete,
-  onMove,
-  onSelect,
-  onTitleChange
-}: {
-  chapters: Chapter[];
-  activeChapterId: string;
-  onAdd: () => void;
-  onDelete: (id: string) => void;
-  onMove: (id: string, direction: -1 | 1) => void;
-  onSelect: (id: string) => void;
-  onTitleChange: (id: string, title: string) => void;
-}) {
+function OutlinePanel({ items, onJump }: { items: OutlineItem[]; onJump: (index: number) => void }) {
   return (
-    <section className="tool-panel">
+    <section className="tool-panel outline-panel">
       <div className="panel-title-row">
-        <h2>章</h2>
-        <button className="icon-button" type="button" title="章を追加" aria-label="章を追加" onClick={onAdd}>
-          <Plus size={17} />
-        </button>
+        <h2>目次</h2>
+        <span className="mini-badge">H1 {items.length}件</span>
       </div>
-      <div className="chapter-list">
-        {chapters.map((chapter, index) => (
-          <div key={chapter.id} className={`chapter-item ${chapter.id === activeChapterId ? "is-active" : ""}`}>
-            <button className="chapter-select" type="button" title={`${index + 1}番目の章を開く`} aria-label={`${index + 1}番目の章を開く`} onClick={() => onSelect(chapter.id)}>
+      {items.length ? (
+        <div className="outline-list">
+          {items.map((item) => (
+            <button key={item.id} className="outline-item" type="button" onClick={() => onJump(item.index)}>
               <FileText size={15} />
+              <span>{item.title}</span>
             </button>
-            <input value={chapter.title} onChange={(event) => onTitleChange(chapter.id, event.target.value)} aria-label="章タイトル" />
-            <button className="icon-button small" type="button" title="上へ" aria-label="上へ" onClick={() => onMove(chapter.id, -1)}>
-              <ArrowUp size={15} />
-            </button>
-            <button className="icon-button small" type="button" title="下へ" aria-label="下へ" onClick={() => onMove(chapter.id, 1)}>
-              <ArrowDown size={15} />
-            </button>
-            <button className="icon-button small danger" type="button" title="削除" aria-label="削除" onClick={() => onDelete(chapter.id)}>
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-note">本文にH1見出しを入れると自動で表示されます。</p>
+      )}
     </section>
   );
 }

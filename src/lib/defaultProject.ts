@@ -99,7 +99,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 };
 
 const sampleContent = `
-<h2>第一章：雨の記憶</h2>
+<h1>第一章：雨の記憶</h1>
 <p>雨音が窓の縁をなぞる夜、主人公は古いノートを開いた。そこには、まだ名前のない町と、まだ会ったことのない誰かへの手紙が残されていた。</p>
 <p>「ここから、物語を始めよう」</p>
 <p>このエディタでは本文を見たまま整えながら、ページ設定に合わせた原稿を作れます。</p>
@@ -119,7 +119,7 @@ export function createDefaultProject(): ManuscriptProject {
     chapters: [
       {
         id: firstChapterId,
-        title: "第一章：雨の記憶",
+        title: "本文",
         content: sampleContent
       }
     ],
@@ -205,6 +205,7 @@ export function runManuscriptChecks(project: ManuscriptProject): ManuscriptCheck
   const html = project.chapters.map((chapter) => chapter.content).join("\n");
   const qrCount = (html.match(/data-type="qr-card"/g) ?? []).length;
   const imageCount = (html.match(/<img/g) ?? []).length - qrCount;
+  const headingCount = (html.match(/<h1\b/gi) ?? []).length;
   const hasEmptyChapter = project.chapters.some((chapter) => stripHtml(chapter.content).length === 0);
   const unsafeQr = [...html.matchAll(/data-url="([^"]*)"/g)].some((match) => !isValidUrl(match[1]));
 
@@ -216,10 +217,10 @@ export function runManuscriptChecks(project: ManuscriptProject): ManuscriptCheck
   });
 
   checks.push({
-    id: "chapters",
-    label: "章",
-    detail: hasEmptyChapter ? "空の章があります" : `${project.chapters.length}章`,
-    level: hasEmptyChapter ? "warning" : "ok"
+    id: "headings",
+    label: "H1見出し",
+    detail: hasEmptyChapter ? "本文が空です" : `${headingCount}件`,
+    level: hasEmptyChapter || headingCount === 0 ? "warning" : "ok"
   });
 
   checks.push({
