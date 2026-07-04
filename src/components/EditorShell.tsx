@@ -1069,8 +1069,11 @@ function printStyle(project: ManuscriptProject) {
         height: 0 !important;
         margin: 0 !important;
         border: 0 !important;
-        break-after: column;
-        page-break-after: always;
+        break-after: column !important;
+      }
+
+      .print-flow .page-break + * {
+        break-before: column !important;
       }
 
       .print-flow .page-break::before {
