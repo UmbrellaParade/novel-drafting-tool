@@ -1,11 +1,11 @@
 const repoName = "novel-drafting-tool";
-const isGitHubActions = process.env.GITHUB_ACTIONS === "true";
+const isProductionBuild = process.env.NODE_ENV === "production";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "export",
-  basePath: isGitHubActions ? `/${repoName}` : "",
-  assetPrefix: isGitHubActions ? `/${repoName}/` : "",
+  basePath: isProductionBuild ? `/${repoName}` : "",
+  assetPrefix: isProductionBuild ? `/${repoName}/` : "",
   images: {
     unoptimized: true
   }
