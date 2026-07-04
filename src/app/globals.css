@@ -878,20 +878,29 @@ h1 {
 }
 
 .page-break {
-  display: grid;
-  place-items: center;
-  height: 10mm;
-  margin: 4mm 0;
-  border-top: 1px dashed #9a8f82;
-  border-bottom: 1px dashed #9a8f82;
+  position: relative;
+  display: block;
+  height: 0;
+  margin: 0;
+  border: 0;
   break-after: column;
+  page-break-after: always;
+  overflow: visible;
 }
 
 .page-break::before {
   content: "改ページ";
+  position: absolute;
+  top: -2mm;
+  left: 0;
+  right: 0;
+  display: block;
+  border-top: 1px dashed #9a8f82;
   color: #7a7168;
   font-family: var(--font-sans), sans-serif;
   font-size: 9px;
+  line-height: 1;
+  text-align: center;
 }
 
 .qr-card {

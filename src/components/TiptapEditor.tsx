@@ -5,6 +5,7 @@ import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TextAlign from "@tiptap/extension-text-align";
 import Underline from "@tiptap/extension-underline";
+import { NodeSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -182,7 +183,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    editor.chain().focus().insertContent({ type: "pageBreak" }).run();
+    const { selection } = editor.state;
+    const insertPosition = selection instanceof NodeSelection ? selection.to : selection.from;
+    editor.chain().focus().insertContentAt(insertPosition, { type: "pageBreak" }).run();
   };
 
   const handleImageFile = (file: File) => {

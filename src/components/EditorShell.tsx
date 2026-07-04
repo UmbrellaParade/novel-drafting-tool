@@ -1078,7 +1078,15 @@ function printStyle(project: ManuscriptProject) {
       }
 
       .print-flow .page-break {
+        height: 0 !important;
+        margin: 0 !important;
+        border: 0 !important;
         break-after: column;
+        page-break-after: always;
+      }
+
+      .print-flow .page-break::before {
+        content: none !important;
       }
     }
   `;
