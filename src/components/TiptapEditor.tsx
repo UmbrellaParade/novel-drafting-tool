@@ -13,6 +13,7 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  Check,
   Heading1,
   Heading2,
   ImagePlus,
@@ -26,6 +27,7 @@ import {
   Trash2,
   Type,
   Undo2,
+  X,
   Underline as UnderlineIcon
 } from "lucide-react";
 import { PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
@@ -116,12 +118,15 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
 
 export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const rubyReadingInputRef = useRef<HTMLInputElement | null>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
     canUndo: false,
     canRedo: false,
     hasImageSelection: false,
     selectedImageWidth: null
   });
+  const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
+  const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
   const disabled = !editor;
 
   useEffect(() => {
@@ -158,24 +163,42 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     };
   }, [editor]);
 
-  const insertRuby = () => {
+  const openRubyPanel = () => {
     if (!editor) {
       return;
     }
 
     const { from, to } = editor.state.selection;
+    const rubyAttrs = editor.getAttributes("rubyText") as { base?: string; rt?: string };
+    const isRubySelected = editor.isActive("rubyText") && Boolean(rubyAttrs.base || rubyAttrs.rt);
     const selectedText = editor.state.doc.textBetween(from, to, " ").trim();
-    const base = selectedText || window.prompt("ルビを付ける文字", "")?.trim();
-    if (!base) {
+    setRubyDraft({
+      base: isRubySelected ? rubyAttrs.base ?? "" : selectedText,
+      rt: isRubySelected ? rubyAttrs.rt ?? "" : ""
+    });
+    setRubyPanelOpen(true);
+    window.requestAnimationFrame(() => rubyReadingInputRef.current?.focus());
+  };
+
+  const applyRuby = () => {
+    if (!editor) {
       return;
     }
 
-    const rt = window.prompt("読み", "")?.trim();
-    if (!rt) {
+    const base = rubyDraft.base.trim();
+    const rt = rubyDraft.rt.trim();
+    if (!base || !rt) {
+      window.alert("親文字とルビを入力してください。");
       return;
     }
 
-    editor.chain().focus().deleteSelection().insertContent({ type: "rubyText", attrs: { base, rt } }).run();
+    const chain = editor.chain().focus();
+    if (editor.isActive("rubyText")) {
+      chain.updateAttributes("rubyText", { base, rt }).run();
+    } else {
+      chain.deleteSelection().insertContent({ type: "rubyText", attrs: { base, rt } }).run();
+    }
+    setRubyPanelOpen(false);
   };
 
   const insertPageBreak = () => {
@@ -288,7 +311,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <ToolButton label="下線" active={editor?.isActive("underline")} disabled={disabled} onClick={() => editor?.chain().focus().toggleUnderline().run()}>
           <UnderlineIcon size={18} />
         </ToolButton>
-        <ToolButton label="ルビ" disabled={disabled} onClick={insertRuby}>
+        <ToolButton label="ルビ" active={rubyPanelOpen} disabled={disabled} onClick={openRubyPanel}>
           <Type size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
@@ -318,6 +341,26 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <ScissorsLineDashed size={18} />
         </ToolButton>
       </div>
+      {rubyPanelOpen ? (
+        <div className="ruby-controls" aria-label="ルビ設定">
+          <label>
+            <span>親文字</span>
+            <input value={rubyDraft.base} onChange={(event) => setRubyDraft((draft) => ({ ...draft, base: event.target.value }))} />
+          </label>
+          <label>
+            <span>ルビ</span>
+            <input ref={rubyReadingInputRef} value={rubyDraft.rt} onChange={(event) => setRubyDraft((draft) => ({ ...draft, rt: event.target.value }))} />
+          </label>
+          <button type="button" onClick={applyRuby}>
+            <Check size={16} />
+            適用
+          </button>
+          <button type="button" onClick={() => setRubyPanelOpen(false)}>
+            <X size={16} />
+            閉じる
+          </button>
+        </div>
+      ) : null}
       {toolbarState.hasImageSelection ? (
         <div className="image-size-controls" aria-label="画像サイズ">
           <span className="image-size-chip">画像</span>

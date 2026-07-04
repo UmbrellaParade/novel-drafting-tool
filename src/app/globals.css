@@ -146,8 +146,7 @@ h1 {
   white-space: nowrap;
 }
 
-.command-button,
-.export-grid button {
+.command-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -162,8 +161,7 @@ h1 {
   white-space: nowrap;
 }
 
-.command-button:hover,
-.export-grid button:hover {
+.command-button:hover {
   border-color: var(--rain);
 }
 
@@ -691,6 +689,63 @@ h1 {
   box-shadow: 0 8px 20px rgba(36, 33, 29, 0.08);
 }
 
+.ruby-controls {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) auto auto;
+  align-items: end;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid #d8cdbc;
+  border-radius: 8px;
+  background: #fffdf8;
+  box-shadow: 0 8px 20px rgba(36, 33, 29, 0.08);
+}
+
+.ruby-controls label {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ruby-controls span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ruby-controls input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 7px;
+  border: 1px solid #d8cdbc;
+  border-radius: 6px;
+  background: #fffefa;
+  color: var(--ink);
+}
+
+.ruby-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #d8cdbc;
+  border-radius: 6px;
+  background: #fbf7ef;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.ruby-controls button:hover {
+  border-color: var(--rain);
+  background: #eaf3f0;
+  color: #1f5c54;
+}
+
 .image-size-chip,
 .image-size-unit {
   color: var(--muted);
@@ -1028,28 +1083,18 @@ h1 {
   line-height: 1.45;
 }
 
-.metric-row {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.check-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   margin-bottom: 12px;
-}
-
-.metric-row div {
-  display: grid;
-  gap: 3px;
-  padding: 10px;
+  padding: 9px 10px;
   border-radius: 8px;
   background: #f6f0e7;
-}
-
-.metric-row span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.metric-row strong {
-  font-size: 20px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .check-list {
@@ -1204,20 +1249,6 @@ h1 {
   font-size: 12px;
 }
 
-.export-panel {
-  display: block;
-}
-
-.export-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.export-grid button {
-  min-height: 42px;
-}
-
 @media (max-width: 1160px) {
   .workspace-grid {
     grid-template-columns: minmax(250px, 300px) minmax(440px, 1fr);
@@ -1226,7 +1257,7 @@ h1 {
   .right-rail {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -1273,7 +1304,7 @@ h1 {
     top: 0;
     z-index: 10;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     padding: 8px 10px;
     border-bottom: 1px solid rgba(54, 45, 35, 0.12);
@@ -1336,6 +1367,7 @@ h1 {
   }
 
   .qr-form,
+  .ruby-controls,
   .number-grid {
     grid-template-columns: 1fr;
   }

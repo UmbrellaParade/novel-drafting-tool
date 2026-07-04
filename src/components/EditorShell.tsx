@@ -4,10 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
+  BookOpen,
   CheckCircle2,
   Cloud,
-  Download,
-  FileDown,
   FileJson,
   FileText,
   FolderOpen,
@@ -16,25 +15,23 @@ import {
   QrCode,
   Save,
   Trash2,
-  Upload,
   XCircle
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar } from "./TiptapEditor";
-import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
+import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, runManuscriptChecks } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { connectGoogleDrive, isDriveConfigured } from "@/lib/googleDrive";
-import { exportProjectDocx, exportProjectPdf } from "@/lib/exporters";
+import { exportProjectDocx, exportProjectEpub, exportProjectPdf } from "@/lib/exporters";
 
-type MobileTab = "draft" | "chapters" | "check" | "export";
+type MobileTab = "draft" | "chapters" | "check";
 
 type DriveClient = Awaited<ReturnType<typeof connectGoogleDrive>>;
 
 const tabLabels: Record<MobileTab, string> = {
   draft: "本文",
   chapters: "目次",
-  check: "確認",
-  export: "出力"
+  check: "QR・確認"
 };
 
 const PAGE_GAP_MM = 14;
@@ -440,6 +437,16 @@ export function EditorShell() {
     }
   };
 
+  const exportEpub = async () => {
+    try {
+      await exportProjectEpub(project);
+      setStatusText("EPUBを書き出し");
+    } catch (error) {
+      window.console.error(error);
+      window.alert(error instanceof Error ? error.message : "EPUBを書き出せませんでした。");
+    }
+  };
+
   const addQrLink = (draft: QrDraft, mode: "save" | "insert" = "save") => {
     const name = draft.name.trim();
     const url = draft.url.trim();
@@ -562,6 +569,10 @@ export function EditorShell() {
             <FileText size={17} />
             DOCX
           </button>
+          <button className="command-button" type="button" onClick={exportEpub} title="EPUB出力">
+            <BookOpen size={17} />
+            EPUB
+          </button>
           <button className="command-button command-button-strong" type="button" onClick={saveToDrive} title="Google Drive保存">
             <Cloud size={17} />
             Drive
@@ -640,8 +651,7 @@ export function EditorShell() {
           </div>
         </section>
 
-        <aside className={`right-rail mobile-panel ${mobileTab === "check" || mobileTab === "export" ? "is-mobile-active" : ""}`}>
-          <CheckPanel project={project} checks={checks} />
+        <aside className={`right-rail mobile-panel ${mobileTab === "check" ? "is-mobile-active" : ""}`}>
           <QrLibraryPanel
             panelRef={qrPanelRef}
             links={project.qrLinks}
@@ -653,7 +663,7 @@ export function EditorShell() {
             }))}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
           />
-          <ExportPanel project={project} onJson={exportJson} onPdf={exportPdf} onDocx={exportDocx} onDrive={saveToDrive} />
+          <CheckPanel project={project} checks={checks} />
         </aside>
       </div>
       <PrintDocument project={project} chapter={activeChapter} sectionTitle={activeSectionTitle} pageCount={pageFrameCount} />
@@ -813,24 +823,19 @@ function OutlinePanel({ items, onJump }: { items: OutlineItem[]; onJump: (index:
 }
 
 function CheckPanel({ project, checks }: { project: ManuscriptProject; checks: ReturnType<typeof runManuscriptChecks> }) {
+  const visibleChecks = checks.filter((check) => check.id !== "characters");
+
   return (
-    <section className="tool-panel">
+    <section className="tool-panel check-panel">
       <div className="panel-title-row">
         <h2>確認</h2>
-        <span className="mini-badge">{estimatePageCount(project)}p</span>
       </div>
-      <div className="metric-row">
-        <div>
-          <span>総文字数</span>
-          <strong>{countManuscriptCharacters(project).toLocaleString("ja-JP")}</strong>
-        </div>
-        <div>
-          <span>推定ページ</span>
-          <strong>{estimatePageCount(project)}</strong>
-        </div>
+      <div className="check-summary-row">
+        <span>{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
+        <span>推定{estimatePageCount(project)}p</span>
       </div>
       <div className="check-list">
-        {checks.map((check) => (
+        {visibleChecks.map((check) => (
           <div key={check.id} className={`check-item ${check.level}`}>
             {check.level === "ok" ? <CheckCircle2 size={17} /> : <XCircle size={17} />}
             <div>
@@ -930,47 +935,6 @@ function QrLibraryPanel({
             </div>
           );
         })}
-      </div>
-    </section>
-  );
-}
-
-function ExportPanel({
-  project,
-  onJson,
-  onPdf,
-  onDocx,
-  onDrive
-}: {
-  project: ManuscriptProject;
-  onJson: () => void;
-  onPdf: () => void;
-  onDocx: () => void;
-  onDrive: () => void;
-}) {
-  return (
-    <section className="tool-panel export-panel">
-      <div className="panel-title-row">
-        <h2>出力</h2>
-        <span className="mini-badge">{sanitizeFileName(project.title)}</span>
-      </div>
-      <div className="export-grid">
-        <button type="button" onClick={onJson}>
-          <Download size={18} />
-          JSON
-        </button>
-        <button type="button" onClick={onPdf}>
-          <FileDown size={18} />
-          PDF
-        </button>
-        <button type="button" onClick={onDocx}>
-          <FileText size={18} />
-          DOCX
-        </button>
-        <button type="button" onClick={onDrive}>
-          <Upload size={18} />
-          Drive
-        </button>
       </div>
     </section>
   );
