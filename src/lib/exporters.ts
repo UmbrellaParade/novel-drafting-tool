@@ -55,8 +55,6 @@ type PdfRenderState = {
     paper: RGB;
     ink: RGB;
     muted: RGB;
-    guide: RGB;
-    brass: RGB;
     white: RGB;
   };
 };
@@ -225,8 +223,6 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
       paper: rgb(1, 0.992, 0.973),
       ink: rgb(0.122, 0.114, 0.102),
       muted: rgb(0.478, 0.443, 0.408),
-      guide: rgb(0.227, 0.51, 0.471),
-      brass: rgb(0.718, 0.518, 0.259),
       white: rgb(1, 1, 1)
     }
   };
@@ -302,29 +298,6 @@ function drawPdfPageChrome(state: PdfRenderState): void {
     height: state.pageHeight,
     color: colors.paper
   });
-
-  if (settings.showBleedGuide) {
-    const inset = mmToPt(3);
-    page.drawRectangle({
-      x: inset,
-      y: inset,
-      width: state.pageWidth - inset * 2,
-      height: state.pageHeight - inset * 2,
-      borderColor: colors.brass,
-      borderWidth: 0.4
-    });
-  }
-
-  if (settings.showSafeArea) {
-    page.drawRectangle({
-      x: marginLeft,
-      y: marginBottom,
-      width: state.pageWidth - marginLeft - marginRight,
-      height: state.pageHeight - marginTop - marginBottom,
-      borderColor: colors.guide,
-      borderWidth: 0.35
-    });
-  }
 
   const headerY = state.pageHeight - Math.max(mmToPt(2), marginTop / 2);
   const footerY = Math.max(mmToPt(2), marginBottom / 2);

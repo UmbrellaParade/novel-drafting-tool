@@ -370,7 +370,7 @@ export function EditorShell() {
   const saveToDrive = async () => {
     try {
       if (!isDriveConfigured()) {
-        window.alert("Google Drive連携を使うには .env に Google API の設定が必要です。");
+        window.alert("Google Drive連携を使うには .env.local に NEXT_PUBLIC_GOOGLE_CLIENT_ID と NEXT_PUBLIC_GOOGLE_API_KEY を設定して、再ビルドしてください。");
         return;
       }
 
@@ -1039,19 +1039,7 @@ function printStyle(project: ManuscriptProject) {
 
       .print-bleed-guide,
       .print-safe-guide {
-        position: absolute;
-        pointer-events: none;
-        z-index: 2;
-      }
-
-      .print-bleed-guide {
-        inset: 3mm;
-        border: 1px dashed rgba(183, 132, 66, 0.55);
-      }
-
-      .print-safe-guide {
-        inset: ${page.marginTopMm}mm ${page.marginRightMm}mm ${page.marginBottomMm}mm ${page.marginLeftMm}mm;
-        border: 1px dotted rgba(58, 130, 120, 0.55);
+        display: none !important;
       }
 
       .print-content-window {

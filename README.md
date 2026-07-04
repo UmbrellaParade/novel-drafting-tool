@@ -49,6 +49,10 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=...
 NEXT_PUBLIC_GOOGLE_API_KEY=...
 ```
 
+`.env.local` はリポジトリ直下、`package.json` と同じ階層に作成します。設定後は `npm run dev` を再起動するか、公開用なら `npm run build` で作り直してください。
+
+GitHub Pages版でDrive連携を有効にする場合は、公開用ビルドを作る環境にも同じ2つの値が必要です。APIキーやOAuthクライアントIDを公開ページへ埋め込む形になるため、Google Cloud Console側でHTTPリファラーとJavaScript生成元をこのサイトに限定してください。
+
 スコープは `https://www.googleapis.com/auth/drive.file` を使います。未設定の場合でも、ブラウザ保存とJSON書き出しは利用できます。
 
 ## 公開先
