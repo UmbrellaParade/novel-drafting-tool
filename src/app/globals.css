@@ -423,7 +423,7 @@ h1 {
   min-height: 0;
   overflow: auto;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: flex-start;
   padding: 156px 18px 18px;
   border: 1px solid rgba(54, 45, 35, 0.1);
@@ -433,6 +433,89 @@ h1 {
     linear-gradient(rgba(36, 33, 29, 0.035) 1px, transparent 1px),
     #ede7dc;
   background-size: 24px 24px;
+}
+
+.paged-document {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--paged-track-width);
+  min-height: var(--page-height);
+  margin: 0 auto;
+}
+
+.page-frame-track {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--page-gap);
+}
+
+.page-frame {
+  position: relative;
+  flex: 0 0 var(--page-width);
+  width: var(--page-width);
+  height: var(--page-height);
+  border: 1px solid #cdbfadd;
+  background: #fffdf8;
+  box-shadow: 0 18px 45px rgba(36, 33, 29, 0.16);
+  color: #1f1d1a;
+}
+
+.page-frame-header,
+.page-frame-footer {
+  position: absolute;
+  left: var(--margin-left);
+  right: var(--margin-right);
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 4mm;
+  overflow: hidden;
+  color: #7a7168;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 7pt;
+  line-height: 1.25;
+  pointer-events: none;
+}
+
+.page-frame-header {
+  top: max(2mm, calc(var(--margin-top) / 2 - 3pt));
+}
+
+.page-frame-footer {
+  bottom: max(2mm, calc(var(--margin-bottom) / 2 - 3pt));
+}
+
+.page-frame-header span,
+.page-frame-footer span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-bleed-guide,
+.page-safe-guide {
+  position: absolute;
+  pointer-events: none;
+}
+
+.page-bleed-guide {
+  inset: 3mm;
+  border: 1px dashed rgba(183, 132, 66, 0.55);
+}
+
+.page-safe-guide {
+  inset: var(--margin-top) var(--margin-right) var(--margin-bottom) var(--margin-left);
+  border: 1px dotted rgba(58, 130, 120, 0.55);
+}
+
+.paged-editor-layer {
+  position: absolute;
+  top: var(--margin-top);
+  left: var(--margin-left);
+  z-index: 2;
+  width: var(--paged-content-width);
+  min-height: var(--content-height);
 }
 
 .paper-page {
@@ -490,19 +573,21 @@ h1 {
 
 .editor-stack {
   position: relative;
+  width: var(--paged-content-width);
   z-index: 1;
 }
 
 .editor-toolbar {
   position: absolute;
   left: 0;
-  right: 0;
+  right: auto;
   top: 0;
   z-index: 5;
   transform: translateY(calc(-100% - 12px));
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  width: min(var(--content-width), 420px);
   margin: 0;
   padding: 7px;
   border: 1px solid #ded2c3;
@@ -523,7 +608,14 @@ h1 {
 }
 
 .manuscript-prose {
-  min-height: calc(var(--page-height) - var(--margin-top) - var(--margin-bottom));
+  width: var(--paged-content-width);
+  height: var(--content-height);
+  min-height: var(--content-height);
+  columns: var(--content-width) auto;
+  column-width: var(--content-width);
+  column-gap: var(--column-gap);
+  column-fill: auto;
+  overflow: visible;
   font-family: var(--font-serif), serif;
   font-size: var(--manuscript-font-size);
   line-height: var(--line-height);
@@ -538,6 +630,7 @@ h1 {
 .manuscript-prose h2,
 .manuscript-prose h3 {
   margin: 0 0 calc(var(--paragraph-spacing) * 2);
+  break-after: avoid;
   line-height: 1.35;
 }
 
@@ -565,6 +658,7 @@ h1 {
   max-height: calc(var(--page-height) - var(--margin-top) - var(--margin-bottom));
   height: auto;
   margin: 4mm auto;
+  break-inside: avoid;
   object-fit: contain;
 }
 
@@ -580,6 +674,7 @@ h1 {
   margin: 4mm 0;
   border-top: 1px dashed #9a8f82;
   border-bottom: 1px dashed #9a8f82;
+  break-after: column;
 }
 
 .page-break::before {
@@ -596,6 +691,7 @@ h1 {
   padding: 4mm;
   border: 1px solid #37312c;
   background: #ffffff;
+  break-inside: avoid;
 }
 
 .qr-card-label {

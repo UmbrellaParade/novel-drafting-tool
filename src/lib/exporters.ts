@@ -40,8 +40,51 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
     creator: "Umbrella Parade",
     title: project.title,
     description: project.subtitle,
+    features: {
+      updateFields: true
+    },
     sections: [
       {
+        headers: {
+          default: new docx.Header({
+            children: [
+              new docx.Paragraph({
+                alignment: docx.AlignmentType.RIGHT,
+                children: [
+                  new docx.TextRun({
+                    text: project.title,
+                    size: 16,
+                    color: "7A7168"
+                  })
+                ]
+              })
+            ]
+          })
+        },
+        footers: {
+          default: new docx.Footer({
+            children: [
+              new docx.Paragraph({
+                alignment: docx.AlignmentType.CENTER,
+                children: project.pageSettings.showPageNumber
+                  ? [
+                      new docx.TextRun({
+                        children: [docx.PageNumber.CURRENT],
+                        size: 16,
+                        color: "7A7168"
+                      })
+                    ]
+                  : [
+                      new docx.TextRun({
+                        text: project.author,
+                        size: 16,
+                        color: "7A7168"
+                      })
+                    ]
+              })
+            ]
+          })
+        },
         properties: {
           page: {
             size: {
@@ -52,7 +95,12 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
               top: mmToTwip(project.pageSettings.marginTopMm),
               bottom: mmToTwip(project.pageSettings.marginBottomMm),
               left: mmToTwip(project.pageSettings.marginLeftMm),
-              right: mmToTwip(project.pageSettings.marginRightMm)
+              right: mmToTwip(project.pageSettings.marginRightMm),
+              header: mmToTwip(Math.max(4, project.pageSettings.marginTopMm / 2)),
+              footer: mmToTwip(Math.max(4, project.pageSettings.marginBottomMm / 2))
+            },
+            pageNumbers: {
+              start: 1
             }
           }
         },

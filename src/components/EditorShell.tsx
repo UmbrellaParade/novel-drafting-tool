@@ -75,6 +75,7 @@ export function EditorShell() {
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
   const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
+  const pageFrameCount = Math.max(1, Math.min(estimatedPages, 80));
 
   const updateProject = useCallback((updater: (previous: ManuscriptProject) => ManuscriptProject) => {
     setProject((previous) => {
@@ -120,7 +121,13 @@ export function EditorShell() {
     "--manuscript-font-size": `${project.pageSettings.fontSizePt}pt`,
     "--ruby-font-size": `${project.pageSettings.rubySizePt}pt`,
     "--line-height": project.pageSettings.lineHeight,
-    "--paragraph-spacing": `${project.pageSettings.paragraphSpacingMm}mm`
+    "--paragraph-spacing": `${project.pageSettings.paragraphSpacingMm}mm`,
+    "--page-gap": "14mm",
+    "--content-width": "calc(var(--page-width) - var(--margin-left) - var(--margin-right))",
+    "--content-height": "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))",
+    "--column-gap": "calc(var(--margin-left) + var(--margin-right) + var(--page-gap))",
+    "--paged-track-width": `calc(${pageFrameCount} * var(--page-width) + ${pageFrameCount - 1} * var(--page-gap))`,
+    "--paged-content-width": `calc(${pageFrameCount} * (var(--page-width) - var(--margin-left) - var(--margin-right)) + ${pageFrameCount - 1} * (var(--margin-left) + var(--margin-right) + var(--page-gap)))`
   } as React.CSSProperties;
 
   const setActiveChapter = (chapterId: string) => {
@@ -405,13 +412,30 @@ export function EditorShell() {
             <span className="chapter-meta">{countManuscriptCharacters({ ...project, chapters: [activeChapter] }).toLocaleString("ja-JP")}字</span>
           </div>
           <div className="page-stage">
-            <article
-              className={`paper-page ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${project.pageSettings.showBleedGuide ? "has-bleed-guide" : ""} ${project.pageSettings.showSafeArea ? "has-safe-area" : ""}`}
+            <div
+              className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
             >
-              <TiptapEditor key={activeChapter.id} content={activeChapter.content} onChange={updateActiveChapterContent} onReady={setActiveEditor} />
-              {project.pageSettings.showPageNumber ? <footer className="page-number">1</footer> : null}
-            </article>
+              <div className="page-frame-track" aria-hidden="true">
+                {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
+                  <section key={pageIndex} className="page-frame">
+                    <header className="page-frame-header">
+                      <span>{project.title}</span>
+                      <span>{activeChapter.title}</span>
+                    </header>
+                    {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
+                    {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
+                    <footer className="page-frame-footer">
+                      <span>{project.author}</span>
+                      {project.pageSettings.showPageNumber ? <span>{pageIndex + 1}</span> : null}
+                    </footer>
+                  </section>
+                ))}
+              </div>
+              <div className="paged-editor-layer">
+                <TiptapEditor key={activeChapter.id} content={activeChapter.content} onChange={updateActiveChapterContent} onReady={setActiveEditor} />
+              </div>
+            </div>
           </div>
         </section>
 
@@ -723,15 +747,33 @@ function printStyle(project: ManuscriptProject) {
         background: #ffffff !important;
         padding: 0 !important;
         margin: 0 !important;
-        width: ${page.pageWidthMm}mm !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        width: auto !important;
+        height: auto !important;
+        overflow: visible !important;
       }
 
-      .paper-page {
-        box-shadow: none !important;
-        border: 0 !important;
-        width: ${page.pageWidthMm}mm !important;
+      .paged-document {
+        margin: 0 !important;
+        width: var(--paged-track-width) !important;
         min-height: ${page.pageHeightMm}mm !important;
-        padding: ${page.marginTopMm}mm ${page.marginRightMm}mm ${page.marginBottomMm}mm ${page.marginLeftMm}mm !important;
+      }
+
+      .page-frame {
+        box-shadow: none !important;
+        border-color: rgba(36, 33, 29, 0.18) !important;
+        width: ${page.pageWidthMm}mm !important;
+        height: ${page.pageHeightMm}mm !important;
+      }
+
+      .paged-editor-layer {
+        top: ${page.marginTopMm}mm !important;
+        left: ${page.marginLeftMm}mm !important;
+      }
+
+      .manuscript-prose {
+        height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm) !important;
       }
     }
   `;
