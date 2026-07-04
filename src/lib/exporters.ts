@@ -7,6 +7,10 @@ const mmToTwip = (value: number) => Math.round(value * 56.6929133858);
 export async function exportProjectDocx(project: ManuscriptProject): Promise<void> {
   const docx = await import("docx");
   const children: InstanceType<typeof docx.Paragraph>[] = [];
+  const bodyFont = project.pageSettings.fontFamily === "noto-sans-jp" ? "Noto Sans JP" : "Noto Serif JP";
+  const uiFont = "Noto Sans JP";
+  const lineSpacingTwips = Math.round(project.pageSettings.fontSizePt * 20 * project.pageSettings.lineHeight);
+  const paragraphAfterTwips = mmToTwip(project.pageSettings.paragraphSpacingMm);
 
   project.chapters.forEach((chapter, chapterIndex) => {
     if (chapterIndex > 0) {
@@ -15,7 +19,13 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
 
     children.push(
       new docx.Paragraph({
-        text: chapter.title,
+        children: [
+          new docx.TextRun({
+            text: chapter.title,
+            font: bodyFont,
+            size: Math.round(project.pageSettings.fontSizePt * 2.6)
+          })
+        ],
         heading: docx.HeadingLevel.HEADING_1
       })
     );
@@ -28,9 +38,19 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
 
       children.push(
         new docx.Paragraph({
-          text: block.text,
+          children: [
+            new docx.TextRun({
+              text: block.text,
+              font: bodyFont,
+              size: Math.round(project.pageSettings.fontSizePt * 2)
+            })
+          ],
           heading: block.kind === "heading" ? docx.HeadingLevel.HEADING_2 : undefined,
-          spacing: { after: 160 }
+          spacing: {
+            after: paragraphAfterTwips,
+            line: lineSpacingTwips,
+            lineRule: docx.LineRuleType.AT_LEAST
+          }
         })
       );
     });
@@ -53,6 +73,7 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
                 children: [
                   new docx.TextRun({
                     text: project.title,
+                    font: uiFont,
                     size: 16,
                     color: "7A7168"
                   })
@@ -70,6 +91,7 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
                   ? [
                       new docx.TextRun({
                         children: [docx.PageNumber.CURRENT],
+                        font: uiFont,
                         size: 16,
                         color: "7A7168"
                       })
@@ -77,6 +99,7 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
                   : [
                       new docx.TextRun({
                         text: project.author,
+                        font: uiFont,
                         size: 16,
                         color: "7A7168"
                       })

@@ -21,8 +21,8 @@ import {
   XCircle
 } from "lucide-react";
 import { TiptapEditor } from "./TiptapEditor";
-import { PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
-import type { Chapter, ManuscriptProject, PagePresetId, QrLink } from "@/lib/types";
+import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
+import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrLink } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { connectGoogleDrive, isDriveConfigured } from "@/lib/googleDrive";
 import { exportProjectDocx } from "@/lib/exporters";
@@ -101,6 +101,26 @@ export function EditorShell() {
     [updateProject]
   );
 
+  const handlePageStageWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+      return;
+    }
+
+    const stage = event.currentTarget;
+    const maxScrollLeft = stage.scrollWidth - stage.clientWidth;
+    if (maxScrollLeft <= 0) {
+      return;
+    }
+
+    const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, stage.scrollLeft + event.deltaY));
+    if (nextScrollLeft === stage.scrollLeft) {
+      return;
+    }
+
+    event.preventDefault();
+    stage.scrollLeft = nextScrollLeft;
+  }, []);
+
   if (!project || !activeChapter) {
     return (
       <main className="app-loading">
@@ -118,10 +138,12 @@ export function EditorShell() {
     "--margin-bottom": `${project.pageSettings.marginBottomMm}mm`,
     "--margin-left": `${project.pageSettings.marginLeftMm}mm`,
     "--margin-right": `${project.pageSettings.marginRightMm}mm`,
+    "--manuscript-font-family": MANUSCRIPT_FONTS[project.pageSettings.fontFamily ?? "noto-serif-jp"].css,
     "--manuscript-font-size": `${project.pageSettings.fontSizePt}pt`,
     "--ruby-font-size": `${project.pageSettings.rubySizePt}pt`,
     "--line-height": project.pageSettings.lineHeight,
     "--paragraph-spacing": `${project.pageSettings.paragraphSpacingMm}mm`,
+    "--image-max-height": `${project.pageSettings.imageMaxHeightMm}mm`,
     "--page-gap": "14mm",
     "--content-width": "calc(var(--page-width) - var(--margin-left) - var(--margin-right))",
     "--content-height": "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))",
@@ -197,12 +219,11 @@ export function EditorShell() {
     }));
   };
 
-  const updatePageNumber = (key: keyof ManuscriptProject["pageSettings"], value: number | boolean) => {
+  const updatePageSetting = (key: keyof PageSettings, value: PageSettings[keyof PageSettings]) => {
     updateProject((previous) => ({
       ...previous,
       pageSettings: {
         ...previous.pageSettings,
-        preset: key === "preset" ? previous.pageSettings.preset : previous.pageSettings.preset,
         [key]: value
       }
     }));
@@ -387,7 +408,7 @@ export function EditorShell() {
             project={project}
             onProjectChange={updateProject}
             onPreset={handlePreset}
-            onPageChange={updatePageNumber}
+            onPageChange={updatePageSetting}
             onReset={resetProject}
           />
           <ChapterPanel
@@ -411,7 +432,7 @@ export function EditorShell() {
             />
             <span className="chapter-meta">{countManuscriptCharacters({ ...project, chapters: [activeChapter] }).toLocaleString("ja-JP")}字</span>
           </div>
-          <div className="page-stage">
+          <div className="page-stage" onWheel={handlePageStageWheel}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
@@ -466,10 +487,14 @@ function ProjectPanel({
   project: ManuscriptProject;
   onProjectChange: (updater: (previous: ManuscriptProject) => ManuscriptProject) => void;
   onPreset: (preset: PagePresetId) => void;
-  onPageChange: (key: keyof ManuscriptProject["pageSettings"], value: number | boolean) => void;
+  onPageChange: (key: keyof PageSettings, value: PageSettings[keyof PageSettings]) => void;
   onReset: () => void;
 }) {
   const settings = project.pageSettings;
+  const fontSizeMm = settings.fontSizePt * 0.352778;
+  const lineAdvanceMm = Math.max(0.1, fontSizeMm * settings.lineHeight);
+  const textHeightMm = Math.max(0, settings.pageHeightMm - settings.marginTopMm - settings.marginBottomMm);
+  const linesPerPage = Math.max(1, Math.floor(textHeightMm / lineAdvanceMm));
   const updateProjectText = (key: "title" | "subtitle" | "author", value: string) => {
     onProjectChange((previous) => ({ ...previous, [key]: value }));
   };
@@ -494,6 +519,14 @@ function ProjectPanel({
         <span>著者</span>
         <input value={project.author} onChange={(event) => updateProjectText("author", event.target.value)} />
       </label>
+      <label className="field">
+        <span>本文フォント</span>
+        <select value={settings.fontFamily} onChange={(event) => onPageChange("fontFamily", event.target.value as ManuscriptFontId)}>
+          {(Object.entries(MANUSCRIPT_FONTS) as Array<[ManuscriptFontId, (typeof MANUSCRIPT_FONTS)[ManuscriptFontId]]>).map(([fontId, font]) => (
+            <option key={fontId} value={fontId}>{font.label}</option>
+          ))}
+        </select>
+      </label>
 
       <div className="segmented" aria-label="ページ設定プリセット">
         {(Object.entries(PAGE_PRESETS) as Array<[PagePresetId, (typeof PAGE_PRESETS)[PagePresetId]]>).map(([preset, data]) => (
@@ -512,8 +545,13 @@ function ProjectPanel({
         <NumberField label="右余白" value={settings.marginRightMm} onChange={(value) => onPageChange("marginRightMm", value)} />
         <NumberField label="本文pt" value={settings.fontSizePt} step={0.1} onChange={(value) => onPageChange("fontSizePt", value)} />
         <NumberField label="ルビpt" value={settings.rubySizePt} step={0.1} onChange={(value) => onPageChange("rubySizePt", value)} />
-        <NumberField label="行間" value={settings.lineHeight} step={0.05} onChange={(value) => onPageChange("lineHeight", value)} />
+        <NumberField label="行間倍率" value={settings.lineHeight} step={0.01} onChange={(value) => onPageChange("lineHeight", value)} />
         <NumberField label="段落mm" value={settings.paragraphSpacingMm} step={0.1} onChange={(value) => onPageChange("paragraphSpacingMm", value)} />
+        <NumberField label="画像高mm" value={settings.imageMaxHeightMm} step={1} onChange={(value) => onPageChange("imageMaxHeightMm", value)} />
+      </div>
+      <div className="settings-readout">
+        <span>行送り {lineAdvanceMm.toFixed(2)}mm</span>
+        <span>約{linesPerPage}行/頁</span>
       </div>
 
       <div className="toggle-row">

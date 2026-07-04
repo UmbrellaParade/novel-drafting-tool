@@ -1,10 +1,22 @@
-import type { ManuscriptCheck, ManuscriptProject, PagePresetId, PageSettings } from "./types";
+import type { ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings } from "./types";
+
+export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
+  "noto-serif-jp": {
+    label: "Noto Serif JP",
+    css: "\"Noto Serif JP\", \"Yu Mincho\", \"Hiragino Mincho ProN\", serif"
+  },
+  "noto-sans-jp": {
+    label: "Noto Sans JP",
+    css: "\"Noto Sans JP\", \"Yu Gothic UI\", \"Meiryo\", sans-serif"
+  }
+};
 
 export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageSettings }> = {
   kindle: {
     label: "Kindle",
     settings: {
       preset: "kindle",
+      fontFamily: "noto-serif-jp",
       pageWidthMm: 148,
       pageHeightMm: 210,
       marginTopMm: 18,
@@ -15,6 +27,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       rubySizePt: 6,
       lineHeight: 1.75,
       paragraphSpacingMm: 1.5,
+      imageMaxHeightMm: 120,
       showPageNumber: false,
       showBleedGuide: false,
       showSafeArea: false
@@ -24,6 +37,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     label: "しまうまA6",
     settings: {
       preset: "shimauma-a6",
+      fontFamily: "noto-serif-jp",
       pageWidthMm: 105,
       pageHeightMm: 148,
       marginTopMm: 10,
@@ -34,6 +48,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       rubySizePt: 4.6,
       lineHeight: 1.72,
       paragraphSpacingMm: 1,
+      imageMaxHeightMm: 74,
       showPageNumber: true,
       showBleedGuide: true,
       showSafeArea: true
@@ -43,6 +58,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     label: "しまうまA5",
     settings: {
       preset: "shimauma-a5",
+      fontFamily: "noto-serif-jp",
       pageWidthMm: 148,
       pageHeightMm: 210,
       marginTopMm: 13,
@@ -53,6 +69,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       rubySizePt: 5.2,
       lineHeight: 1.76,
       paragraphSpacingMm: 1.2,
+      imageMaxHeightMm: 120,
       showPageNumber: true,
       showBleedGuide: true,
       showSafeArea: true
@@ -62,6 +79,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     label: "カスタム",
     settings: {
       preset: "custom",
+      fontFamily: "noto-serif-jp",
       pageWidthMm: 105,
       pageHeightMm: 148,
       marginTopMm: 10,
@@ -72,6 +90,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       rubySizePt: 4.8,
       lineHeight: 1.7,
       paragraphSpacingMm: 1,
+      imageMaxHeightMm: 74,
       showPageNumber: true,
       showBleedGuide: true,
       showSafeArea: true
@@ -120,10 +139,29 @@ export function createDefaultProject(): ManuscriptProject {
 
 export function applyPreset(settings: PageSettings, preset: PagePresetId): PageSettings {
   if (preset === "custom") {
-    return { ...settings, preset: "custom" };
+    return normalizePageSettings({ ...settings, preset: "custom" });
   }
 
-  return { ...PAGE_PRESETS[preset].settings };
+  return normalizePageSettings({ ...PAGE_PRESETS[preset].settings });
+}
+
+export function normalizeProject(project: ManuscriptProject): ManuscriptProject {
+  return {
+    ...project,
+    pageSettings: normalizePageSettings(project.pageSettings)
+  };
+}
+
+export function normalizePageSettings(settings: PageSettings): PageSettings {
+  const presetDefaults = PAGE_PRESETS[settings.preset]?.settings ?? PAGE_PRESETS["shimauma-a6"].settings;
+  const fontFamily = Object.hasOwn(MANUSCRIPT_FONTS, settings.fontFamily) ? settings.fontFamily : presetDefaults.fontFamily;
+
+  return {
+    ...presetDefaults,
+    ...settings,
+    fontFamily,
+    imageMaxHeightMm: settings.imageMaxHeightMm ?? presetDefaults.imageMaxHeightMm
+  };
 }
 
 export function stripHtml(html: string): string {

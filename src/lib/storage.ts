@@ -1,5 +1,5 @@
 import type { ManuscriptProject } from "./types";
-import { sanitizeFileName } from "./defaultProject";
+import { normalizeProject, sanitizeFileName } from "./defaultProject";
 
 const STORAGE_KEY = "umbrella-parade:novel-drafting-tool:project";
 
@@ -14,7 +14,7 @@ export function loadProjectFromBrowser(): ManuscriptProject | null {
   }
 
   try {
-    return JSON.parse(raw) as ManuscriptProject;
+    return normalizeProject(JSON.parse(raw) as ManuscriptProject);
   } catch {
     return null;
   }
@@ -42,7 +42,7 @@ export function readJsonFile(file: File): Promise<ManuscriptProject> {
     reader.onerror = () => reject(new Error("JSONを読み込めませんでした"));
     reader.onload = () => {
       try {
-        resolve(JSON.parse(String(reader.result)) as ManuscriptProject);
+        resolve(normalizeProject(JSON.parse(String(reader.result)) as ManuscriptProject));
       } catch {
         reject(new Error("JSON形式を確認してください"));
       }

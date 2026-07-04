@@ -1,6 +1,8 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@400;500;700&display=swap");
+
 :root {
-  --font-sans: "Yu Gothic UI", "Meiryo", "Noto Sans JP";
-  --font-serif: "Yu Mincho", "Hiragino Mincho ProN", "Noto Serif JP";
+  --font-sans: "Noto Sans JP", "Yu Gothic UI", "Meiryo";
+  --font-serif: "Noto Serif JP", "Yu Mincho", "Hiragino Mincho ProN";
   --background: #f6f3ed;
   --panel: #fffdf8;
   --panel-strong: #fff9ee;
@@ -241,6 +243,7 @@ h1 {
 }
 
 .field input,
+.field select,
 .number-field input,
 .chapter-title-input,
 .chapter-item input,
@@ -255,12 +258,14 @@ h1 {
 }
 
 .field input,
+.field select,
 .chapter-title-input {
   min-height: 37px;
   padding: 8px 10px;
 }
 
 .field input:focus,
+.field select:focus,
 .number-field input:focus,
 .chapter-title-input:focus,
 .chapter-item input:focus,
@@ -303,6 +308,24 @@ h1 {
 .number-field input {
   height: 33px;
   padding: 5px 8px;
+}
+
+.settings-readout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.settings-readout span {
+  min-height: 25px;
+  padding: 5px 8px;
+  border: 1px solid #ded5c7;
+  border-radius: 7px;
+  background: #f6f0e7;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .toggle-row {
@@ -616,7 +639,7 @@ h1 {
   column-gap: var(--column-gap);
   column-fill: auto;
   overflow: visible;
-  font-family: var(--font-serif), serif;
+  font-family: var(--manuscript-font-family);
   font-size: var(--manuscript-font-size);
   line-height: var(--line-height);
   outline: none;
@@ -655,7 +678,7 @@ h1 {
 .manuscript-prose img:not(.qr-card-image) {
   display: block;
   max-width: 100%;
-  max-height: calc(var(--page-height) - var(--margin-top) - var(--margin-bottom));
+  max-height: min(var(--image-max-height), calc(var(--content-height) - 8mm));
   height: auto;
   margin: 4mm auto;
   break-inside: avoid;
