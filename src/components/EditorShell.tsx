@@ -54,7 +54,7 @@ type QrDraft = {
   category: string;
 };
 
-const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式" };
+const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式サイト" };
 
 function escapeHtml(value: string): string {
   return value
@@ -415,10 +415,10 @@ export function EditorShell() {
     const name = draft.name.trim();
     const url = draft.url.trim();
     const description = draft.description.trim();
-    const category = draft.category.trim() || "公式";
+    const category = draft.category.trim() || "公式サイト";
 
     if (!name || !url) {
-      window.alert("リンク名とURLを入力してください。");
+      window.alert("太字タイトルとQRのURLを入力してください。");
       return false;
     }
 
@@ -455,20 +455,27 @@ export function EditorShell() {
       width: 420,
       color: { dark: "#24211d", light: "#ffffff" }
     });
+    const insertPosition = activeEditor.state.selection.to;
     activeEditor
       .chain()
       .focus()
-      .insertContent({
-        type: "qrCard",
-        attrs: {
-          url: link.url,
-          title: link.name,
-          description: link.description,
-          src,
-          template: "umbrella",
-          label: "Umbrella Parade 記録室"
+      .insertContentAt(insertPosition, [
+        {
+          type: "qrCard",
+          attrs: {
+            instanceId: crypto.randomUUID(),
+            url: link.url,
+            title: link.name,
+            description: link.description,
+            src,
+            template: "umbrella",
+            label: link.category || "記録室リンク"
+          }
+        },
+        {
+          type: "paragraph"
         }
-      })
+      ])
       .run();
     setMobileTab("draft");
   };
@@ -820,10 +827,22 @@ function QrLibraryPanel({
         <h2>QRリンク</h2>
       </div>
       <div className="qr-form">
-        <input placeholder="リンク名" value={newQr.name} onChange={(event) => setNewQr({ ...newQr, name: event.target.value })} />
-        <input placeholder="URL" value={newQr.url} onChange={(event) => setNewQr({ ...newQr, url: event.target.value })} />
-        <input placeholder="説明" value={newQr.description} onChange={(event) => setNewQr({ ...newQr, description: event.target.value })} />
-        <input placeholder="種別" value={newQr.category} onChange={(event) => setNewQr({ ...newQr, category: event.target.value })} />
+        <label className="qr-form-field">
+          <span>太字タイトル</span>
+          <input placeholder="例: 作品サイト" value={newQr.name} onChange={(event) => setNewQr({ ...newQr, name: event.target.value })} />
+        </label>
+        <label className="qr-form-field">
+          <span>上部ラベル</span>
+          <input placeholder="例: 公式サイト" value={newQr.category} onChange={(event) => setNewQr({ ...newQr, category: event.target.value })} />
+        </label>
+        <label className="qr-form-field wide">
+          <span>QRのURL</span>
+          <input placeholder="https://..." value={newQr.url} onChange={(event) => setNewQr({ ...newQr, url: event.target.value })} />
+        </label>
+        <label className="qr-form-field wide">
+          <span>説明文</span>
+          <input placeholder="例: 最新情報はこちら" value={newQr.description} onChange={(event) => setNewQr({ ...newQr, description: event.target.value })} />
+        </label>
       </div>
       <div className="qr-form-actions">
         <button type="button" onClick={() => handleAdd("save")}>
@@ -842,7 +861,7 @@ function QrLibraryPanel({
               <QrCode size={16} />
               <span className="qr-link-text">
                 <strong>{link.name}</strong>
-                <span>{link.category}</span>
+                <span>上部ラベル: {link.category}</span>
               </span>
             </button>
             <button className="icon-button small danger" type="button" title="削除" aria-label="削除" onClick={() => onDelete(link.id)}>

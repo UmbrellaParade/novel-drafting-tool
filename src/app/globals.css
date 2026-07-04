@@ -1012,8 +1012,24 @@ h1 {
 .qr-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-  margin-bottom: 8px;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.qr-form-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.qr-form-field.wide {
+  grid-column: 1 / -1;
+}
+
+.qr-form-field span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .qr-form input {

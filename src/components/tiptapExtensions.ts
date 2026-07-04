@@ -74,6 +74,7 @@ export const QrCardNode = Node.create({
 
   addAttributes() {
     return {
+      instanceId: { default: "" },
       url: { default: "" },
       title: { default: "QRリンク" },
       description: { default: "" },
@@ -90,6 +91,7 @@ export const QrCardNode = Node.create({
         getAttrs: (node) => {
           const element = node as HTMLElement;
           return {
+            instanceId: element.dataset.instanceId ?? "",
             url: element.dataset.url ?? "",
             title: element.dataset.title ?? element.querySelector(".qr-card-title")?.textContent ?? "QRリンク",
             description: element.dataset.description ?? element.querySelector(".qr-card-description")?.textContent ?? "",
@@ -107,6 +109,7 @@ export const QrCardNode = Node.create({
       "figure",
       mergeAttributes(HTMLAttributes, {
         "data-type": "qr-card",
+        "data-instance-id": node.attrs.instanceId,
         "data-url": node.attrs.url,
         "data-title": node.attrs.title,
         "data-description": node.attrs.description,
