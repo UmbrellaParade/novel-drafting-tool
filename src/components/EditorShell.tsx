@@ -38,6 +38,9 @@ const tabLabels: Record<MobileTab, string> = {
   export: "出力"
 };
 
+const PAGE_GAP_MM = 14;
+const MAX_PAGE_FRAMES = 160;
+
 export function EditorShell() {
   const [project, setProject] = useState<ManuscriptProject | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("draft");
@@ -45,6 +48,8 @@ export function EditorShell() {
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
   const [newQr, setNewQr] = useState({ name: "", url: "", description: "", category: "公式" });
+  const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
+  const pageStageRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -75,7 +80,19 @@ export function EditorShell() {
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
   const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
-  const pageFrameCount = Math.max(1, Math.min(estimatedPages, 80));
+  const layoutSignature = useMemo(() => {
+    if (!project || !activeChapter) {
+      return "";
+    }
+
+    return JSON.stringify({
+      activeChapterId: activeChapter.id,
+      content: activeChapter.content,
+      pageSettings: project.pageSettings
+    });
+  }, [activeChapter, project]);
+  const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
+  const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
 
   const updateProject = useCallback((updater: (previous: ManuscriptProject) => ManuscriptProject) => {
     setProject((previous) => {
@@ -121,6 +138,35 @@ export function EditorShell() {
     stage.scrollLeft = nextScrollLeft;
   }, []);
 
+  useEffect(() => {
+    if (!project || !activeChapter || !layoutSignature) {
+      return;
+    }
+
+    const handle = window.requestAnimationFrame(() => {
+      const stage = pageStageRef.current;
+      const prose = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
+      const firstFrame = stage?.querySelector<HTMLElement>(".page-frame");
+      const secondFrame = stage?.querySelectorAll<HTMLElement>(".page-frame")[1];
+      if (!prose || !firstFrame) {
+        return;
+      }
+
+      const pagePitch = secondFrame ? secondFrame.offsetLeft - firstFrame.offsetLeft : firstFrame.offsetWidth;
+      if (pagePitch <= 0) {
+        return;
+      }
+
+      const actualPages = Math.ceil((prose.scrollWidth + 1) / pagePitch);
+      const nextCount = Math.max(estimatedPages, actualPages);
+      if (Number.isFinite(nextCount) && nextCount > pageFrameCount) {
+        setMeasuredPages({ signature: layoutSignature, count: Math.min(nextCount, MAX_PAGE_FRAMES) });
+      }
+    });
+
+    return () => window.cancelAnimationFrame(handle);
+  }, [activeChapter, estimatedPages, layoutSignature, pageFrameCount, project]);
+
   if (!project || !activeChapter) {
     return (
       <main className="app-loading">
@@ -144,7 +190,7 @@ export function EditorShell() {
     "--line-height": project.pageSettings.lineHeight,
     "--paragraph-spacing": `${project.pageSettings.paragraphSpacingMm}mm`,
     "--image-max-height": `${project.pageSettings.imageMaxHeightMm}mm`,
-    "--page-gap": "14mm",
+    "--page-gap": `${PAGE_GAP_MM}mm`,
     "--content-width": "calc(var(--page-width) - var(--margin-left) - var(--margin-right))",
     "--content-height": "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))",
     "--column-gap": "calc(var(--margin-left) + var(--margin-right) + var(--page-gap))",
@@ -274,7 +320,14 @@ export function EditorShell() {
 
   const printPdf = () => {
     setMobileTab("draft");
-    window.setTimeout(() => window.print(), 80);
+    setStatusText("PDFプレビューを準備");
+    window.setTimeout(() => {
+      const fontsReady = document.fonts?.ready ?? Promise.resolve();
+      void fontsReady.finally(() => {
+        window.print();
+        setStatusText("PDFプレビューを表示");
+      });
+    }, 120);
   };
 
   const exportDocx = async () => {
@@ -432,10 +485,11 @@ export function EditorShell() {
             />
             <span className="chapter-meta">{countManuscriptCharacters({ ...project, chapters: [activeChapter] }).toLocaleString("ja-JP")}字</span>
           </div>
-          <div className="page-stage" onWheel={handlePageStageWheel}>
+          <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
+              data-rendered-pages={pageFrameCount}
             >
               <div className="page-frame-track" aria-hidden="true">
                 {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
@@ -473,7 +527,40 @@ export function EditorShell() {
           <ExportPanel project={project} onJson={exportJson} onPdf={printPdf} onDocx={exportDocx} onDrive={saveToDrive} />
         </aside>
       </div>
+      <PrintDocument project={project} chapter={activeChapter} pageCount={pageFrameCount} />
     </main>
+  );
+}
+
+function PrintDocument({ project, chapter, pageCount }: { project: ManuscriptProject; chapter: Chapter; pageCount: number }) {
+  const page = project.pageSettings;
+  const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
+  const pagePitchMm = contentWidthMm + page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
+
+  return (
+    <div className="print-document" aria-hidden="true">
+      {Array.from({ length: pageCount }, (_, pageIndex) => (
+        <section key={pageIndex} className="print-page">
+          <header className="print-page-header">
+            <span>{project.title}</span>
+            <span>{chapter.title}</span>
+          </header>
+          {page.showBleedGuide ? <div className="print-bleed-guide" /> : null}
+          {page.showSafeArea ? <div className="print-safe-guide" /> : null}
+          <div className="print-content-window">
+            <div
+              className="print-flow manuscript-prose"
+              style={{ marginLeft: `-${pageIndex * pagePitchMm}mm` }}
+              dangerouslySetInnerHTML={{ __html: chapter.content }}
+            />
+          </div>
+          <footer className="print-page-footer">
+            <span>{project.author}</span>
+            {page.showPageNumber ? <span>{pageIndex + 1}</span> : null}
+          </footer>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -758,60 +845,142 @@ function NumberField({
 function printStyle(project: ManuscriptProject) {
   const page = project.pageSettings;
   return `
+    .print-document {
+      display: none;
+    }
+
     @media print {
       @page {
         size: ${page.pageWidthMm}mm ${page.pageHeightMm}mm;
         margin: 0;
       }
 
+      html,
       body {
         background: #ffffff !important;
-      }
-
-      .topbar,
-      .mobile-tabs,
-      .left-rail,
-      .right-rail,
-      .chapter-heading-row,
-      .editor-toolbar {
-        display: none !important;
-      }
-
-      .app-shell,
-      .workspace-grid,
-      .editor-column,
-      .page-stage {
-        display: block !important;
-        background: #ffffff !important;
-        padding: 0 !important;
-        margin: 0 !important;
-        border: 0 !important;
-        box-shadow: none !important;
-        width: auto !important;
-        height: auto !important;
+        width: ${page.pageWidthMm}mm !important;
+        min-height: auto !important;
         overflow: visible !important;
       }
 
-      .paged-document {
-        margin: 0 !important;
-        width: var(--paged-track-width) !important;
-        min-height: ${page.pageHeightMm}mm !important;
+      .app-shell > :not(.print-document) {
+        display: none !important;
       }
 
-      .page-frame {
-        box-shadow: none !important;
-        border-color: rgba(36, 33, 29, 0.18) !important;
+      .app-shell {
+        display: block !important;
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: ${page.pageWidthMm}mm !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: visible !important;
+      }
+
+      .print-document {
+        display: block !important;
+        width: ${page.pageWidthMm}mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+      }
+
+      .print-page {
+        position: relative;
         width: ${page.pageWidthMm}mm !important;
         height: ${page.pageHeightMm}mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        background: #fffdf8 !important;
+        color: #1f1d1a !important;
+        box-shadow: none !important;
+        break-after: page;
+        page-break-after: always;
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
       }
 
-      .paged-editor-layer {
-        top: ${page.marginTopMm}mm !important;
-        left: ${page.marginLeftMm}mm !important;
+      .print-page:last-child {
+        break-after: auto;
+        page-break-after: auto;
       }
 
-      .manuscript-prose {
+      .print-page-header,
+      .print-page-footer {
+        position: absolute;
+        left: ${page.marginLeftMm}mm;
+        right: ${page.marginRightMm}mm;
+        z-index: 3;
+        display: flex;
+        justify-content: space-between;
+        gap: 4mm;
+        overflow: hidden;
+        color: #7a7168;
+        font-family: var(--font-sans), sans-serif;
+        font-size: 7pt;
+        line-height: 1.25;
+      }
+
+      .print-page-header {
+        top: max(2mm, calc(${page.marginTopMm}mm / 2 - 3pt));
+      }
+
+      .print-page-footer {
+        bottom: max(2mm, calc(${page.marginBottomMm}mm / 2 - 3pt));
+      }
+
+      .print-page-header span,
+      .print-page-footer span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .print-bleed-guide,
+      .print-safe-guide {
+        position: absolute;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .print-bleed-guide {
+        inset: 3mm;
+        border: 1px dashed rgba(183, 132, 66, 0.55);
+      }
+
+      .print-safe-guide {
+        inset: ${page.marginTopMm}mm ${page.marginRightMm}mm ${page.marginBottomMm}mm ${page.marginLeftMm}mm;
+        border: 1px dotted rgba(58, 130, 120, 0.55);
+      }
+
+      .print-content-window {
+        position: absolute;
+        top: ${page.marginTopMm}mm;
+        left: ${page.marginLeftMm}mm;
+        z-index: 1;
+        width: calc(${page.pageWidthMm}mm - ${page.marginLeftMm}mm - ${page.marginRightMm}mm);
+        height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm);
+        overflow: hidden !important;
+      }
+
+      .print-flow.manuscript-prose {
+        width: var(--paged-content-width) !important;
         height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm) !important;
+        min-height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm) !important;
+        max-height: none !important;
+        columns: calc(${page.pageWidthMm}mm - ${page.marginLeftMm}mm - ${page.marginRightMm}mm) auto !important;
+        column-width: calc(${page.pageWidthMm}mm - ${page.marginLeftMm}mm - ${page.marginRightMm}mm) !important;
+        column-gap: calc(${page.marginLeftMm}mm + ${page.marginRightMm}mm + ${PAGE_GAP_MM}mm) !important;
+        column-fill: auto !important;
+        overflow: visible !important;
+        outline: 0 !important;
+      }
+
+      .print-flow .page-break {
+        break-after: column;
       }
     }
   `;
