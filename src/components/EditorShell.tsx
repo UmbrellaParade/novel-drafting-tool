@@ -15,13 +15,14 @@ import {
   FolderOpen,
   Plus,
   Printer,
+  QrCode,
   Save,
   Trash2,
   Upload,
   XCircle
 } from "lucide-react";
-import { TiptapEditor } from "./TiptapEditor";
-import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
+import { TiptapEditor, TiptapToolbar } from "./TiptapEditor";
+import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrLink } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { connectGoogleDrive, isDriveConfigured } from "@/lib/googleDrive";
@@ -339,28 +340,43 @@ export function EditorShell() {
     }
   };
 
-  const addQrLink = () => {
-    if (!newQr.name.trim() || !newQr.url.trim()) {
+  const addQrLink = (mode: "save" | "insert" = "save") => {
+    const name = newQr.name.trim();
+    const url = newQr.url.trim();
+    const description = newQr.description.trim();
+    const category = newQr.category.trim() || "公式";
+
+    if (!name || !url) {
       window.alert("リンク名とURLを入力してください。");
+      return;
+    }
+
+    if (!isValidUrl(url)) {
+      window.alert("http または https のURLを入力してください。");
       return;
     }
 
     const link: QrLink = {
       id: crypto.randomUUID(),
-      name: newQr.name.trim(),
-      url: newQr.url.trim(),
-      description: newQr.description.trim(),
-      category: newQr.category.trim() || "公式"
+      name,
+      url,
+      description,
+      category
     };
     updateProject((previous) => ({
       ...previous,
       qrLinks: [...previous.qrLinks, link]
     }));
     setNewQr({ name: "", url: "", description: "", category: "公式" });
+
+    if (mode === "insert") {
+      void insertQrLink(link);
+    }
   };
 
   const insertQrLink = async (link: QrLink) => {
     if (!activeEditor) {
+      window.alert("本文エディタの準備ができてから挿入してください。");
       return;
     }
     const src = await QRCode.toDataURL(link.url, {
@@ -384,6 +400,11 @@ export function EditorShell() {
       })
       .run();
     setMobileTab("draft");
+  };
+
+  const openQrLibrary = () => {
+    setMobileTab("check");
+    setStatusText("QRリンクパネルを開きました");
   };
 
   const resetProject = () => {
@@ -485,6 +506,7 @@ export function EditorShell() {
             />
             <span className="chapter-meta">{countManuscriptCharacters({ ...project, chapters: [activeChapter] }).toLocaleString("ja-JP")}字</span>
           </div>
+          <TiptapToolbar editor={activeEditor} onOpenQrLibrary={openQrLibrary} />
           <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
@@ -678,8 +700,8 @@ function ChapterPanel({
       <div className="chapter-list">
         {chapters.map((chapter, index) => (
           <div key={chapter.id} className={`chapter-item ${chapter.id === activeChapterId ? "is-active" : ""}`}>
-            <button className="chapter-select" type="button" onClick={() => onSelect(chapter.id)}>
-              <span>{String(index + 1).padStart(2, "0")}</span>
+            <button className="chapter-select" type="button" title={`${index + 1}番目の章を開く`} aria-label={`${index + 1}番目の章を開く`} onClick={() => onSelect(chapter.id)}>
+              <FileText size={15} />
             </button>
             <input value={chapter.title} onChange={(event) => onTitleChange(chapter.id, event.target.value)} aria-label="章タイトル" />
             <button className="icon-button small" type="button" title="上へ" aria-label="上へ" onClick={() => onMove(chapter.id, -1)}>
@@ -741,7 +763,7 @@ function QrLibraryPanel({
   links: QrLink[];
   newQr: { name: string; url: string; description: string; category: string };
   onNewQrChange: (value: { name: string; url: string; description: string; category: string }) => void;
-  onAdd: () => void;
+  onAdd: (mode?: "save" | "insert") => void;
   onInsert: (link: QrLink) => void;
   onDelete: (id: string) => void;
 }) {
@@ -749,9 +771,6 @@ function QrLibraryPanel({
     <section className="tool-panel">
       <div className="panel-title-row">
         <h2>QRリンク</h2>
-        <button className="icon-button" type="button" title="追加" aria-label="追加" onClick={onAdd}>
-          <Plus size={17} />
-        </button>
       </div>
       <div className="qr-form">
         <input placeholder="リンク名" value={newQr.name} onChange={(event) => onNewQrChange({ ...newQr, name: event.target.value })} />
@@ -759,12 +778,25 @@ function QrLibraryPanel({
         <input placeholder="説明" value={newQr.description} onChange={(event) => onNewQrChange({ ...newQr, description: event.target.value })} />
         <input placeholder="種別" value={newQr.category} onChange={(event) => onNewQrChange({ ...newQr, category: event.target.value })} />
       </div>
+      <div className="qr-form-actions">
+        <button type="button" onClick={() => onAdd("save")}>
+          <Plus size={16} />
+          保存
+        </button>
+        <button type="button" onClick={() => onAdd("insert")}>
+          <QrCode size={16} />
+          本文へ挿入
+        </button>
+      </div>
       <div className="qr-list">
         {links.map((link) => (
           <div key={link.id} className="qr-link-item">
-            <button type="button" onClick={() => void onInsert(link)}>
-              <strong>{link.name}</strong>
-              <span>{link.category}</span>
+            <button type="button" title={`${link.name}を本文へ挿入`} aria-label={`${link.name}を本文へ挿入`} onClick={() => void onInsert(link)}>
+              <QrCode size={16} />
+              <span className="qr-link-text">
+                <strong>{link.name}</strong>
+                <span>{link.category}</span>
+              </span>
             </button>
             <button className="icon-button small danger" type="button" title="削除" aria-label="削除" onClick={() => onDelete(link.id)}>
               <Trash2 size={15} />

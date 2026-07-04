@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TextAlign from "@tiptap/extension-text-align";
 import Underline from "@tiptap/extension-underline";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import QRCode from "qrcode";
 import {
   AlignCenter,
   AlignLeft,
@@ -33,16 +32,20 @@ type TiptapEditorProps = {
   onReady?: (editor: Editor | null) => void;
 };
 
+type TiptapToolbarProps = {
+  editor: Editor | null;
+  onOpenQrLibrary?: () => void;
+};
+
 type ToolButtonProps = {
   label: string;
   active?: boolean;
   disabled?: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
 export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) {
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -84,7 +87,22 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
     return <div className="editor-loading">読み込み中</div>;
   }
 
+  return (
+    <div className="editor-stack">
+      <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const disabled = !editor;
+
   const insertRuby = () => {
+    if (!editor) {
+      return;
+    }
+
     const { from, to } = editor.state.selection;
     const selectedText = editor.state.doc.textBetween(from, to, " ").trim();
     const base = selectedText || window.prompt("ルビを付ける文字", "")?.trim();
@@ -100,45 +118,19 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
     editor.chain().focus().deleteSelection().insertContent({ type: "rubyText", attrs: { base, rt } }).run();
   };
 
-  const insertQrCard = async () => {
-    const url = window.prompt("URL", "https://")?.trim();
-    if (!url || !isLikelyUrl(url)) {
-      window.alert("http または https のURLを入力してください。");
+  const insertPageBreak = () => {
+    if (!editor) {
       return;
     }
-    const title = window.prompt("タイトル", "記録室リンク")?.trim() || "記録室リンク";
-    const description = window.prompt("説明", "")?.trim() || "";
-    const src = await QRCode.toDataURL(url, {
-      margin: 1,
-      width: 420,
-      color: {
-        dark: "#24211d",
-        light: "#ffffff"
-      }
-    });
 
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: "qrCard",
-        attrs: {
-          url,
-          title,
-          description,
-          src,
-          template: "umbrella",
-          label: "Umbrella Parade 記録室"
-        }
-      })
-      .run();
-  };
-
-  const insertPageBreak = () => {
     editor.chain().focus().insertContent({ type: "pageBreak" }).run();
   };
 
   const handleImageFile = (file: File) => {
+    if (!editor) {
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       const src = String(reader.result);
@@ -148,54 +140,54 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
   };
 
   return (
-    <div className="editor-stack">
+    <>
       <div className="editor-toolbar" aria-label="本文ツールバー">
-        <ToolButton label="段落" active={editor.isActive("paragraph")} onClick={() => editor.chain().focus().setParagraph().run()}>
+        <ToolButton label="段落" active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
           <Pilcrow size={18} />
         </ToolButton>
-        <ToolButton label="見出し1" active={editor.isActive("heading", { level: 1 })} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
+        <ToolButton label="見出し1" active={editor?.isActive("heading", { level: 1 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
           <Heading1 size={18} />
         </ToolButton>
-        <ToolButton label="見出し2" active={editor.isActive("heading", { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+        <ToolButton label="見出し2" active={editor?.isActive("heading", { level: 2 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>
           <Heading2 size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
-        <ToolButton label="太字" active={editor.isActive("bold")} onClick={() => editor.chain().focus().toggleBold().run()}>
+        <ToolButton label="太字" active={editor?.isActive("bold")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBold().run()}>
           <Bold size={18} />
         </ToolButton>
-        <ToolButton label="斜体" active={editor.isActive("italic")} onClick={() => editor.chain().focus().toggleItalic().run()}>
+        <ToolButton label="斜体" active={editor?.isActive("italic")} disabled={disabled} onClick={() => editor?.chain().focus().toggleItalic().run()}>
           <Italic size={18} />
         </ToolButton>
-        <ToolButton label="下線" active={editor.isActive("underline")} onClick={() => editor.chain().focus().toggleUnderline().run()}>
+        <ToolButton label="下線" active={editor?.isActive("underline")} disabled={disabled} onClick={() => editor?.chain().focus().toggleUnderline().run()}>
           <UnderlineIcon size={18} />
         </ToolButton>
-        <ToolButton label="ルビ" onClick={insertRuby}>
+        <ToolButton label="ルビ" disabled={disabled} onClick={insertRuby}>
           <Type size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
-        <ToolButton label="左揃え" active={editor.isActive({ textAlign: "left" })} onClick={() => editor.chain().focus().setTextAlign("left").run()}>
+        <ToolButton label="左揃え" active={editor?.isActive({ textAlign: "left" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("left").run()}>
           <AlignLeft size={18} />
         </ToolButton>
-        <ToolButton label="中央揃え" active={editor.isActive({ textAlign: "center" })} onClick={() => editor.chain().focus().setTextAlign("center").run()}>
+        <ToolButton label="中央揃え" active={editor?.isActive({ textAlign: "center" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("center").run()}>
           <AlignCenter size={18} />
         </ToolButton>
-        <ToolButton label="右揃え" active={editor.isActive({ textAlign: "right" })} onClick={() => editor.chain().focus().setTextAlign("right").run()}>
+        <ToolButton label="右揃え" active={editor?.isActive({ textAlign: "right" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("right").run()}>
           <AlignRight size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
-        <ToolButton label="箇条書き" active={editor.isActive("bulletList")} onClick={() => editor.chain().focus().toggleBulletList().run()}>
+        <ToolButton label="箇条書き" active={editor?.isActive("bulletList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}>
           <List size={18} />
         </ToolButton>
-        <ToolButton label="番号付きリスト" active={editor.isActive("orderedList")} onClick={() => editor.chain().focus().toggleOrderedList().run()}>
+        <ToolButton label="番号付きリスト" active={editor?.isActive("orderedList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
           <ListOrdered size={18} />
         </ToolButton>
-        <ToolButton label="画像" onClick={() => imageInputRef.current?.click()}>
+        <ToolButton label="画像" disabled={disabled} onClick={() => imageInputRef.current?.click()}>
           <ImagePlus size={18} />
         </ToolButton>
-        <ToolButton label="QRカード" onClick={insertQrCard}>
+        <ToolButton label="QRリンク" disabled={!onOpenQrLibrary} onClick={() => onOpenQrLibrary?.()}>
           <QrCode size={18} />
         </ToolButton>
-        <ToolButton label="改ページ" onClick={insertPageBreak}>
+        <ToolButton label="改ページ" disabled={disabled} onClick={insertPageBreak}>
           <ScissorsLineDashed size={18} />
         </ToolButton>
       </div>
@@ -212,8 +204,7 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
           event.currentTarget.value = "";
         }}
       />
-      <EditorContent editor={editor} />
-    </div>
+    </>
   );
 }
 
@@ -230,13 +221,4 @@ function ToolButton({ label, active, disabled, onClick, children }: ToolButtonPr
       {children}
     </button>
   );
-}
-
-function isLikelyUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
 }

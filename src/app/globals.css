@@ -404,8 +404,6 @@ h1 {
   border-radius: 6px;
   background: #24211d;
   color: #ffffff;
-  font-size: 12px;
-  font-weight: 700;
 }
 
 .chapter-item input {
@@ -448,7 +446,7 @@ h1 {
   display: flex;
   justify-content: flex-start;
   align-items: flex-start;
-  padding: 156px 18px 18px;
+  padding: 18px;
   border: 1px solid rgba(54, 45, 35, 0.1);
   border-radius: 8px;
   background:
@@ -601,16 +599,13 @@ h1 {
 }
 
 .editor-toolbar {
-  position: absolute;
-  left: 0;
-  right: auto;
-  top: 0;
-  z-index: 5;
-  transform: translateY(calc(-100% - 12px));
+  position: relative;
+  z-index: 4;
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 5px;
-  width: min(var(--content-width), 420px);
+  width: 100%;
   margin: 0;
   padding: 7px;
   border: 1px solid #ded2c3;
@@ -826,13 +821,40 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .qr-form input {
   height: 32px;
   padding: 6px 8px;
   font-size: 12px;
+}
+
+.qr-form-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.qr-form-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid #cfc3b4;
+  border-radius: 7px;
+  background: #fffdf8;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.qr-form-actions button:hover {
+  border-color: var(--rain);
+  background: #eaf3f0;
+  color: #1f5c54;
 }
 
 .qr-list {
@@ -853,7 +875,9 @@ h1 {
 
 .qr-link-item > button:first-child {
   display: grid;
-  gap: 2px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
   min-width: 0;
   border: 0;
   background: transparent;
@@ -861,14 +885,20 @@ h1 {
   text-align: left;
 }
 
+.qr-link-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .qr-link-item strong,
-.qr-link-item span {
+.qr-link-text span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.qr-link-item span {
+.qr-link-text span {
   color: var(--muted);
   font-size: 12px;
 }
@@ -985,7 +1015,7 @@ h1 {
   }
 
   .page-stage {
-    padding: 176px 10px 10px;
+    padding: 10px;
     overflow-x: auto;
   }
 
