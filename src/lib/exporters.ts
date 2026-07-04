@@ -1,4 +1,4 @@
-import type { ManuscriptProject } from "./types";
+import type { ManuscriptProject, QrCardTemplateId } from "./types";
 import { downloadBlob } from "./storage";
 import { sanitizeFileName, stripHtml } from "./defaultProject";
 import type { PDFDocument, PDFFont, PDFImage, PDFPage, RGB } from "pdf-lib";
@@ -7,8 +7,8 @@ const mmToTwip = (value: number) => Math.round(value * 56.6929133858);
 const mmToPt = (value: number) => (value * 72) / 25.4;
 
 const FONT_URLS = {
-  "noto-serif-jp": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Serif/OTF/Japanese/NotoSerifCJKjp-Regular.otf",
-  "noto-sans-jp": "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf"
+  "noto-serif-jp": "https://raw.githubusercontent.com/google/fonts/main/ofl/bizudpmincho/BIZUDPMincho-Regular.ttf",
+  "noto-sans-jp": "https://raw.githubusercontent.com/google/fonts/main/ofl/bizudpgothic/BIZUDPGothic-Regular.ttf"
 } as const;
 
 type PdfTextBlock = {
@@ -32,6 +32,7 @@ type PdfQrBlock = {
   description: string;
   src: string;
   label: string;
+  template: QrCardTemplateId;
 };
 
 type PdfBlock = PdfTextBlock | PdfImageBlock | PdfQrBlock | { kind: "pageBreak" };
@@ -56,6 +57,13 @@ type PdfRenderState = {
     ink: RGB;
     muted: RGB;
     white: RGB;
+    rain: RGB;
+    rainPaper: RGB;
+    antiqueInk: RGB;
+    antiquePaper: RGB;
+    midnightPaper: RGB;
+    midnightInk: RGB;
+    gold: RGB;
   };
 };
 
@@ -223,7 +231,14 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
       paper: rgb(1, 0.992, 0.973),
       ink: rgb(0.122, 0.114, 0.102),
       muted: rgb(0.478, 0.443, 0.408),
-      white: rgb(1, 1, 1)
+      white: rgb(1, 1, 1),
+      rain: rgb(0.184, 0.443, 0.416),
+      rainPaper: rgb(0.925, 0.973, 0.953),
+      antiqueInk: rgb(0.357, 0.259, 0.176),
+      antiquePaper: rgb(1, 0.973, 0.91),
+      midnightPaper: rgb(0.078, 0.11, 0.176),
+      midnightInk: rgb(0.973, 0.945, 0.875),
+      gold: rgb(0.776, 0.612, 0.31)
     }
   };
 
@@ -266,7 +281,7 @@ async function loadPdfFont(pdfDoc: PDFDocument, fontFamily: ManuscriptProject["p
     throw new Error("PDF用フォントを取得できませんでした。オンライン接続を確認してください。");
   }
 
-  return pdfDoc.embedFont(await response.arrayBuffer(), { subset: true });
+  return pdfDoc.embedFont(await response.arrayBuffer(), { subset: false });
 }
 
 function startPdfPage(state: PdfRenderState, chapterTitle: string): void {
@@ -384,12 +399,13 @@ async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Prom
 
 async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<void> {
   const QRCode = await import("qrcode");
+  const theme = qrPdfTheme(state, block.template);
   const src =
     block.src ||
     (await QRCode.toDataURL(block.url, {
       margin: 1,
       width: 420,
-      color: { dark: "#24211d", light: "#ffffff" }
+      color: { dark: theme.qrDark, light: "#ffffff" }
     }));
   const image = await embedImage(state.pdfDoc, src);
   const cardWidth = Math.min(state.contentWidth, mmToPt(74));
@@ -416,9 +432,9 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
     y: cardY,
     width: cardWidth,
     height: cardHeight,
-    color: state.colors.white,
-    borderColor: state.colors.ink,
-    borderWidth: 0.8
+    color: theme.background,
+    borderColor: theme.border,
+    borderWidth: theme.borderWidth
   });
 
   const label = truncateToWidth(block.label, state.uiFont, labelSize, cardWidth - cardPadding * 2);
@@ -428,7 +444,7 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
     y: cardY + cardHeight - cardPadding - labelSize,
     font: state.uiFont,
     size: labelSize,
-    color: state.colors.muted
+    color: theme.muted
   });
 
   const bodyTop = cardY + cardHeight - cardPadding - labelSize * 1.35 - mmToPt(2);
@@ -441,19 +457,32 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
 
   let textY = bodyTop - bodyTextSize;
   for (const line of titleLines) {
-    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: bodyTextSize, color: state.colors.ink });
+    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: bodyTextSize, color: theme.ink });
     textY -= bodyTextSize * 1.35;
   }
   for (const line of descriptionLines) {
-    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: urlSize, color: state.colors.muted });
+    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: urlSize, color: theme.muted });
     textY -= urlSize * 1.35;
   }
   for (const line of urlLines) {
-    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: urlSize, color: state.colors.muted });
+    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: urlSize, color: theme.muted });
     textY -= urlSize * 1.35;
   }
 
   state.y -= cardHeight + mmToPt(state.project.pageSettings.paragraphSpacingMm + 1);
+}
+
+function qrPdfTheme(state: PdfRenderState, template: QrCardTemplateId): { background: RGB; border: RGB; ink: RGB; muted: RGB; borderWidth: number; qrDark: string } {
+  if (template === "rain-letter") {
+    return { background: state.colors.rainPaper, border: state.colors.rain, ink: state.colors.ink, muted: state.colors.rain, borderWidth: 0.9, qrDark: "#1f5c54" };
+  }
+  if (template === "antique-book") {
+    return { background: state.colors.antiquePaper, border: state.colors.antiqueInk, ink: state.colors.antiqueInk, muted: state.colors.muted, borderWidth: 1.1, qrDark: "#3b2f23" };
+  }
+  if (template === "midnight") {
+    return { background: state.colors.midnightPaper, border: state.colors.gold, ink: state.colors.midnightInk, muted: state.colors.midnightInk, borderWidth: 1, qrDark: "#141c2d" };
+  }
+  return { background: state.colors.white, border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, borderWidth: 0.8, qrDark: "#24211d" };
 }
 
 function ensureVerticalSpace(state: PdfRenderState, neededHeight: number): void {
@@ -577,7 +606,8 @@ function parsePdfBlocks(html: string): PdfBlock[] {
         title: element.dataset.title ?? element.querySelector(".qr-card-title")?.textContent ?? "QRリンク",
         description: element.dataset.description ?? element.querySelector(".qr-card-description")?.textContent ?? "",
         src: element.dataset.src ?? element.querySelector("img")?.getAttribute("src") ?? "",
-        label: element.dataset.label ?? "Umbrella Parade 記録室"
+        label: element.dataset.label ?? "Umbrella Parade 記録室",
+        template: parseQrTemplate(element.dataset.template)
       });
       return;
     }
@@ -625,6 +655,10 @@ function parseHtmlDimension(value: string | null): number | undefined {
 
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseQrTemplate(value: string | undefined): QrCardTemplateId {
+  return value === "rain-letter" || value === "antique-book" || value === "midnight" || value === "umbrella" ? value : "umbrella";
 }
 
 function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | "pageBreak"; text: string }> {

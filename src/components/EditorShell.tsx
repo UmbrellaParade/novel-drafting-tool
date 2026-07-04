@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
-import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrLink } from "@/lib/types";
+import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { connectGoogleDrive, isDriveConfigured } from "@/lib/googleDrive";
 import { exportProjectDocx, exportProjectPdf } from "@/lib/exporters";
@@ -52,9 +52,37 @@ type QrDraft = {
   url: string;
   description: string;
   category: string;
+  template: QrCardTemplateId;
 };
 
-const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式サイト" };
+const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: string; qrDark: string }> = {
+  umbrella: {
+    label: "記録室",
+    description: "黒枠でシンプル",
+    qrDark: "#24211d"
+  },
+  "rain-letter": {
+    label: "雨の手紙",
+    description: "青緑の便箋風",
+    qrDark: "#1f5c54"
+  },
+  "antique-book": {
+    label: "古書",
+    description: "古紙と飾り罫",
+    qrDark: "#3b2f23"
+  },
+  midnight: {
+    label: "夜の祝祭",
+    description: "濃紺に金の差し色",
+    qrDark: "#141c2d"
+  }
+};
+
+const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式サイト", template: "umbrella" };
+
+function getQrCardTemplateId(value: QrCardTemplateId | undefined): QrCardTemplateId {
+  return value && QR_CARD_TEMPLATES[value] ? value : "umbrella";
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -132,6 +160,7 @@ export function EditorShell() {
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
+  const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -416,6 +445,7 @@ export function EditorShell() {
     const url = draft.url.trim();
     const description = draft.description.trim();
     const category = draft.category.trim() || "公式サイト";
+    const template = getQrCardTemplateId(draft.template);
 
     if (!name || !url) {
       window.alert("太字タイトルとQRのURLを入力してください。");
@@ -432,7 +462,8 @@ export function EditorShell() {
       name,
       url,
       description,
-      category
+      category,
+      template
     };
     updateProject((previous) => ({
       ...previous,
@@ -450,10 +481,11 @@ export function EditorShell() {
       window.alert("本文エディタの準備ができてから挿入してください。");
       return;
     }
+    const template = getQrCardTemplateId(link.template);
     const src = await QRCode.toDataURL(link.url, {
       margin: 1,
       width: 420,
-      color: { dark: "#24211d", light: "#ffffff" }
+      color: { dark: QR_CARD_TEMPLATES[template].qrDark, light: "#ffffff" }
     });
     const insertPosition = activeEditor.state.selection.to;
     activeEditor
@@ -468,7 +500,7 @@ export function EditorShell() {
             title: link.name,
             description: link.description,
             src,
-            template: "umbrella",
+            template,
             label: link.category || "記録室リンク"
           }
         },
@@ -483,6 +515,10 @@ export function EditorShell() {
   const openQrLibrary = () => {
     setMobileTab("check");
     setStatusText("QRリンクパネルを開きました");
+    window.requestAnimationFrame(() => {
+      qrPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      qrPanelRef.current?.querySelector<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>("input, select, button")?.focus({ preventScroll: true });
+    });
   };
 
   const resetProject = () => {
@@ -607,9 +643,14 @@ export function EditorShell() {
         <aside className={`right-rail mobile-panel ${mobileTab === "check" || mobileTab === "export" ? "is-mobile-active" : ""}`}>
           <CheckPanel project={project} checks={checks} />
           <QrLibraryPanel
+            panelRef={qrPanelRef}
             links={project.qrLinks}
             onAdd={addQrLink}
             onInsert={insertQrLink}
+            onTemplateChange={(id, template) => updateProject((previous) => ({
+              ...previous,
+              qrLinks: previous.qrLinks.map((link) => (link.id === id ? { ...link, template } : link))
+            }))}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
           />
           <ExportPanel project={project} onJson={exportJson} onPdf={exportPdf} onDocx={exportDocx} onDrive={saveToDrive} />
@@ -804,14 +845,18 @@ function CheckPanel({ project, checks }: { project: ManuscriptProject; checks: R
 }
 
 function QrLibraryPanel({
+  panelRef,
   links,
   onAdd,
   onInsert,
+  onTemplateChange,
   onDelete
 }: {
+  panelRef: RefObject<HTMLElement | null>;
   links: QrLink[];
   onAdd: (draft: QrDraft, mode?: "save" | "insert") => boolean;
   onInsert: (link: QrLink) => void;
+  onTemplateChange: (id: string, template: QrCardTemplateId) => void;
   onDelete: (id: string) => void;
 }) {
   const [newQr, setNewQr] = useState<QrDraft>(EMPTY_QR_DRAFT);
@@ -822,7 +867,7 @@ function QrLibraryPanel({
   };
 
   return (
-    <section className="tool-panel">
+    <section ref={panelRef} className="tool-panel qr-library-panel">
       <div className="panel-title-row">
         <h2>QRリンク</h2>
       </div>
@@ -834,6 +879,14 @@ function QrLibraryPanel({
         <label className="qr-form-field">
           <span>上部ラベル</span>
           <input placeholder="例: 公式サイト" value={newQr.category} onChange={(event) => setNewQr({ ...newQr, category: event.target.value })} />
+        </label>
+        <label className="qr-form-field wide">
+          <span>装飾</span>
+          <select aria-label="装飾" value={newQr.template} onChange={(event) => setNewQr({ ...newQr, template: event.target.value as QrCardTemplateId })}>
+            {(Object.entries(QR_CARD_TEMPLATES) as Array<[QrCardTemplateId, (typeof QR_CARD_TEMPLATES)[QrCardTemplateId]]>).map(([templateId, template]) => (
+              <option key={templateId} value={templateId}>{template.label} - {template.description}</option>
+            ))}
+          </select>
         </label>
         <label className="qr-form-field wide">
           <span>QRのURL</span>
@@ -855,20 +908,28 @@ function QrLibraryPanel({
         </button>
       </div>
       <div className="qr-list">
-        {links.map((link) => (
-          <div key={link.id} className="qr-link-item">
-            <button type="button" title={`${link.name}を本文へ挿入`} aria-label={`${link.name}を本文へ挿入`} onClick={() => void onInsert(link)}>
-              <QrCode size={16} />
-              <span className="qr-link-text">
-                <strong>{link.name}</strong>
-                <span>上部ラベル: {link.category}</span>
-              </span>
-            </button>
-            <button className="icon-button small danger" type="button" title="削除" aria-label="削除" onClick={() => onDelete(link.id)}>
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
+        {links.map((link) => {
+          const template = getQrCardTemplateId(link.template);
+          return (
+            <div key={link.id} className="qr-link-item">
+              <button type="button" title={`${link.name}を本文へ挿入`} aria-label={`${link.name}を本文へ挿入`} onClick={() => void onInsert({ ...link, template })}>
+                <QrCode size={16} />
+                <span className="qr-link-text">
+                  <strong>{link.name}</strong>
+                  <span>{QR_CARD_TEMPLATES[template].label} / 上部ラベル: {link.category}</span>
+                </span>
+              </button>
+              <select className="qr-template-select" aria-label={`${link.name}の装飾`} value={template} onChange={(event) => onTemplateChange(link.id, event.target.value as QrCardTemplateId)}>
+                {(Object.entries(QR_CARD_TEMPLATES) as Array<[QrCardTemplateId, (typeof QR_CARD_TEMPLATES)[QrCardTemplateId]]>).map(([templateId, templateOption]) => (
+                  <option key={templateId} value={templateId}>{templateOption.label}</option>
+                ))}
+              </select>
+              <button className="icon-button small danger" type="button" title="削除" aria-label="削除" onClick={() => onDelete(link.id)}>
+                <Trash2 size={15} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

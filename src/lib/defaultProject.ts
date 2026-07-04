@@ -1,4 +1,4 @@
-import type { ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings } from "./types";
+import type { ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId } from "./types";
 
 export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
   "noto-serif-jp": {
@@ -98,6 +98,8 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
   }
 };
 
+const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight"]);
+
 const sampleContent = `
 <h1>第一章：雨の記憶</h1>
 <p>雨音が窓の縁をなぞる夜、主人公は古いノートを開いた。そこには、まだ名前のない町と、まだ会ったことのない誰かへの手紙が残されていた。</p>
@@ -130,7 +132,8 @@ export function createDefaultProject(): ManuscriptProject {
         name: "Umbrella Parade 公式サイト",
         url: "https://example.com",
         description: "作品情報やお知らせへのリンク",
-        category: "公式"
+        category: "公式",
+        template: "umbrella"
       }
     ],
     updatedAt: now
@@ -148,7 +151,11 @@ export function applyPreset(settings: PageSettings, preset: PagePresetId): PageS
 export function normalizeProject(project: ManuscriptProject): ManuscriptProject {
   return {
     ...project,
-    pageSettings: normalizePageSettings(project.pageSettings)
+    pageSettings: normalizePageSettings(project.pageSettings),
+    qrLinks: (project.qrLinks ?? []).map((link) => ({
+      ...link,
+      template: QR_CARD_TEMPLATE_IDS.has(link.template ?? "umbrella") ? link.template ?? "umbrella" : "umbrella"
+    }))
   };
 }
 

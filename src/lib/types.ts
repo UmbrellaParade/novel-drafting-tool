@@ -1,5 +1,6 @@
 export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "custom";
 export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
+export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight";
 
 export type PageSettings = {
   preset: PagePresetId;
@@ -32,6 +33,7 @@ export type QrLink = {
   url: string;
   description: string;
   category: string;
+  template?: QrCardTemplateId;
 };
 
 export type DriveState = {
