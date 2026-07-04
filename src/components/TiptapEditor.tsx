@@ -30,7 +30,7 @@ import {
   X,
   Underline as UnderlineIcon
 } from "lucide-react";
-import { PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
+import { PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
 
 type TiptapEditorProps = {
   content: string;
@@ -84,6 +84,7 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
       Placeholder.configure({
         placeholder: "本文を書きはじめる"
       }),
+      PageBreakBeforeExtension,
       RubyTextNode,
       PageBreakNode,
       QrCardNode
@@ -207,8 +208,40 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     }
 
     const { selection } = editor.state;
-    const insertPosition = selection instanceof NodeSelection ? selection.to : selection.from;
-    editor.chain().focus().insertContentAt(insertPosition, { type: "pageBreak" }).run();
+    if (selection instanceof NodeSelection) {
+      const shouldEnable = !selection.node.attrs.pageBreakBefore;
+      editor
+        .chain()
+        .focus()
+        .command(({ tr }) => {
+          tr.setNodeMarkup(selection.from, undefined, {
+            ...selection.node.attrs,
+            pageBreakBefore: shouldEnable
+          });
+          return true;
+        })
+        .run();
+      return;
+    }
+
+    const activeTypeBeforeSplit = currentBreakableNodeName(editor);
+    const isAtBlockStart = selection.$from.parentOffset === 0;
+    const alreadyBreaksBefore = Boolean(editor.getAttributes(activeTypeBeforeSplit).pageBreakBefore);
+
+    if (isAtBlockStart && alreadyBreaksBefore) {
+      editor.chain().focus().updateAttributes(activeTypeBeforeSplit, { pageBreakBefore: false }).run();
+      return;
+    }
+
+    if (!selection.empty) {
+      editor.chain().focus().deleteSelection().run();
+    }
+
+    if (editor.state.selection.$from.parentOffset > 0) {
+      editor.chain().focus().splitBlock().run();
+    }
+
+    editor.chain().focus().updateAttributes(currentBreakableNodeName(editor), { pageBreakBefore: true }).run();
   };
 
   const handleImageFile = (file: File) => {
@@ -440,6 +473,23 @@ function readCssLengthPx(editor: Editor, variableName: string): number {
   const width = probe.getBoundingClientRect().width;
   probe.remove();
   return Number.isFinite(width) && width > 0 ? width : 320;
+}
+
+function currentBreakableNodeName(editor: Editor): string {
+  const { selection } = editor.state;
+  if (selection instanceof NodeSelection) {
+    return selection.node.type.name;
+  }
+
+  const { $from } = selection;
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    const node = $from.node(depth);
+    if (node.isBlock) {
+      return node.type.name;
+    }
+  }
+
+  return "paragraph";
 }
 
 function ToolButton({ label, active, disabled, onClick, children }: ToolButtonProps) {

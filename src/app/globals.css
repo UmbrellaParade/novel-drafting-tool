@@ -934,6 +934,27 @@ h1 {
   font-size: var(--ruby-font-size);
 }
 
+.manuscript-prose .page-break-before,
+.manuscript-prose [data-page-break-before="true"] {
+  position: relative;
+  break-before: column;
+}
+
+.manuscript-prose .page-break-before::before,
+.manuscript-prose [data-page-break-before="true"]::before {
+  content: "改ページ";
+  position: absolute;
+  top: -2mm;
+  left: 0;
+  right: 0;
+  display: block;
+  border-top: 1px dashed #9a8f82;
+  color: #7a7168;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 7pt;
+  line-height: 1;
+}
+
 .page-break {
   position: relative;
   display: block;

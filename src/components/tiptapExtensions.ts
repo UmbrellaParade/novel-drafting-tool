@@ -1,4 +1,32 @@
-import { mergeAttributes, Node } from "@tiptap/core";
+import { Extension, mergeAttributes, Node } from "@tiptap/core";
+
+export const PageBreakBeforeExtension = Extension.create({
+  name: "pageBreakBefore",
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard"],
+        attributes: {
+          pageBreakBefore: {
+            default: false,
+            parseHTML: (element) => element.getAttribute("data-page-break-before") === "true" || element.classList.contains("page-break-before"),
+            renderHTML: (attributes) => {
+              if (!attributes.pageBreakBefore) {
+                return {};
+              }
+
+              return {
+                "data-page-break-before": "true",
+                class: "page-break-before"
+              };
+            }
+          }
+        }
+      }
+    ];
+  }
+});
 
 export const PageBreakNode = Node.create({
   name: "pageBreak",

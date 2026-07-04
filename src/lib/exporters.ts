@@ -544,6 +544,12 @@ img {
   height: 0;
 }
 
+.page-break-before,
+[data-page-break-before="true"] {
+  break-before: page;
+  page-break-before: always;
+}
+
 .qr-card {
   display: block;
   max-width: 74mm;
@@ -1044,6 +1050,10 @@ function parsePdfBlocks(html: string): PdfBlock[] {
       return;
     }
 
+    if (hasPageBreakBefore(element)) {
+      blocks.push({ kind: "pageBreak" });
+    }
+
     if (element.matches("figure[data-type='qr-card']")) {
       blocks.push({
         kind: "qr",
@@ -1106,6 +1116,10 @@ function parseQrTemplate(value: string | undefined): QrCardTemplateId {
   return value === "rain-letter" || value === "antique-book" || value === "midnight" || value === "umbrella" ? value : "umbrella";
 }
 
+function hasPageBreakBefore(element: HTMLElement): boolean {
+  return element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before");
+}
+
 function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | "pageBreak"; text: string }> {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -1116,6 +1130,10 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
     if (element.matches("div[data-type='page-break']")) {
       blocks.push({ kind: "pageBreak", text: "" });
       return;
+    }
+
+    if (hasPageBreakBefore(element)) {
+      blocks.push({ kind: "pageBreak", text: "" });
     }
 
     if (element.matches("figure[data-type='qr-card']")) {

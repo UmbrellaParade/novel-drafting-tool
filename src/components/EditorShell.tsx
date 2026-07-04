@@ -94,11 +94,37 @@ function chapterStartsWithH1(content: string): boolean {
   return /^\s*<h1[\s>]/i.test(content);
 }
 
+function normalizePageBreaks(content: string): string {
+  if (typeof document === "undefined" || !content.includes("page-break")) {
+    return content;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = content;
+  template.content.querySelectorAll("div[data-type='page-break'], hr[data-type='page-break']").forEach((pageBreak) => {
+    let target = pageBreak.nextElementSibling as HTMLElement | null;
+    if (!target) {
+      target = document.createElement("p");
+      target.innerHTML = "<br>";
+      pageBreak.after(target);
+    }
+
+    target.dataset.pageBreakBefore = "true";
+    target.classList.add("page-break-before");
+    pageBreak.remove();
+  });
+
+  return template.innerHTML;
+}
+
 function normalizeDocumentProject(project: ManuscriptProject): ManuscriptProject {
   const savedChapters = Array.isArray(project.chapters) ? project.chapters : [];
-  const chapters = savedChapters.length
+  const chapters = (savedChapters.length
     ? savedChapters
-    : [{ id: crypto.randomUUID(), title: DOCUMENT_CHAPTER_TITLE, content: "<p></p>" }];
+    : [{ id: crypto.randomUUID(), title: DOCUMENT_CHAPTER_TITLE, content: "<p></p>" }]).map((chapter) => ({
+    ...chapter,
+    content: normalizePageBreaks(chapter.content ?? "<p></p>")
+  }));
 
   if (chapters.length === 1) {
     const [chapter] = chapters;
@@ -1127,6 +1153,16 @@ function printStyle(project: ManuscriptProject) {
         column-fill: auto !important;
         overflow: visible !important;
         outline: 0 !important;
+      }
+
+      .print-flow .page-break-before,
+      .print-flow [data-page-break-before="true"] {
+        break-before: column !important;
+      }
+
+      .print-flow .page-break-before::before,
+      .print-flow [data-page-break-before="true"]::before {
+        content: none !important;
       }
 
       .print-flow .page-break {
