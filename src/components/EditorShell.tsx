@@ -26,7 +26,7 @@ import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters,
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrLink } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { connectGoogleDrive, isDriveConfigured } from "@/lib/googleDrive";
-import { exportProjectDocx } from "@/lib/exporters";
+import { exportProjectDocx, exportProjectPdf } from "@/lib/exporters";
 
 type MobileTab = "draft" | "chapters" | "check" | "export";
 
@@ -54,9 +54,27 @@ export function EditorShell() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    const restored = loadProjectFromBrowser();
-    setProject(restored ?? createDefaultProject());
-    setStatusText(restored ? "ブラウザ保存から復元" : "新規原稿");
+    let isMounted = true;
+
+    void loadProjectFromBrowser()
+      .then((restored) => {
+        if (!isMounted) {
+          return;
+        }
+        setProject(restored ?? createDefaultProject());
+        setStatusText(restored ? "ブラウザ保存から復元" : "新規原稿");
+      })
+      .catch(() => {
+        if (!isMounted) {
+          return;
+        }
+        setProject(createDefaultProject());
+        setStatusText("新規原稿");
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -65,8 +83,14 @@ export function EditorShell() {
     }
 
     const handle = window.setTimeout(() => {
-      saveProjectToBrowser(project);
-      setStatusText(`ブラウザ保存 ${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
+      void saveProjectToBrowser(project)
+        .then(() => {
+          setStatusText(`ブラウザ保存 ${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
+        })
+        .catch((error) => {
+          setStatusText("ブラウザ保存に失敗");
+          window.console.error(error);
+        });
     }, 500);
 
     return () => window.clearTimeout(handle);
@@ -281,9 +305,14 @@ export function EditorShell() {
     setStatusText("JSONを書き出し");
   };
 
-  const manualSave = () => {
-    saveProjectToBrowser(project);
-    setStatusText(`ブラウザ保存 ${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
+  const manualSave = async () => {
+    try {
+      await saveProjectToBrowser(project);
+      setStatusText(`ブラウザ保存 ${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
+    } catch (error) {
+      setStatusText("ブラウザ保存に失敗");
+      window.alert(error instanceof Error ? error.message : "ブラウザ保存に失敗しました。");
+    }
   };
 
   const importJson = async (file: File) => {
@@ -319,16 +348,16 @@ export function EditorShell() {
     }
   };
 
-  const printPdf = () => {
-    setMobileTab("draft");
-    setStatusText("PDFプレビューを準備");
-    window.setTimeout(() => {
-      const fontsReady = document.fonts?.ready ?? Promise.resolve();
-      void fontsReady.finally(() => {
-        window.print();
-        setStatusText("PDFプレビューを表示");
-      });
-    }, 120);
+  const exportPdf = async () => {
+    try {
+      setStatusText("本用PDFを作成中");
+      await exportProjectPdf(project);
+      setStatusText("本用PDFを書き出し");
+    } catch (error) {
+      setStatusText("PDF書き出しに失敗");
+      window.console.error(error);
+      window.alert(error instanceof Error ? error.message : "PDFを書き出せませんでした。");
+    }
   };
 
   const exportDocx = async () => {
@@ -440,7 +469,7 @@ export function EditorShell() {
             <FileJson size={17} />
             JSON
           </button>
-          <button className="command-button" type="button" onClick={printPdf} title="PDF出力">
+          <button className="command-button" type="button" onClick={exportPdf} title="本用PDF出力">
             <Printer size={17} />
             PDF
           </button>
@@ -546,7 +575,7 @@ export function EditorShell() {
             onInsert={insertQrLink}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
           />
-          <ExportPanel project={project} onJson={exportJson} onPdf={printPdf} onDocx={exportDocx} onDrive={saveToDrive} />
+          <ExportPanel project={project} onJson={exportJson} onPdf={exportPdf} onDocx={exportDocx} onDrive={saveToDrive} />
         </aside>
       </div>
       <PrintDocument project={project} chapter={activeChapter} pageCount={pageFrameCount} />
