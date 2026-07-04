@@ -75,6 +75,7 @@ type PdfRenderState = {
   page: PDFPage;
   pageNumber: number;
   chapterTitle: string;
+  pageTitles: string[];
   project: ManuscriptProject;
   pageWidth: number;
   pageHeight: number;
@@ -273,14 +274,15 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
   const contentTop = pageHeight - mmToPt(project.pageSettings.marginTopMm);
   const contentBottom = mmToPt(project.pageSettings.marginBottomMm);
   const contentWidth = pageWidth - mmToPt(project.pageSettings.marginLeftMm + project.pageSettings.marginRightMm);
-  const firstChapter = project.chapters[0] ?? { title: project.title, content: "" };
+  const initialTitle = firstPdfHeadingTitle(project) ?? project.title;
   const state: PdfRenderState = {
     pdfDoc,
     font,
     uiFont: font,
     page: pdfDoc.addPage([pageWidth, pageHeight]),
     pageNumber: 0,
-    chapterTitle: firstChapter.title,
+    chapterTitle: initialTitle,
+    pageTitles: [],
     project,
     pageWidth,
     pageHeight,
@@ -304,29 +306,33 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
     }
   };
 
-  startPdfPage(state, firstChapter.title);
+  startPdfPage(state, initialTitle);
 
   for (const [chapterIndex, chapter] of project.chapters.entries()) {
     if (chapterIndex > 0) {
-      startPdfPage(state, chapter.title);
-    } else {
-      state.chapterTitle = chapter.title;
+      startPdfPage(state, state.chapterTitle);
     }
-
-    drawTextBlock(state, chapter.title, 1);
 
     for (const block of parsePdfBlocks(chapter.content)) {
       if (block.kind === "pageBreak") {
-        startPdfPage(state, chapter.title);
+        startPdfPage(state, state.chapterTitle);
       } else if (block.kind === "image") {
         await drawImageBlock(state, block);
       } else if (block.kind === "qr") {
         await drawQrBlock(state, block);
       } else {
+        if (block.level === 1) {
+          state.chapterTitle = normalizePdfText(block.text) || state.chapterTitle;
+        }
         drawTextBlock(state, block.text, block.level);
+        if (block.level === 1) {
+          setPdfCurrentPageTitle(state, state.chapterTitle);
+        }
       }
     }
   }
+
+  drawPdfPageChromeOnAllPages(state);
 
   const bytes = await pdfDoc.save();
   const pdfBytes = new Uint8Array(bytes);
@@ -744,12 +750,33 @@ function startPdfPage(state: PdfRenderState, chapterTitle: string): void {
 
   state.pageNumber += 1;
   state.chapterTitle = chapterTitle;
+  state.pageTitles[state.pageNumber - 1] = chapterTitle;
   state.y = state.contentTop;
-  drawPdfPageChrome(state);
+  drawPdfPageBackground(state);
 }
 
-function drawPdfPageChrome(state: PdfRenderState): void {
-  const { page, project, colors } = state;
+function drawPdfPageBackground(state: PdfRenderState): void {
+  state.page.drawRectangle({
+    x: 0,
+    y: 0,
+    width: state.pageWidth,
+    height: state.pageHeight,
+    color: state.colors.paper
+  });
+}
+
+function setPdfCurrentPageTitle(state: PdfRenderState, chapterTitle: string): void {
+  state.pageTitles[state.pageNumber - 1] = chapterTitle;
+}
+
+function drawPdfPageChromeOnAllPages(state: PdfRenderState): void {
+  state.pdfDoc.getPages().forEach((page, index) => {
+    drawPdfPageChrome(state, page, state.pageTitles[index] || state.project.title, index + 1);
+  });
+}
+
+function drawPdfPageChrome(state: PdfRenderState, page: PDFPage, chapterTitle: string, pageNumber: number): void {
+  const { project, colors } = state;
   const settings = project.pageSettings;
   const marginTop = mmToPt(settings.marginTopMm);
   const marginBottom = mmToPt(settings.marginBottomMm);
@@ -757,19 +784,11 @@ function drawPdfPageChrome(state: PdfRenderState): void {
   const marginRight = mmToPt(settings.marginRightMm);
   const smallSize = 7;
 
-  page.drawRectangle({
-    x: 0,
-    y: 0,
-    width: state.pageWidth,
-    height: state.pageHeight,
-    color: colors.paper
-  });
-
   const headerY = state.pageHeight - Math.max(mmToPt(2), marginTop / 2);
   const footerY = Math.max(mmToPt(2), marginBottom / 2);
   const halfWidth = Math.max(10, state.contentWidth / 2 - mmToPt(2));
   const title = truncateToWidth(project.title, state.uiFont, smallSize, halfWidth);
-  const chapter = truncateToWidth(state.chapterTitle, state.uiFont, smallSize, halfWidth);
+  const chapter = truncateToWidth(chapterTitle, state.uiFont, smallSize, halfWidth);
   const chapterWidth = state.uiFont.widthOfTextAtSize(chapter, smallSize);
   const author = truncateToWidth(project.author, state.uiFont, smallSize, halfWidth);
 
@@ -784,9 +803,9 @@ function drawPdfPageChrome(state: PdfRenderState): void {
   page.drawText(author, { x: marginLeft, y: footerY, font: state.uiFont, size: smallSize, color: colors.muted });
 
   if (settings.showPageNumber) {
-    const pageNumber = String(state.pageNumber);
-    const pageNumberWidth = state.uiFont.widthOfTextAtSize(pageNumber, smallSize);
-    page.drawText(pageNumber, {
+    const pageNumberText = String(pageNumber);
+    const pageNumberWidth = state.uiFont.widthOfTextAtSize(pageNumberText, smallSize);
+    page.drawText(pageNumberText, {
       x: state.pageWidth - marginRight - pageNumberWidth,
       y: footerY,
       font: state.uiFont,
@@ -797,7 +816,7 @@ function drawPdfPageChrome(state: PdfRenderState): void {
 }
 
 function drawTextBlock(state: PdfRenderState, text: string, level: 0 | 1 | 2 | 3): void {
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const normalized = normalizePdfText(text);
   if (!normalized) {
     return;
   }
@@ -946,6 +965,22 @@ function ensureVerticalSpace(state: PdfRenderState, neededHeight: number): void 
 
 function projectFontSize(state: PdfRenderState): number {
   return state.project.pageSettings.fontSizePt;
+}
+
+function firstPdfHeadingTitle(project: ManuscriptProject): string | null {
+  for (const chapter of project.chapters) {
+    const heading = parsePdfBlocks(chapter.content).find((block): block is PdfTextBlock => block.kind === "text" && block.level === 1);
+    const title = heading ? normalizePdfText(heading.text) : "";
+    if (title) {
+      return title;
+    }
+  }
+
+  return null;
+}
+
+function normalizePdfText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {

@@ -10,6 +10,7 @@ import {
   FileJson,
   FileText,
   FolderOpen,
+  Pencil,
   Plus,
   Printer,
   QrCode,
@@ -175,6 +176,10 @@ function extractOutlineItems(html: string): OutlineItem[] {
   }));
 }
 
+function sameStringList(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 export function EditorShell() {
   const [project, setProject] = useState<ManuscriptProject | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("draft");
@@ -182,6 +187,7 @@ export function EditorShell() {
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
+  const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -237,7 +243,7 @@ export function EditorShell() {
   }, [project]);
   const activeChapterContent = activeChapter?.content ?? "";
   const outlineItems = useMemo(() => extractOutlineItems(activeChapterContent), [activeChapterContent]);
-  const activeSectionTitle = outlineItems[0]?.title ?? DOCUMENT_CHAPTER_TITLE;
+  const activeSectionTitle = outlineItems[0]?.title ?? project?.title ?? DOCUMENT_CHAPTER_TITLE;
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
   const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
@@ -329,13 +335,29 @@ export function EditorShell() {
 
       const actualPages = Math.ceil((prose.scrollWidth + 1) / pagePitch);
       const nextCount = Math.max(estimatedPages, actualPages);
+      const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
+      const nextTitles = Array.from({ length: titleCount }, () => activeSectionTitle);
+      const firstFrameLeft = firstFrame.getBoundingClientRect().left;
+      prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
+        const title = heading.textContent?.trim();
+        if (!title) {
+          return;
+        }
+
+        const pageIndex = Math.max(0, Math.min(titleCount - 1, Math.floor((heading.getBoundingClientRect().left - firstFrameLeft + 2) / pagePitch)));
+        for (let index = pageIndex; index < nextTitles.length; index += 1) {
+          nextTitles[index] = title;
+        }
+      });
+      setPageSectionTitles((previous) => (sameStringList(previous, nextTitles) ? previous : nextTitles));
+
       if (Number.isFinite(nextCount) && nextCount > pageFrameCount) {
         setMeasuredPages({ signature: layoutSignature, count: Math.min(nextCount, MAX_PAGE_FRAMES) });
       }
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [activeChapter, estimatedPages, layoutSignature, pageFrameCount, project]);
+  }, [activeChapter, activeSectionTitle, estimatedPages, layoutSignature, pageFrameCount, project]);
 
   if (!project || !activeChapter) {
     return (
@@ -473,7 +495,7 @@ export function EditorShell() {
     }
   };
 
-  const addQrLink = (draft: QrDraft, mode: "save" | "insert" = "save") => {
+  const readQrDraft = (draft: QrDraft): Omit<QrLink, "id"> | null => {
     const name = draft.name.trim();
     const url = draft.url.trim();
     const description = draft.description.trim();
@@ -482,21 +504,26 @@ export function EditorShell() {
 
     if (!name || !url) {
       window.alert("太字タイトルとQRのURLを入力してください。");
-      return false;
+      return null;
     }
 
     if (!isValidUrl(url)) {
       window.alert("http または https のURLを入力してください。");
+      return null;
+    }
+
+    return { name, url, description, category, template };
+  };
+
+  const addQrLink = (draft: QrDraft, mode: "save" | "insert" = "save") => {
+    const values = readQrDraft(draft);
+    if (!values) {
       return false;
     }
 
     const link: QrLink = {
       id: crypto.randomUUID(),
-      name,
-      url,
-      description,
-      category,
-      template
+      ...values
     };
     updateProject((previous) => ({
       ...previous,
@@ -545,48 +572,81 @@ export function EditorShell() {
     setMobileTab("draft");
   };
 
-  const updateQrLinkTemplate = async (id: string, template: QrCardTemplateId) => {
-    const nextTemplate = getQrCardTemplateId(template);
-    const link = project.qrLinks.find((item) => item.id === id);
-
-    updateProject((previous) => ({
-      ...previous,
-      qrLinks: previous.qrLinks.map((item) => (item.id === id ? { ...item, template: nextTemplate } : item))
-    }));
-
-    if (!link || !activeEditor) {
+  const syncQrCards = async (previousLink: QrLink, nextLink: QrLink) => {
+    if (!activeEditor) {
       return;
     }
 
-    const src = await QRCode.toDataURL(link.url, {
+    const template = getQrCardTemplateId(nextLink.template);
+    const src = await QRCode.toDataURL(nextLink.url, {
       margin: 1,
       width: 420,
-      color: { dark: QR_CARD_TEMPLATES[nextTemplate].qrDark, light: "#ffffff" }
+      color: { dark: QR_CARD_TEMPLATES[template].qrDark, light: "#ffffff" }
     });
 
     activeEditor
       .chain()
       .command(({ state, tr }) => {
-        let updated = false;
+        let visited = false;
         state.doc.descendants((node, position) => {
           if (node.type.name !== "qrCard") {
             return;
           }
 
-          const sameUrl = node.attrs.url === link.url;
-          const sameTitle = !link.name || node.attrs.title === link.name;
+          const sameUrl = node.attrs.url === previousLink.url;
+          const sameTitle = !previousLink.name || node.attrs.title === previousLink.name;
           if (sameUrl && sameTitle) {
             tr.setNodeMarkup(position, undefined, {
               ...node.attrs,
+              url: nextLink.url,
+              title: nextLink.name,
+              description: nextLink.description,
               src,
-              template: nextTemplate
+              template,
+              label: nextLink.category || "記録室リンク"
             });
-            updated = true;
           }
+          visited = true;
         });
-        return updated;
+        return visited;
       })
       .run();
+  };
+
+  const updateQrLink = async (id: string, draft: QrDraft): Promise<boolean> => {
+    const values = readQrDraft(draft);
+    if (!values) {
+      return false;
+    }
+
+    const previousLink = project.qrLinks.find((item) => item.id === id);
+    if (!previousLink) {
+      return false;
+    }
+
+    const nextLink: QrLink = { id, ...values };
+    updateProject((previous) => ({
+      ...previous,
+      qrLinks: previous.qrLinks.map((item) => (item.id === id ? nextLink : item))
+    }));
+
+    await syncQrCards(previousLink, nextLink);
+    return true;
+  };
+
+  const updateQrLinkTemplate = async (id: string, template: QrCardTemplateId) => {
+    const link = project.qrLinks.find((item) => item.id === id);
+    if (!link) {
+      return;
+    }
+
+    await updateQrLink(id, {
+      name: link.name,
+      url: link.url,
+      description: link.description,
+      category: link.category,
+      template
+    });
   };
 
   const openQrLibrary = () => {
@@ -703,7 +763,7 @@ export function EditorShell() {
                   <section key={pageIndex} className="page-frame">
                     <header className="page-frame-header">
                       <span>{project.title}</span>
-                      <span>{activeSectionTitle}</span>
+                      <span>{pageSectionTitles[pageIndex] ?? activeSectionTitle}</span>
                     </header>
                     {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
                     {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
@@ -727,13 +787,14 @@ export function EditorShell() {
             links={project.qrLinks}
             onAdd={addQrLink}
             onInsert={insertQrLink}
+            onUpdate={updateQrLink}
             onTemplateChange={updateQrLinkTemplate}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
           />
           <CheckPanel project={project} checks={checks} />
         </aside>
       </div>
-      <PrintDocument project={project} chapter={activeChapter} sectionTitle={activeSectionTitle} pageCount={pageFrameCount} />
+      <PrintDocument project={project} chapter={activeChapter} sectionTitles={pageSectionTitles.length ? pageSectionTitles : [activeSectionTitle]} pageCount={pageFrameCount} />
     </main>
   );
 }
@@ -741,12 +802,12 @@ export function EditorShell() {
 function PrintDocument({
   project,
   chapter,
-  sectionTitle,
+  sectionTitles,
   pageCount
 }: {
   project: ManuscriptProject;
   chapter: Chapter;
-  sectionTitle: string;
+  sectionTitles: string[];
   pageCount: number;
 }) {
   const page = project.pageSettings;
@@ -759,7 +820,7 @@ function PrintDocument({
         <section key={pageIndex} className="print-page">
           <header className="print-page-header">
             <span>{project.title}</span>
-            <span>{sectionTitle}</span>
+            <span>{sectionTitles[pageIndex] ?? sectionTitles[sectionTitles.length - 1] ?? project.title}</span>
           </header>
           {page.showBleedGuide ? <div className="print-bleed-guide" /> : null}
           {page.showSafeArea ? <div className="print-safe-guide" /> : null}
@@ -921,6 +982,7 @@ function QrLibraryPanel({
   links,
   onAdd,
   onInsert,
+  onUpdate,
   onTemplateChange,
   onDelete
 }: {
@@ -928,12 +990,35 @@ function QrLibraryPanel({
   links: QrLink[];
   onAdd: (draft: QrDraft, mode?: "save" | "insert") => boolean;
   onInsert: (link: QrLink) => void;
+  onUpdate: (id: string, draft: QrDraft) => Promise<boolean>;
   onTemplateChange: (id: string, template: QrCardTemplateId) => void;
   onDelete: (id: string) => void;
 }) {
   const [newQr, setNewQr] = useState<QrDraft>(EMPTY_QR_DRAFT);
+  const [editingQr, setEditingQr] = useState<{ id: string; draft: QrDraft } | null>(null);
   const handleAdd = (mode: "save" | "insert") => {
     onAdd(newQr, mode);
+  };
+  const startEdit = (link: QrLink) => {
+    setEditingQr({
+      id: link.id,
+      draft: {
+        name: link.name,
+        url: link.url,
+        description: link.description,
+        category: link.category,
+        template: getQrCardTemplateId(link.template)
+      }
+    });
+  };
+  const saveEdit = async () => {
+    if (!editingQr) {
+      return;
+    }
+
+    if (await onUpdate(editingQr.id, editingQr.draft)) {
+      setEditingQr(null);
+    }
   };
 
   return (
@@ -994,9 +1079,44 @@ function QrLibraryPanel({
                   <option key={templateId} value={templateId}>{templateOption.label}</option>
                 ))}
               </select>
+              <button className="icon-button small" type="button" title="編集" aria-label={`${link.name}を編集`} onClick={() => startEdit(link)}>
+                <Pencil size={15} />
+              </button>
               <button className="icon-button small danger" type="button" title="削除" aria-label="削除" onClick={() => onDelete(link.id)}>
                 <Trash2 size={15} />
               </button>
+              {editingQr?.id === link.id ? (
+                <div className="qr-link-editor">
+                  <label>
+                    <span>太字タイトル</span>
+                    <input value={editingQr.draft.name} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, name: event.target.value } })} />
+                  </label>
+                  <label>
+                    <span>上部ラベル</span>
+                    <input value={editingQr.draft.category} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, category: event.target.value } })} />
+                  </label>
+                  <label>
+                    <span>装飾</span>
+                    <select value={editingQr.draft.template} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, template: event.target.value as QrCardTemplateId } })}>
+                      {(Object.entries(QR_CARD_TEMPLATES) as Array<[QrCardTemplateId, (typeof QR_CARD_TEMPLATES)[QrCardTemplateId]]>).map(([templateId, templateOption]) => (
+                        <option key={templateId} value={templateId}>{templateOption.label} - {templateOption.description}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>QRのURL</span>
+                    <input value={editingQr.draft.url} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, url: event.target.value } })} />
+                  </label>
+                  <label className="wide">
+                    <span>説明文</span>
+                    <input value={editingQr.draft.description} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, description: event.target.value } })} />
+                  </label>
+                  <div className="qr-link-editor-actions">
+                    <button type="button" onClick={() => void saveEdit()}>保存</button>
+                    <button type="button" onClick={() => setEditingQr(null)}>閉じる</button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           );
         })}
