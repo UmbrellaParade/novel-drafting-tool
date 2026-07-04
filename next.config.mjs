@@ -1,14 +1,19 @@
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
+
 const repoName = "novel-drafting-tool";
-const isProductionBuild = process.env.NODE_ENV === "production";
 
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  output: "export",
-  basePath: isProductionBuild ? `/${repoName}` : "",
-  assetPrefix: isProductionBuild ? `/${repoName}/` : "",
-  images: {
-    unoptimized: true
-  }
+const nextConfig = (phase) => {
+  const isGitHubPagesBuild = phase !== PHASE_DEVELOPMENT_SERVER;
+
+  return {
+    output: "export",
+    basePath: isGitHubPagesBuild ? `/${repoName}` : "",
+    assetPrefix: isGitHubPagesBuild ? `/${repoName}/` : "",
+    images: {
+      unoptimized: true
+    }
+  };
 };
 
 export default nextConfig;

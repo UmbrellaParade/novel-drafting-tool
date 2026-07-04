@@ -390,8 +390,9 @@ async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Prom
   }
 
   const image = await embedImage(state.pdfDoc, block.src);
-  const maxWidth = state.contentWidth;
-  const maxHeight = Math.min(mmToPt(state.project.pageSettings.imageMaxHeightMm), state.contentTop - state.contentBottom);
+  const maxWidth = state.pageWidth;
+  const contentHeight = state.contentTop - state.contentBottom;
+  const maxHeight = Math.min(Math.max(mmToPt(state.project.pageSettings.imageMaxHeightMm), contentHeight), state.contentTop - mmToPt(2));
   const requestedWidth = block.width ? Math.min(maxWidth, block.width * 0.75) : maxWidth;
   const requestedHeight = block.height ? Math.min(maxHeight, block.height * 0.75) : maxHeight;
   const scale = Math.min(requestedWidth / image.width, requestedHeight / image.height, maxHeight / image.height, 1);
@@ -400,7 +401,7 @@ async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Prom
 
   ensureVerticalSpace(state, height);
   state.page.drawImage(image, {
-    x: state.contentX + (state.contentWidth - width) / 2,
+    x: (state.pageWidth - width) / 2,
     y: state.y - height,
     width,
     height

@@ -47,6 +47,15 @@ type OutlineItem = {
   index: number;
 };
 
+type QrDraft = {
+  name: string;
+  url: string;
+  description: string;
+  category: string;
+};
+
+const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式" };
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -121,7 +130,6 @@ export function EditorShell() {
   const [statusText, setStatusText] = useState("起動中");
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
-  const [newQr, setNewQr] = useState({ name: "", url: "", description: "", category: "公式" });
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -403,20 +411,20 @@ export function EditorShell() {
     }
   };
 
-  const addQrLink = (mode: "save" | "insert" = "save") => {
-    const name = newQr.name.trim();
-    const url = newQr.url.trim();
-    const description = newQr.description.trim();
-    const category = newQr.category.trim() || "公式";
+  const addQrLink = (draft: QrDraft, mode: "save" | "insert" = "save") => {
+    const name = draft.name.trim();
+    const url = draft.url.trim();
+    const description = draft.description.trim();
+    const category = draft.category.trim() || "公式";
 
     if (!name || !url) {
       window.alert("リンク名とURLを入力してください。");
-      return;
+      return false;
     }
 
     if (!isValidUrl(url)) {
       window.alert("http または https のURLを入力してください。");
-      return;
+      return false;
     }
 
     const link: QrLink = {
@@ -430,11 +438,11 @@ export function EditorShell() {
       ...previous,
       qrLinks: [...previous.qrLinks, link]
     }));
-    setNewQr({ name: "", url: "", description: "", category: "公式" });
 
     if (mode === "insert") {
       void insertQrLink(link);
     }
+    return true;
   };
 
   const insertQrLink = async (link: QrLink) => {
@@ -593,8 +601,6 @@ export function EditorShell() {
           <CheckPanel project={project} checks={checks} />
           <QrLibraryPanel
             links={project.qrLinks}
-            newQr={newQr}
-            onNewQrChange={setNewQr}
             onAdd={addQrLink}
             onInsert={insertQrLink}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
@@ -792,36 +798,39 @@ function CheckPanel({ project, checks }: { project: ManuscriptProject; checks: R
 
 function QrLibraryPanel({
   links,
-  newQr,
-  onNewQrChange,
   onAdd,
   onInsert,
   onDelete
 }: {
   links: QrLink[];
-  newQr: { name: string; url: string; description: string; category: string };
-  onNewQrChange: (value: { name: string; url: string; description: string; category: string }) => void;
-  onAdd: (mode?: "save" | "insert") => void;
+  onAdd: (draft: QrDraft, mode?: "save" | "insert") => boolean;
   onInsert: (link: QrLink) => void;
   onDelete: (id: string) => void;
 }) {
+  const [newQr, setNewQr] = useState<QrDraft>(EMPTY_QR_DRAFT);
+  const handleAdd = (mode: "save" | "insert") => {
+    if (onAdd(newQr, mode)) {
+      setNewQr(EMPTY_QR_DRAFT);
+    }
+  };
+
   return (
     <section className="tool-panel">
       <div className="panel-title-row">
         <h2>QRリンク</h2>
       </div>
       <div className="qr-form">
-        <input placeholder="リンク名" value={newQr.name} onChange={(event) => onNewQrChange({ ...newQr, name: event.target.value })} />
-        <input placeholder="URL" value={newQr.url} onChange={(event) => onNewQrChange({ ...newQr, url: event.target.value })} />
-        <input placeholder="説明" value={newQr.description} onChange={(event) => onNewQrChange({ ...newQr, description: event.target.value })} />
-        <input placeholder="種別" value={newQr.category} onChange={(event) => onNewQrChange({ ...newQr, category: event.target.value })} />
+        <input placeholder="リンク名" value={newQr.name} onChange={(event) => setNewQr({ ...newQr, name: event.target.value })} />
+        <input placeholder="URL" value={newQr.url} onChange={(event) => setNewQr({ ...newQr, url: event.target.value })} />
+        <input placeholder="説明" value={newQr.description} onChange={(event) => setNewQr({ ...newQr, description: event.target.value })} />
+        <input placeholder="種別" value={newQr.category} onChange={(event) => setNewQr({ ...newQr, category: event.target.value })} />
       </div>
       <div className="qr-form-actions">
-        <button type="button" onClick={() => onAdd("save")}>
+        <button type="button" onClick={() => handleAdd("save")}>
           <Plus size={16} />
           保存
         </button>
-        <button type="button" onClick={() => onAdd("insert")}>
+        <button type="button" onClick={() => handleAdd("insert")}>
           <QrCode size={16} />
           本文へ挿入
         </button>

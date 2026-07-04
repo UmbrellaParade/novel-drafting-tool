@@ -200,7 +200,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           src,
           alt: file.name,
           title: file.name,
-          width: Math.round(readContentWidthPx(editor) * 0.75)
+          width: Math.round(readPageWidthPx(editor) * 0.75)
         })
         .run();
     };
@@ -219,7 +219,21 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     if (!editor) {
       return;
     }
-    setImageWidth(readContentWidthPx(editor) * ratio);
+    setImageWidth(readPageWidthPx(editor) * ratio);
+  };
+
+  const setImageToTextWidth = () => {
+    if (!editor) {
+      return;
+    }
+    setImageWidth(readCssLengthPx(editor, "--content-width"));
+  };
+
+  const setImageToPageWidth = () => {
+    if (!editor) {
+      return;
+    }
+    setImageWidth(readPageWidthPx(editor));
   };
 
   const resetImageSize = () => {
@@ -238,9 +252,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     editor.chain().focus().deleteSelection().run();
   };
 
-  const contentWidth = editor ? readContentWidthPx(editor) : 320;
-  const imageWidth = toolbarState.selectedImageWidth ?? Math.round(contentWidth * 0.75);
-  const maxImageWidth = Math.max(240, Math.round(contentWidth * 1.25));
+  const pageWidth = editor ? readPageWidthPx(editor) : 420;
+  const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
+  const maxImageWidth = Math.max(240, Math.round(pageWidth));
 
   return (
     <>
@@ -309,6 +323,12 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
               {Math.round(ratio * 100)}%
             </button>
           ))}
+          <button type="button" onClick={setImageToTextWidth}>
+            本文幅
+          </button>
+          <button type="button" onClick={setImageToPageWidth}>
+            紙面幅
+          </button>
           <input
             className="image-size-range"
             type="range"
@@ -358,13 +378,17 @@ function parseImageDimension(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
 }
 
-function readContentWidthPx(editor: Editor): number {
+function readPageWidthPx(editor: Editor): number {
+  return readCssLengthPx(editor, "--page-width");
+}
+
+function readCssLengthPx(editor: Editor, variableName: string): number {
   const host = editor.view.dom.parentElement ?? editor.view.dom;
   const probe = document.createElement("div");
   probe.style.position = "absolute";
   probe.style.visibility = "hidden";
   probe.style.pointerEvents = "none";
-  probe.style.width = "var(--content-width)";
+  probe.style.width = `var(${variableName})`;
   probe.style.height = "0";
   host.appendChild(probe);
   const width = probe.getBoundingClientRect().width;
