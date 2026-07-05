@@ -53,6 +53,7 @@ type ToolbarState = {
   selectedImageWidth: number | null;
   hasQrCardSelection: boolean;
   selectedQrCardWidth: number | null;
+  selectedQrCardHeight: number | null;
 };
 
 type ImageReplacementTarget = {
@@ -252,7 +253,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     hasImageSelection: false,
     selectedImageWidth: null,
     hasQrCardSelection: false,
-    selectedQrCardWidth: null
+    selectedQrCardWidth: null,
+    selectedQrCardHeight: null
   });
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
@@ -266,7 +268,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         hasImageSelection: false,
         selectedImageWidth: null,
         hasQrCardSelection: false,
-        selectedQrCardWidth: null
+        selectedQrCardWidth: null,
+        selectedQrCardHeight: null
       });
       return;
     }
@@ -283,7 +286,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         hasImageSelection,
         selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null,
         hasQrCardSelection,
-        selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null
+        selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null,
+        selectedQrCardHeight: hasQrCardSelection ? parseImageDimension(qrCardAttributes.height) : null
       };
       setToolbarState((previous) => (sameToolbarState(previous, nextState) ? previous : nextState));
     };
@@ -633,6 +637,37 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     setQrCardWidth(readTextWidthPx(editor));
   };
 
+  const setQrCardHeight = (height: number | null) => {
+    if (!editor || !toolbarState.hasQrCardSelection) {
+      return;
+    }
+
+    const nextHeight = height === null ? null : Math.max(96, Math.min(readTextHeightPx(editor), Math.round(height)));
+    const position = selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current;
+    if (position === null) {
+      return;
+    }
+
+    const applied = withStablePageStageScroll(editor, () =>
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          const node = state.doc.nodeAt(position);
+          if (!node || node.type.name !== "qrCard") {
+            return false;
+          }
+
+          tr.setNodeMarkup(position, undefined, { ...node.attrs, height: nextHeight }, node.marks);
+          return true;
+        })
+        .run()
+    );
+    if (applied) {
+      setToolbarState((previous) => (previous.hasQrCardSelection ? { ...previous, selectedQrCardHeight: nextHeight } : previous));
+    }
+  };
+
   const deleteSelectedContent = () => {
     if (!editor) {
       return;
@@ -754,8 +789,11 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
   const textWidth = editor ? readTextWidthPx(editor) : 360;
+  const textHeight = editor ? readTextHeightPx(editor) : 520;
   const qrCardWidth = toolbarState.selectedQrCardWidth ?? Math.round(textWidth * 0.75);
   const maxQrCardWidth = Math.max(180, Math.round(textWidth));
+  const qrCardHeight = toolbarState.selectedQrCardHeight ?? Math.min(220, Math.round(textHeight * 0.34));
+  const maxQrCardHeight = Math.max(120, Math.round(textHeight));
   const normalizedQrPresetWidth = Math.max(120, Math.min(maxQrCardWidth, Math.round(qrPresetWidth)));
 
   return (
@@ -880,6 +918,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <button type="button" onMouseDown={preserveEditorSelection} onClick={() => setQrCardWidth(normalizedQrPresetWidth)}>
             指定px
           </button>
+          <span className="image-size-chip">幅</span>
           <input
             className="image-size-range"
             type="range"
@@ -908,6 +947,29 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             onChange={(event) => setQrPresetWidth(Number(event.target.value))}
             aria-label="QRカード指定px"
           />
+          <span className="image-size-chip">高さ</span>
+          <input
+            className="image-size-range"
+            type="range"
+            min={96}
+            max={maxQrCardHeight}
+            value={Math.max(96, Math.min(maxQrCardHeight, qrCardHeight))}
+            onChange={(event) => setQrCardHeight(Number(event.target.value))}
+            aria-label="QRカード高さ"
+          />
+          <input
+            className="image-size-number"
+            type="number"
+            min={96}
+            max={maxQrCardHeight}
+            value={Math.round(qrCardHeight)}
+            onChange={(event) => setQrCardHeight(Number(event.target.value))}
+            aria-label="QRカード高さpx"
+          />
+          <span className="image-size-unit">px</span>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={() => setQrCardHeight(null)}>
+            高さ自動
+          </button>
           <button className="danger" type="button" onMouseDown={preserveEditorSelection} onClick={deleteSelectedContent} title="削除" aria-label="削除">
             <Trash2 size={16} />
           </button>
@@ -958,7 +1020,8 @@ function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
     left.hasImageSelection === right.hasImageSelection &&
     left.selectedImageWidth === right.selectedImageWidth &&
     left.hasQrCardSelection === right.hasQrCardSelection &&
-    left.selectedQrCardWidth === right.selectedQrCardWidth
+    left.selectedQrCardWidth === right.selectedQrCardWidth &&
+    left.selectedQrCardHeight === right.selectedQrCardHeight
   );
 }
 
@@ -1079,6 +1142,12 @@ function readTextWidthPx(editor: Editor): number {
   const guide = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-safe-guide");
   const width = guide?.offsetWidth ?? 0;
   return Number.isFinite(width) && width > 0 ? width : readCssLengthPx(editor, "--content-width");
+}
+
+function readTextHeightPx(editor: Editor): number {
+  const guide = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-safe-guide");
+  const height = guide?.offsetHeight ?? 0;
+  return Number.isFinite(height) && height > 0 ? height : readCssLengthPx(editor, "--content-height");
 }
 
 function readCssLengthPx(editor: Editor, variableName: string): number {

@@ -15,17 +15,32 @@ function fontSizeAttributes(fontSize: string | null | undefined): Record<string,
   };
 }
 
-function qrCardWidthAttributes(width: unknown): Record<string, string> {
-  const parsed = typeof width === "number" ? width : typeof width === "string" ? Number.parseFloat(width) : NaN;
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return {};
+function positiveRoundedDimension(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+}
+
+function qrCardSizeAttributes(width: unknown, height: unknown): Record<string, string> {
+  const roundedWidth = positiveRoundedDimension(width);
+  const roundedHeight = positiveRoundedDimension(height);
+  const attributes: Record<string, string> = {};
+  const styles: string[] = [];
+
+  if (roundedWidth) {
+    attributes["data-width"] = String(roundedWidth);
+    styles.push(`--qr-card-width: ${roundedWidth}px`, `width: ${roundedWidth}px`);
   }
 
-  const rounded = Math.round(parsed);
-  return {
-    "data-width": String(rounded),
-    style: `--qr-card-width: ${rounded}px; width: ${rounded}px`
-  };
+  if (roundedHeight) {
+    attributes["data-height"] = String(roundedHeight);
+    styles.push(`--qr-card-height: ${roundedHeight}px`, `height: ${roundedHeight}px`);
+  }
+
+  if (styles.length > 0) {
+    attributes.style = styles.join("; ");
+  }
+
+  return attributes;
 }
 
 type TocNodeItem = {
@@ -325,7 +340,12 @@ export const QrCardNode = Node.create({
       width: {
         default: null,
         parseHTML: (element) => (element as HTMLElement).dataset.width ?? (element as HTMLElement).style.width ?? null,
-        renderHTML: (attributes) => qrCardWidthAttributes(attributes.width)
+        renderHTML: (attributes) => qrCardSizeAttributes(attributes.width, attributes.height)
+      },
+      height: {
+        default: null,
+        parseHTML: (element) => (element as HTMLElement).dataset.height ?? (element as HTMLElement).style.height ?? null,
+        renderHTML: () => ({})
       }
     };
   },
@@ -344,7 +364,8 @@ export const QrCardNode = Node.create({
             src: element.dataset.src ?? element.querySelector("img")?.getAttribute("src") ?? "",
             template: element.dataset.template ?? "umbrella",
             label: element.dataset.label ?? "記録室リンク",
-            width: element.dataset.width ?? element.style.width ?? null
+            width: element.dataset.width ?? element.style.width ?? null,
+            height: element.dataset.height ?? element.style.height ?? null
           };
         }
       }

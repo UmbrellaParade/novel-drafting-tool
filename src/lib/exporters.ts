@@ -34,6 +34,7 @@ type PdfQrBlock = {
   label: string;
   template: QrCardTemplateId;
   width?: number;
+  height?: number;
 };
 
 type TocExportEntry = {
@@ -1105,18 +1106,30 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
   const image = await embedImage(state.pdfDoc, src);
   const requestedCardWidth = block.width ? block.width * 0.75 : mmToPt(74);
   const cardWidth = Math.min(state.contentWidth, requestedCardWidth);
+  const contentHeight = state.contentTop - state.contentBottom;
+  const requestedCardHeight = block.height ? Math.min(contentHeight, Math.max(mmToPt(24), block.height * 0.75)) : null;
   const cardPadding = mmToPt(4);
-  const qrSize = mmToPt(23);
   const labelSize = 7;
   const bodyTextSize = 8;
   const urlSize = 6;
-  const captionX = state.contentX + (state.contentWidth - cardWidth) / 2 + cardPadding + qrSize + mmToPt(4);
-  const captionWidth = cardWidth - cardPadding * 2 - qrSize - mmToPt(4);
-  const titleLines = wrapText(block.title, state.uiFont, bodyTextSize, captionWidth).slice(0, 2);
-  const descriptionLines = wrapText(block.description, state.uiFont, urlSize, captionWidth).slice(0, 2);
+  const bodyGap = mmToPt(4);
+  const labelHeight = labelSize * 1.35;
+  const labelGap = mmToPt(2);
+  const availableBodyHeight = requestedCardHeight ? Math.max(mmToPt(12), requestedCardHeight - cardPadding * 2 - labelHeight - labelGap) : mmToPt(23);
+  const qrSize = Math.min(mmToPt(23), Math.max(mmToPt(14), availableBodyHeight));
+  const captionX = state.contentX + (state.contentWidth - cardWidth) / 2 + cardPadding + qrSize + bodyGap;
+  const captionWidth = Math.max(mmToPt(18), cardWidth - cardPadding * 2 - qrSize - bodyGap);
+  const titleLineHeight = bodyTextSize * 1.35;
+  const descriptionLineHeight = urlSize * 1.35;
+  const rawTitleLines = wrapText(block.title, state.uiFont, bodyTextSize, captionWidth).slice(0, 2);
+  const maxTitleLines = requestedCardHeight ? Math.max(1, Math.min(rawTitleLines.length, Math.floor(availableBodyHeight / titleLineHeight))) : rawTitleLines.length;
+  const titleLines = rawTitleLines.slice(0, maxTitleLines);
+  const remainingTextHeight = Math.max(0, availableBodyHeight - titleLines.length * titleLineHeight);
+  const maxDescriptionLines = requestedCardHeight ? Math.max(0, Math.min(2, Math.floor(remainingTextHeight / descriptionLineHeight))) : 2;
+  const descriptionLines = wrapText(block.description, state.uiFont, urlSize, captionWidth).slice(0, maxDescriptionLines);
   const textHeight = titleLines.length * bodyTextSize * 1.35 + descriptionLines.length * urlSize * 1.35;
   const bodyHeight = Math.max(qrSize, textHeight);
-  const cardHeight = cardPadding * 2 + labelSize * 1.35 + mmToPt(2) + bodyHeight;
+  const cardHeight = requestedCardHeight ?? cardPadding * 2 + labelHeight + labelGap + bodyHeight;
 
   ensureVerticalSpace(state, cardHeight);
   const cardX = state.contentX + (state.contentWidth - cardWidth) / 2;
@@ -1142,7 +1155,7 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
     color: theme.muted
   });
 
-  const bodyTop = cardY + cardHeight - cardPadding - labelSize * 1.35 - mmToPt(2);
+  const bodyTop = cardY + cardHeight - cardPadding - labelHeight - labelGap;
   state.page.drawImage(image, {
     x: cardX + cardPadding,
     y: bodyTop - qrSize,
@@ -1323,7 +1336,8 @@ function parsePdfBlocks(html: string): PdfBlock[] {
         src: element.dataset.src ?? element.querySelector("img")?.getAttribute("src") ?? "",
         label: element.dataset.label ?? "Umbrella Parade 記録室",
         template: parseQrTemplate(element.dataset.template),
-        width: parseHtmlDimension(element.dataset.width ?? element.style.width)
+        width: parseHtmlDimension(element.dataset.width ?? element.style.width),
+        height: parseHtmlDimension(element.dataset.height ?? element.style.height)
       });
       return;
     }
