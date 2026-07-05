@@ -41,6 +41,7 @@ const DOCUMENT_CHAPTER_TITLE = "本文";
 const AUTOSAVE_DELAY_MS = 1600;
 const CONTENT_COMMIT_DELAY_MS = 450;
 const LAYOUT_REFRESH_DELAY_MS = 650;
+const FAST_EDITING_RESET_MS = 850;
 
 type OutlineItem = {
   id: string;
@@ -219,11 +220,13 @@ export function EditorShell() {
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const [printDomActive, setPrintDomActive] = useState(false);
+  const [fastEditing, setFastEditing] = useState(false);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pendingChapterContentRef = useRef<string | null>(null);
   const contentCommitTimerRef = useRef<number | null>(null);
+  const fastEditingTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -253,6 +256,9 @@ export function EditorShell() {
     return () => {
       if (contentCommitTimerRef.current !== null) {
         window.clearTimeout(contentCommitTimerRef.current);
+      }
+      if (fastEditingTimerRef.current !== null) {
+        window.clearTimeout(fastEditingTimerRef.current);
       }
     };
   }, []);
@@ -337,6 +343,17 @@ export function EditorShell() {
     });
   }, []);
 
+  const markTypingActivity = useCallback(() => {
+    setFastEditing(true);
+    if (fastEditingTimerRef.current !== null) {
+      window.clearTimeout(fastEditingTimerRef.current);
+    }
+    fastEditingTimerRef.current = window.setTimeout(() => {
+      fastEditingTimerRef.current = null;
+      setFastEditing(false);
+    }, FAST_EDITING_RESET_MS);
+  }, []);
+
   const projectWithLatestContent = useCallback(
     (source: ManuscriptProject) => {
       const pendingContent = pendingChapterContentRef.current;
@@ -362,6 +379,11 @@ export function EditorShell() {
       window.clearTimeout(contentCommitTimerRef.current);
       contentCommitTimerRef.current = null;
     }
+    if (fastEditingTimerRef.current !== null) {
+      window.clearTimeout(fastEditingTimerRef.current);
+      fastEditingTimerRef.current = null;
+    }
+    setFastEditing(false);
     pendingChapterContentRef.current = null;
     updateProject((previous) => ({
       ...previous,
@@ -552,6 +574,11 @@ export function EditorShell() {
         window.clearTimeout(contentCommitTimerRef.current);
         contentCommitTimerRef.current = null;
       }
+      if (fastEditingTimerRef.current !== null) {
+        window.clearTimeout(fastEditingTimerRef.current);
+        fastEditingTimerRef.current = null;
+      }
+      setFastEditing(false);
       pendingChapterContentRef.current = null;
       setProject(normalizeDocumentProject({ ...imported, updatedAt: new Date().toISOString() }));
       setStatusText("JSONを読み込み");
@@ -793,6 +820,11 @@ export function EditorShell() {
       window.clearTimeout(contentCommitTimerRef.current);
       contentCommitTimerRef.current = null;
     }
+    if (fastEditingTimerRef.current !== null) {
+      window.clearTimeout(fastEditingTimerRef.current);
+      fastEditingTimerRef.current = null;
+    }
+    setFastEditing(false);
     pendingChapterContentRef.current = null;
     setProject(normalizeDocumentProject(createDefaultProject()));
     setStatusText("新規原稿");
@@ -886,7 +918,7 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
+        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`} onWheel={handlePageStageWheel}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
@@ -907,7 +939,13 @@ export function EditorShell() {
                 ))}
               </div>
               <div className="paged-editor-layer">
-                <TiptapEditor key={activeChapter.id} content={activeChapter.content} onChange={updateActiveChapterContent} onReady={setActiveEditor} />
+                <TiptapEditor
+                  key={activeChapter.id}
+                  content={activeChapter.content}
+                  onChange={updateActiveChapterContent}
+                  onTypingActivity={markTypingActivity}
+                  onReady={setActiveEditor}
+                />
               </div>
             </div>
           </div>

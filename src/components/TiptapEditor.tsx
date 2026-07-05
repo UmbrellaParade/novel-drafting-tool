@@ -12,15 +12,10 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  Bold,
   Check,
   Copy,
   Heading1,
-  Heading2,
   ImagePlus,
-  Italic,
-  List,
-  ListOrdered,
   Pilcrow,
   QrCode,
   Redo2,
@@ -31,13 +26,13 @@ import {
   Type,
   Undo2,
   X,
-  Underline as UnderlineIcon
 } from "lucide-react";
 import { BlockFontSizeExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
 
 type TiptapEditorProps = {
   content: string;
   onChange: (content: string) => void;
+  onTypingActivity?: () => void;
   onReady?: (editor: Editor | null) => void;
 };
 
@@ -55,8 +50,6 @@ type ToolButtonProps = {
 };
 
 type ToolbarState = {
-  canUndo: boolean;
-  canRedo: boolean;
   hasImageSelection: boolean;
   selectedImageWidth: number | null;
   hasQrCardSelection: boolean;
@@ -70,8 +63,6 @@ type ImageReplacementTarget = {
   title: string;
 };
 
-const IMAGE_SIZE_RATIOS = [0.5, 0.75, 1] as const;
-const QR_CARD_SIZE_RATIOS = [0.5, 0.75, 1] as const;
 const FONT_SIZE_SCOPES = {
   all: new Set(["paragraph", "heading", "blockquote", "listItem"]),
   headings: new Set(["heading"]),
@@ -82,7 +73,7 @@ function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
 }
 
-export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: TiptapEditorProps) {
   const editorRef = useRef<Editor | null>(null);
   const editor = useEditor({
     extensions: [
@@ -120,7 +111,20 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
       attributes: {
         class: "manuscript-prose"
       },
+      handleKeyDown: (_view, event) => {
+        const isEditingKey =
+          event.key.length === 1 ||
+          event.key === "Backspace" ||
+          event.key === "Delete" ||
+          event.key === "Enter" ||
+          event.key === "Tab";
+        if (isEditingKey) {
+          onTypingActivity?.();
+        }
+        return false;
+      },
       handlePaste: (_view, event) => {
+        onTypingActivity?.();
         const clipboard = event.clipboardData;
         const pastedEditor = editorRef.current;
         if (!clipboard || !pastedEditor) {
@@ -176,8 +180,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const qrCardSelectionPositionRef = useRef<number | null>(null);
   const rubyReadingInputRef = useRef<HTMLInputElement | null>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
-    canUndo: false,
-    canRedo: false,
     hasImageSelection: false,
     selectedImageWidth: null,
     hasQrCardSelection: false,
@@ -191,8 +193,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   useEffect(() => {
     if (!editor) {
       setToolbarState({
-        canUndo: false,
-        canRedo: false,
         hasImageSelection: false,
         selectedImageWidth: null,
         hasQrCardSelection: false,
@@ -209,8 +209,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       imageSelectionTargetRef.current = hasImageSelection ? readSelectedImageTarget(editor) : null;
       qrCardSelectionPositionRef.current = hasQrCardSelection ? selectedNodePosition(editor, "qrCard") : null;
       setToolbarState({
-        canUndo: editor.can().undo(),
-        canRedo: editor.can().redo(),
         hasImageSelection,
         selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null,
         hasQrCardSelection,
@@ -220,13 +218,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
 
     refreshToolbarState();
     editor.on("selectionUpdate", refreshToolbarState);
-    editor.on("transaction", refreshToolbarState);
-    editor.on("update", refreshToolbarState);
 
     return () => {
       editor.off("selectionUpdate", refreshToolbarState);
-      editor.off("transaction", refreshToolbarState);
-      editor.off("update", refreshToolbarState);
     };
   }, [editor]);
 
@@ -401,27 +395,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       .run();
   };
 
-  const setImageWidthRatio = (ratio: (typeof IMAGE_SIZE_RATIOS)[number]) => {
-    if (!editor) {
-      return;
-    }
-    setImageWidth(readPageWidthPx(editor) * ratio);
-  };
-
-  const setImageToTextWidth = () => {
-    if (!editor) {
-      return;
-    }
-    setImageWidth(readTextWidthPx(editor));
-  };
-
-  const setImageToPageWidth = () => {
-    if (!editor) {
-      return;
-    }
-    setImageWidth(readPageWidthPx(editor));
-  };
-
   const fitImageToCurrentPage = () => {
     if (!editor || !toolbarState.hasImageSelection) {
       return;
@@ -435,7 +408,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     const rect = image.getBoundingClientRect();
     const frame = currentPageFrame(editor, rect.left);
     if (!frame) {
-      setImageToPageWidth();
+      setImageWidth(readPageWidthPx(editor));
       return;
     }
 
@@ -469,32 +442,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     setImageWidth(width);
   };
 
-  const resetImageSize = () => {
-    if (!editor || !toolbarState.hasImageSelection) {
-      return;
-    }
-
-    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
-    const position = target ? resolveImagePosition(editor, target) : selectedImagePosition(editor);
-    if (position === null) {
-      return;
-    }
-
-    editor
-      .chain()
-      .focus()
-      .command(({ state, tr }) => {
-        const node = state.doc.nodeAt(position);
-        if (!node || node.type.name !== "image") {
-          return false;
-        }
-
-        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: null, height: null }, node.marks);
-        return true;
-      })
-      .run();
-  };
-
   const setQrCardWidth = (width: number) => {
     if (!editor || !toolbarState.hasQrCardSelection) {
       return;
@@ -520,13 +467,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       .run();
   };
 
-  const setQrCardWidthRatio = (ratio: (typeof QR_CARD_SIZE_RATIOS)[number]) => {
-    if (!editor) {
-      return;
-    }
-    setQrCardWidth(readTextWidthPx(editor) * ratio);
-  };
-
   const setQrCardToTextWidth = () => {
     if (!editor) {
       return;
@@ -539,31 +479,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
     setQrCardWidth(readPageWidthPx(editor));
-  };
-
-  const resetQrCardSize = () => {
-    if (!editor || !toolbarState.hasQrCardSelection) {
-      return;
-    }
-
-    const position = selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current;
-    if (position === null) {
-      return;
-    }
-
-    editor
-      .chain()
-      .focus()
-      .command(({ state, tr }) => {
-        const node = state.doc.nodeAt(position);
-        if (!node || node.type.name !== "qrCard") {
-          return false;
-        }
-
-        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: null }, node.marks);
-        return true;
-      })
-      .run();
   };
 
   const deleteSelectedContent = () => {
@@ -655,10 +570,10 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   return (
     <>
       <div className="editor-toolbar" aria-label="本文ツールバー">
-        <ToolButton label="戻す" disabled={disabled || !toolbarState.canUndo} onClick={() => editor?.chain().focus().undo().run()}>
+        <ToolButton label="戻す" disabled={disabled} onClick={() => editor?.chain().focus().undo().run()}>
           <Undo2 size={18} />
         </ToolButton>
-        <ToolButton label="進む" disabled={disabled || !toolbarState.canRedo} onClick={() => editor?.chain().focus().redo().run()}>
+        <ToolButton label="進む" disabled={disabled} onClick={() => editor?.chain().focus().redo().run()}>
           <Redo2 size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
@@ -667,19 +582,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         </ToolButton>
         <ToolButton label="見出し1" active={editor?.isActive("heading", { level: 1 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
           <Heading1 size={18} />
-        </ToolButton>
-        <ToolButton label="見出し2" active={editor?.isActive("heading", { level: 2 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}>
-          <Heading2 size={18} />
-        </ToolButton>
-        <span className="toolbar-divider" />
-        <ToolButton label="太字" active={editor?.isActive("bold")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBold().run()}>
-          <Bold size={18} />
-        </ToolButton>
-        <ToolButton label="斜体" active={editor?.isActive("italic")} disabled={disabled} onClick={() => editor?.chain().focus().toggleItalic().run()}>
-          <Italic size={18} />
-        </ToolButton>
-        <ToolButton label="下線" active={editor?.isActive("underline")} disabled={disabled} onClick={() => editor?.chain().focus().toggleUnderline().run()}>
-          <UnderlineIcon size={18} />
         </ToolButton>
         <ToolButton label="ルビ" active={rubyPanelOpen} disabled={disabled} onClick={openRubyPanel}>
           <Type size={18} />
@@ -693,13 +595,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         </ToolButton>
         <ToolButton label="右揃え" active={editor?.isActive({ textAlign: "right" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("right").run()}>
           <AlignRight size={18} />
-        </ToolButton>
-        <span className="toolbar-divider" />
-        <ToolButton label="箇条書き" active={editor?.isActive("bulletList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleBulletList().run()}>
-          <List size={18} />
-        </ToolButton>
-        <ToolButton label="番号付きリスト" active={editor?.isActive("orderedList")} disabled={disabled} onClick={() => editor?.chain().focus().toggleOrderedList().run()}>
-          <ListOrdered size={18} />
         </ToolButton>
         <ToolButton label="画像" disabled={disabled} onClick={() => imageInputRef.current?.click()}>
           <ImagePlus size={18} />
@@ -734,24 +629,13 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       {toolbarState.hasImageSelection ? (
         <div className="image-size-controls" aria-label="画像サイズ">
           <span className="image-size-chip">画像</span>
-          {IMAGE_SIZE_RATIOS.map((ratio) => (
-            <button key={ratio} type="button" onMouseDown={preserveEditorSelection} onClick={() => setImageWidthRatio(ratio)}>
-              {Math.round(ratio * 100)}%
-            </button>
-          ))}
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={setImageToTextWidth}>
-            本文幅
-          </button>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={setImageToPageWidth}>
-            紙面幅
-          </button>
           <button type="button" onMouseDown={preserveEditorSelection} onClick={fitImageToCurrentPage}>
             <Scan size={15} />
-            頁最大
+            ページ内最大
           </button>
           <button type="button" onMouseDown={preserveEditorSelection} onClick={matchPreviousImageSize}>
             <Copy size={15} />
-            前画像
+            前画像と同じ
           </button>
           <input
             className="image-size-range"
@@ -772,9 +656,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             aria-label="画像幅px"
           />
           <span className="image-size-unit">px</span>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={resetImageSize}>
-            自動
-          </button>
           <label className="image-replace-button" onPointerDown={prepareReplaceImage}>
             <RefreshCw size={15} />
             置換
@@ -802,11 +683,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       {toolbarState.hasQrCardSelection ? (
         <div className="image-size-controls" aria-label="QRカードサイズ">
           <span className="image-size-chip">QRカード</span>
-          {QR_CARD_SIZE_RATIOS.map((ratio) => (
-            <button key={ratio} type="button" onMouseDown={preserveEditorSelection} onClick={() => setQrCardWidthRatio(ratio)}>
-              {Math.round(ratio * 100)}%
-            </button>
-          ))}
           <button type="button" onMouseDown={preserveEditorSelection} onClick={setQrCardToTextWidth}>
             本文幅
           </button>
@@ -832,9 +708,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             aria-label="QRカード幅px"
           />
           <span className="image-size-unit">px</span>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={resetQrCardSize}>
-            自動
-          </button>
           <button className="danger" type="button" onMouseDown={preserveEditorSelection} onClick={deleteSelectedContent} title="削除" aria-label="削除">
             <Trash2 size={16} />
           </button>
