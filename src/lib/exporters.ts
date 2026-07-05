@@ -46,6 +46,7 @@ type PdfTocBlock = {
   title: string;
   subtitle: string;
   style: TocStyleId;
+  fontSizePt?: number;
   items: TocExportEntry[];
 };
 
@@ -940,7 +941,7 @@ function drawTextBlock(state: PdfRenderState, text: string, level: 0 | 1 | 2 | 3
 
 function drawTocBlock(state: PdfRenderState, block: PdfTocBlock): void {
   const theme = tocPdfTheme(state, block.style);
-  const baseSize = projectFontSize(state);
+  const baseSize = block.fontSizePt && Number.isFinite(block.fontSizePt) && block.fontSizePt > 0 ? block.fontSizePt : projectFontSize(state);
   const titleSize = baseSize * 1.55;
   const subtitleSize = baseSize * 0.86;
   const entrySize = baseSize;
@@ -1058,8 +1059,17 @@ async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Prom
   const requestedWidth = block.width ? Math.min(maxWidth, block.width * 0.75) : maxWidth;
   const requestedHeight = block.height ? Math.min(maxHeight, block.height * 0.75) : maxHeight;
   const scale = Math.min(requestedWidth / image.width, requestedHeight / image.height, maxHeight / image.height, 1);
-  const width = image.width * scale;
-  const height = image.height * scale;
+  let width = image.width * scale;
+  let height = image.height * scale;
+  const paragraphGap = mmToPt(state.project.pageSettings.paragraphSpacingMm + 2);
+  const remainingHeight = Math.max(0, state.y - state.contentBottom - paragraphGap);
+  const minReadableHeight = mmToPt(18);
+
+  if (height > remainingHeight && remainingHeight >= minReadableHeight) {
+    const fitScale = remainingHeight / height;
+    width *= fitScale;
+    height *= fitScale;
+  }
 
   ensureVerticalSpace(state, height);
   state.page.drawImage(image, {
@@ -1068,7 +1078,7 @@ async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Prom
     width,
     height
   });
-  state.y -= height + mmToPt(state.project.pageSettings.paragraphSpacingMm + 2);
+  state.y -= height + paragraphGap;
 }
 
 async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<void> {
@@ -1313,6 +1323,7 @@ function parsePdfBlocks(html: string): PdfBlock[] {
         title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
         subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
         style: parseTocStyle(element.dataset.style),
+        fontSizePt: parseHtmlDimension(element.dataset.fontSizePt ?? null),
         items: parseTocEntries(element)
       });
       return;
@@ -1326,8 +1337,8 @@ function parsePdfBlocks(html: string): PdfBlock[] {
         kind: "image",
         src: element.getAttribute("src") ?? "",
         alt: element.getAttribute("alt") ?? element.getAttribute("title") ?? "",
-        width: parseHtmlDimension(element.getAttribute("width")),
-        height: parseHtmlDimension(element.getAttribute("height"))
+        width: parseHtmlDimension(element.getAttribute("width") ?? element.style.width),
+        height: parseHtmlDimension(element.getAttribute("height") ?? element.style.height)
       });
       return;
     }

@@ -169,10 +169,13 @@ export function normalizeProject(project: ManuscriptProject): ManuscriptProject 
 }
 
 export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettings {
+  const fontSizePt = typeof settings?.fontSizePt === "number" && Number.isFinite(settings.fontSizePt) && settings.fontSizePt > 0 ? settings.fontSizePt : undefined;
+
   return {
     title: settings?.title?.trim() || DEFAULT_TOC_SETTINGS.title,
     subtitle: settings?.subtitle ?? DEFAULT_TOC_SETTINGS.subtitle,
-    style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style
+    style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style,
+    ...(fontSizePt ? { fontSizePt } : {})
   };
 }
 

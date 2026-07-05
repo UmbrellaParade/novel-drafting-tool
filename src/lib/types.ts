@@ -46,6 +46,8 @@ export type TocSettings = {
   title: string;
   subtitle: string;
   style: TocStyleId;
+  /** 目次本文のフォントサイズ（pt）。省略時は原稿フォントサイズに準じる */
+  fontSizePt?: number;
 };
 
 export type ManuscriptProject = {

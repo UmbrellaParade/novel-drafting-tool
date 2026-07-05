@@ -75,6 +75,20 @@ function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
 
 export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: TiptapEditorProps) {
   const editorRef = useRef<Editor | null>(null);
+  // onChangeをrefで保持することで、useEditor内クロージャが古い参照を持たないようにする
+  const onChangeRef = useRef(onChange);
+  const onTypingActivityRef = useRef(onTypingActivity);
+  // getHTML()のdebounce用タイマー（画像リサイズ中の連続シリアライズを防止）
+  const onUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    onTypingActivityRef.current = onTypingActivity;
+  }, [onTypingActivity]);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -150,7 +164,18 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
       }
     },
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML());
+      // 画像リサイズ・テキスト削除など、すべての変更でfastEditingフラグを立てる
+      onTypingActivityRef.current?.();
+
+      // getHTML()は重いため、80msのdebounceで連続呼び出しをまとめる
+      // （画像を1pxドラッグするたびにシリアライズが走るのを防ぐ）
+      if (onUpdateTimerRef.current !== null) {
+        clearTimeout(onUpdateTimerRef.current);
+      }
+      onUpdateTimerRef.current = setTimeout(() => {
+        onUpdateTimerRef.current = null;
+        onChangeRef.current(editor.getHTML());
+      }, 80);
     }
   });
 
@@ -162,6 +187,15 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
       onReady?.(null);
     };
   }, [editor, onReady]);
+
+  // コンポーネントアンマウント時にタイマーをクリア
+  useEffect(() => {
+    return () => {
+      if (onUpdateTimerRef.current !== null) {
+        clearTimeout(onUpdateTimerRef.current);
+      }
+    };
+  }, []);
 
   if (!editor) {
     return <div className="editor-loading">読み込み中</div>;
@@ -189,6 +223,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
   const [textSizePt, setTextSizePt] = useState(9);
+  const [qrPresetWidth, setQrPresetWidth] = useState(320);
   const disabled = !editor;
 
   useEffect(() => {
@@ -436,8 +471,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     }
 
     const aspectRatio = image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : Math.max(0.1, rect.width / Math.max(1, rect.height));
+    const pageScale = readPageScale(editor);
     const verticalPadding = readCssLengthPx(editor, "--paragraph-spacing") + 8;
-    const availableHeight = Math.max(48, frame.contentBottom - rect.top - verticalPadding);
+    const availableHeight = Math.max(48, (frame.contentBottom - rect.top) / pageScale - verticalPadding);
     const maxByHeight = availableHeight * aspectRatio;
     const maxByWidth = readPageWidthPx(editor);
     setImageWidth(Math.max(48, Math.min(maxByWidth, maxByHeight)));
@@ -470,6 +506,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
+    const nextWidth = Math.max(120, Math.min(readTextWidthPx(editor), Math.round(width)));
     const position = selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current;
     if (position === null) {
       return;
@@ -484,7 +521,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           return false;
         }
 
-        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: Math.round(width) }, node.marks);
+        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth }, node.marks);
         return true;
       })
       .run();
@@ -495,13 +532,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
     setQrCardWidth(readTextWidthPx(editor));
-  };
-
-  const setQrCardToPageWidth = () => {
-    if (!editor) {
-      return;
-    }
-    setQrCardWidth(readPageWidthPx(editor));
   };
 
   const deleteSelectedContent = () => {
@@ -588,7 +618,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
   const textWidth = editor ? readTextWidthPx(editor) : 360;
   const qrCardWidth = toolbarState.selectedQrCardWidth ?? Math.round(textWidth * 0.75);
-  const maxQrCardWidth = Math.max(180, Math.round(pageWidth));
+  const maxQrCardWidth = Math.max(180, Math.round(textWidth));
+  const normalizedQrPresetWidth = Math.max(120, Math.min(maxQrCardWidth, Math.round(qrPresetWidth)));
 
   return (
     <>
@@ -709,8 +740,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <button type="button" onMouseDown={preserveEditorSelection} onClick={setQrCardToTextWidth}>
             本文幅
           </button>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={setQrCardToPageWidth}>
-            紙面幅
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={() => setQrCardWidth(normalizedQrPresetWidth)}>
+            指定px
           </button>
           <input
             className="image-size-range"
@@ -731,6 +762,15 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             aria-label="QRカード幅px"
           />
           <span className="image-size-unit">px</span>
+          <input
+            className="image-size-number"
+            type="number"
+            min={120}
+            max={maxQrCardWidth}
+            value={normalizedQrPresetWidth}
+            onChange={(event) => setQrPresetWidth(Number(event.target.value))}
+            aria-label="QRカード指定px"
+          />
           <button className="danger" type="button" onMouseDown={preserveEditorSelection} onClick={deleteSelectedContent} title="削除" aria-label="削除">
             <Trash2 size={16} />
           </button>
@@ -853,13 +893,13 @@ async function toEmbeddableImageSrc(src: string): Promise<string> {
 
 function readPageWidthPx(editor: Editor): number {
   const frame = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-frame");
-  const width = frame?.getBoundingClientRect().width ?? 0;
+  const width = frame?.offsetWidth ?? 0;
   return Number.isFinite(width) && width > 0 ? width : readCssLengthPx(editor, "--page-width");
 }
 
 function readTextWidthPx(editor: Editor): number {
   const guide = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-safe-guide");
-  const width = guide?.getBoundingClientRect().width ?? 0;
+  const width = guide?.offsetWidth ?? 0;
   return Number.isFinite(width) && width > 0 ? width : readCssLengthPx(editor, "--content-width");
 }
 
@@ -872,9 +912,19 @@ function readCssLengthPx(editor: Editor, variableName: string): number {
   probe.style.width = `var(${variableName})`;
   probe.style.height = "0";
   host.appendChild(probe);
-  const width = probe.getBoundingClientRect().width;
+  const width = probe.offsetWidth || probe.getBoundingClientRect().width;
   probe.remove();
   return Number.isFinite(width) && width > 0 ? width : 320;
+}
+
+function readPageScale(editor: Editor): number {
+  const viewport = editor.view.dom.closest(".page-viewport");
+  if (!viewport) {
+    return 1;
+  }
+
+  const parsed = Number.parseFloat(window.getComputedStyle(viewport).getPropertyValue("--page-scale"));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
 function renderedImages(editor: Editor): HTMLImageElement[] {
@@ -922,9 +972,10 @@ function currentPageFrame(editor: Editor, x: number): { contentBottom: number } 
   const frameRect = frame.getBoundingClientRect();
   const marginTop = readCssLengthPx(editor, "--margin-top");
   const contentHeight = readCssLengthPx(editor, "--content-height");
+  const scale = readPageScale(editor);
 
   return {
-    contentBottom: frameRect.top + marginTop + contentHeight
+    contentBottom: frameRect.top + (marginTop + contentHeight) * scale
   };
 }
 

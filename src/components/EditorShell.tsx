@@ -248,6 +248,7 @@ function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
     title: settings.title.trim() || "目次",
     subtitle: settings.subtitle,
     style: settings.style,
+    fontSizePt: settings.fontSizePt ?? null,
     items: tocItemsJson(entries)
   };
 }
@@ -269,6 +270,7 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           node.attrs.title === nextAttrs.title &&
           node.attrs.subtitle === nextAttrs.subtitle &&
           node.attrs.style === nextAttrs.style &&
+          node.attrs.fontSizePt === nextAttrs.fontSizePt &&
           node.attrs.items === nextAttrs.items;
         if (!isSame) {
           tr.setNodeMarkup(position, undefined, nextAttrs, node.marks);
@@ -292,6 +294,7 @@ export function EditorShell() {
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
+  const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0 });
   const [printDomActive, setPrintDomActive] = useState(false);
   const [fastEditing, setFastEditing] = useState(false);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
@@ -300,6 +303,9 @@ export function EditorShell() {
   const pendingChapterContentRef = useRef<string | null>(null);
   const contentCommitTimerRef = useRef<number | null>(null);
   const fastEditingTimerRef = useRef<number | null>(null);
+  // ページ設定（フォント・余白等）変更のdebounce用
+  const pageSettingTimerRef = useRef<number | null>(null);
+  const pendingPageSettingsRef = useRef<Partial<PageSettings>>({});
 
   useEffect(() => {
     let isMounted = true;
@@ -336,6 +342,9 @@ export function EditorShell() {
       }
       if (fastEditingTimerRef.current !== null) {
         window.clearTimeout(fastEditingTimerRef.current);
+      }
+      if (pageSettingTimerRef.current !== null) {
+        window.clearTimeout(pageSettingTimerRef.current);
       }
     };
   }, []);
@@ -411,6 +420,11 @@ export function EditorShell() {
   }, [activeChapter, layoutChapterContent, project]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
   const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
+  const pageViewportStyle = {
+    "--page-scale": pageFit.scale,
+    width: pageFit.width ? `${pageFit.width}px` : undefined,
+    height: pageFit.height ? `${pageFit.height}px` : undefined
+  } as React.CSSProperties;
 
   const updateProject = useCallback((updater: (previous: ManuscriptProject) => ManuscriptProject) => {
     setProject((previous) => {
@@ -542,6 +556,8 @@ export function EditorShell() {
       }
 
       const pagePitch = secondFrame ? secondFrame.offsetLeft - firstFrame.offsetLeft : firstFrame.offsetWidth;
+      const firstFrameRect = firstFrame.getBoundingClientRect();
+      const visualPagePitch = secondFrame ? secondFrame.getBoundingClientRect().left - firstFrameRect.left : firstFrameRect.width;
       if (pagePitch <= 0) {
         return;
       }
@@ -551,13 +567,13 @@ export function EditorShell() {
       const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];
-      const firstFrameLeft = firstFrame.getBoundingClientRect().left;
+      const firstFrameLeft = firstFrameRect.left;
       prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
         if (heading.closest("[data-type='table-of-contents']")) {
           return;
         }
 
-        const pageIndex = Math.max(0, Math.min(titleCount - 1, Math.floor((heading.getBoundingClientRect().left - firstFrameLeft + 2) / pagePitch)));
+        const pageIndex = Math.max(0, Math.min(titleCount - 1, Math.floor((heading.getBoundingClientRect().left - firstFrameLeft + 2) / visualPagePitch)));
         nextHeadingPageNumbers.push(pageIndex + 1);
         const title = heading.textContent?.trim();
         if (!title) {
@@ -578,6 +594,61 @@ export function EditorShell() {
 
     return () => window.cancelAnimationFrame(handle);
   }, [estimatedPages, layoutSignature, pageFrameCount]);
+
+  useEffect(() => {
+    const stage = pageStageRef.current;
+    if (!stage) {
+      return;
+    }
+
+    let frameHandle: number | null = null;
+    const updatePageFit = () => {
+      if (frameHandle !== null) {
+        return;
+      }
+
+      frameHandle = window.requestAnimationFrame(() => {
+        frameHandle = null;
+        const documentElement = stage.querySelector<HTMLElement>(".paged-document");
+        const frame = stage.querySelector<HTMLElement>(".page-frame");
+        if (!documentElement || !frame) {
+          return;
+        }
+
+        const stageRect = stage.getBoundingClientRect();
+        const pageWidth = frame.offsetWidth;
+        const pageHeight = frame.offsetHeight;
+        const trackWidth = documentElement.offsetWidth;
+        if (pageWidth <= 0 || pageHeight <= 0 || trackWidth <= 0) {
+          return;
+        }
+
+        const availableWidth = Math.max(160, stageRect.width - 20);
+        const availableHeight = Math.max(160, stageRect.height - 20);
+        const scale = Math.max(0.32, Math.min(1, availableWidth / pageWidth, availableHeight / pageHeight));
+        const nextFit = {
+          scale: Number(scale.toFixed(4)),
+          width: Math.ceil(trackWidth * scale),
+          height: Math.ceil(pageHeight * scale)
+        };
+        setPageFit((previous) =>
+          previous.scale === nextFit.scale && previous.width === nextFit.width && previous.height === nextFit.height ? previous : nextFit
+        );
+      });
+    };
+
+    const resizeObserver = new ResizeObserver(updatePageFit);
+    resizeObserver.observe(stage);
+    updatePageFit();
+    window.addEventListener("resize", updatePageFit);
+    return () => {
+      if (frameHandle !== null) {
+        window.cancelAnimationFrame(frameHandle);
+      }
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updatePageFit);
+    };
+  }, [layoutSignature, pageFrameCount]);
 
   useEffect(() => {
     if (!activeEditor || !project || fastEditing) {
@@ -634,14 +705,25 @@ export function EditorShell() {
     }));
   };
 
+  // フォント・余白などのページ設定変更は 300ms debounceでまとめて反映する
+  // （即時適用すると入力のたびに全体のコンポーネントが再計算されて重くなるため）
   const updatePageSetting = (key: keyof PageSettings, value: PageSettings[keyof PageSettings]) => {
-    updateProject((previous) => ({
-      ...previous,
-      pageSettings: {
-        ...previous.pageSettings,
-        [key]: value
-      }
-    }));
+    // 変更内容を一時保持（複数の設定をまとめて扱える）
+    pendingPageSettingsRef.current = { ...pendingPageSettingsRef.current, [key]: value };
+
+    if (pageSettingTimerRef.current !== null) {
+      window.clearTimeout(pageSettingTimerRef.current);
+    }
+
+    pageSettingTimerRef.current = window.setTimeout(() => {
+      const pending = pendingPageSettingsRef.current;
+      pendingPageSettingsRef.current = {};
+      pageSettingTimerRef.current = null;
+      updateProject((previous) => ({
+        ...previous,
+        pageSettings: { ...previous.pageSettings, ...pending }
+      }));
+    }, 300);
   };
 
   const updateTocSetting = (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => {
@@ -1079,7 +1161,8 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`} onWheel={handlePageStageWheel}>
+        <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
+          <div className="page-viewport" style={pageViewportStyle}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
@@ -1109,6 +1192,7 @@ export function EditorShell() {
                 />
               </div>
             </div>
+          </div>
           </div>
         </section>
 
@@ -1321,6 +1405,18 @@ function TableOfContentsPanel({
               <option key={styleId} value={styleId}>{option.label} - {option.description}</option>
             ))}
           </select>
+        </label>
+        <label className="toc-form-field wide">
+          <span>目次の文字サイズ：{settings.fontSizePt ?? 9}pt</span>
+          <input
+            type="range"
+            min="6"
+            max="16"
+            step="0.5"
+            value={settings.fontSizePt ?? 9}
+            onChange={(event) => onSettingChange("fontSizePt", Number.parseFloat(event.target.value))}
+            style={{ width: "100%" }}
+          />
         </label>
       </div>
       <div className="toc-actions">

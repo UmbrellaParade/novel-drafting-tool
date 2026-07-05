@@ -159,6 +159,17 @@ export const TableOfContentsNode = Node.create({
       title: { default: "目次" },
       subtitle: { default: "" },
       style: { default: "classic" },
+      fontSizePt: {
+        default: null,
+        parseHTML: (element) => {
+          const v = (element as HTMLElement).dataset.fontSizePt;
+          return v ? Number.parseFloat(v) : null;
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.fontSizePt) return {};
+          return { "data-font-size-pt": String(attributes.fontSizePt) };
+        }
+      },
       items: {
         default: "[]",
         parseHTML: (element) => (element as HTMLElement).dataset.items ?? "[]",
@@ -175,10 +186,12 @@ export const TableOfContentsNode = Node.create({
         tag: "section[data-type='table-of-contents']",
         getAttrs: (node) => {
           const element = node as HTMLElement;
+          const fontSizePtRaw = element.dataset.fontSizePt;
           return {
             title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
             subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
             style: tocStyle(element.dataset.style),
+            fontSizePt: fontSizePtRaw ? Number.parseFloat(fontSizePtRaw) : null,
             items: JSON.stringify(tocItemsFromElement(element))
           };
         }
@@ -190,6 +203,10 @@ export const TableOfContentsNode = Node.create({
     const style = tocStyle(node.attrs.style);
     const items = readTocItems(node.attrs.items);
     const subtitle = typeof node.attrs.subtitle === "string" ? node.attrs.subtitle : "";
+    const fontSizePt = typeof node.attrs.fontSizePt === "number" && node.attrs.fontSizePt > 0
+      ? node.attrs.fontSizePt
+      : null;
+    const blockStyle = fontSizePt ? `font-size: ${fontSizePt}pt` : undefined;
 
     return [
       "section",
@@ -198,6 +215,8 @@ export const TableOfContentsNode = Node.create({
         "data-title": node.attrs.title,
         "data-subtitle": subtitle,
         "data-style": style,
+        ...(fontSizePt ? { "data-font-size-pt": String(fontSizePt) } : {}),
+        ...(blockStyle ? { style: blockStyle } : {}),
         class: `manuscript-toc manuscript-toc-${style}`
       }),
       ["div", { class: "toc-title" }, node.attrs.title || "目次"],

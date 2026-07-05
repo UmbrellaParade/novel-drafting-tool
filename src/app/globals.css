@@ -633,10 +633,11 @@ h1 {
 .page-stage {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
   display: flex;
   justify-content: flex-start;
-  align-items: flex-start;
+  align-items: center;
   padding: 10px;
   border: 1px solid rgba(54, 45, 35, 0.1);
   border-radius: 8px;
@@ -647,12 +648,23 @@ h1 {
   background-size: 24px 24px;
 }
 
-.paged-document {
+.page-viewport {
   position: relative;
   flex: 0 0 auto;
+  min-width: 1px;
+  min-height: 1px;
+  overflow: visible;
+}
+
+.paged-document {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: var(--paged-track-width);
   min-height: var(--page-height);
-  margin: 0 auto;
+  margin: 0;
+  transform: scale(var(--page-scale, 1));
+  transform-origin: top left;
 }
 
 .page-stage.is-fast-editing .paged-document {
@@ -1740,6 +1752,7 @@ h1 {
   .page-stage {
     padding: 10px;
     overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .paper-page {
