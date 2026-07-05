@@ -58,8 +58,9 @@ const AUTOSAVE_DELAY_MS = 1600;
 const CONTENT_COMMIT_DELAY_MS = 450;
 const LAYOUT_REFRESH_DELAY_MS = 650;
 const FAST_EDITING_RESET_MS = 850;
-const PAGE_SCROLL_SNAP_DELAY_MS = 140;
 const PAGE_SCROLL_ALIGN_TOLERANCE_PX = 1.5;
+const PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS = 450;
+const PAGE_USER_SCROLL_WINDOW_MS = 900;
 
 type OutlineItem = {
   id: string;
@@ -475,7 +476,8 @@ export function EditorShell() {
   const scrollFrameRef = useRef<number | null>(null);
   const scrollLockFrameRef = useRef<number | null>(null);
   const pendingScrollTopRef = useRef(0);
-  const scrollSnapTimerRef = useRef<number | null>(null);
+  const programmaticPageScrollUntilRef = useRef(0);
+  const lastUserPageScrollInputRef = useRef(0);
   const fastEditingRef = useRef(false);
   const editingScrollLockRef = useRef<{ top: number; left: number } | null>(null);
   const qrPanelRef = useRef<HTMLElement | null>(null);
@@ -531,9 +533,6 @@ export function EditorShell() {
       }
       if (scrollLockFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollLockFrameRef.current);
-      }
-      if (scrollSnapTimerRef.current !== null) {
-        window.clearTimeout(scrollSnapTimerRef.current);
       }
     };
   }, []);
@@ -797,6 +796,14 @@ export function EditorShell() {
     [updateProject]
   );
 
+  const markProgrammaticPageScroll = useCallback(() => {
+    programmaticPageScrollUntilRef.current = Date.now() + PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS;
+  }, []);
+
+  const markUserPageScrollInput = useCallback(() => {
+    lastUserPageScrollInputRef.current = Date.now();
+  }, []);
+
   const alignStageToSpreadIndex = useCallback(
     (spreadIndex: number, behavior: ScrollBehavior = "auto") => {
       const stage = pageStageRef.current;
@@ -808,12 +815,17 @@ export function EditorShell() {
       const nextIndex = Math.max(0, Math.min(pageSpreads.length - 1, spreadIndex));
       const nextTop = nextIndex * pageStep;
       pendingScrollTopRef.current = nextTop;
+      markProgrammaticPageScroll();
       if (Math.abs(stage.scrollTop - nextTop) > PAGE_SCROLL_ALIGN_TOLERANCE_PX) {
-        stage.scrollTo({ top: nextTop, behavior });
+        if (behavior === "auto") {
+          stage.scrollTop = nextTop;
+        } else {
+          stage.scrollTo({ top: nextTop, behavior });
+        }
       }
       stage.style.setProperty("--page-scroll-top", `${nextTop}px`);
     },
-    [pageFit.pageStep, pageSpreads.length]
+    [markProgrammaticPageScroll, pageFit.pageStep, pageSpreads.length]
   );
 
   const goToSpreadIndex = useCallback(
@@ -838,6 +850,11 @@ export function EditorShell() {
   const updateVisibleSpreadFromScroll = useCallback(
     (stage: HTMLDivElement, scrollTop: number) => {
       stage.style.setProperty("--page-scroll-top", `${scrollTop}px`);
+      const now = Date.now();
+      if (now < programmaticPageScrollUntilRef.current || now - lastUserPageScrollInputRef.current > PAGE_USER_SCROLL_WINDOW_MS) {
+        return;
+      }
+
       const pageStep = pageFit.pageStep;
       if (pageStep <= 0) {
         return;
@@ -872,32 +889,40 @@ export function EditorShell() {
       }
 
       scrollFrameRef.current = window.requestAnimationFrame(flushScroll);
-      if (scrollSnapTimerRef.current !== null) {
-        window.clearTimeout(scrollSnapTimerRef.current);
-      }
-      scrollSnapTimerRef.current = window.setTimeout(() => {
-        scrollSnapTimerRef.current = null;
-        if (!fastEditingRef.current) {
-          alignStageToSpreadIndex(visibleSpreadIndexRef.current);
-        }
-      }, PAGE_SCROLL_SNAP_DELAY_MS);
     };
 
     pendingScrollTopRef.current = stage.scrollTop;
     updateVisibleSpreadFromScroll(stage, stage.scrollTop);
+    const handleWheel = () => markUserPageScrollInput();
+    const handleTouchStart = () => markUserPageScrollInput();
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target === stage) {
+        markUserPageScrollInput();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "PageDown" || event.key === "PageUp" || event.key === "Home" || event.key === "End" || event.key === " ") {
+        markUserPageScrollInput();
+      }
+    };
+
     stage.addEventListener("scroll", handleScroll, { passive: true });
+    stage.addEventListener("wheel", handleWheel, { passive: true });
+    stage.addEventListener("touchstart", handleTouchStart, { passive: true });
+    stage.addEventListener("pointerdown", handlePointerDown, { passive: true });
+    stage.addEventListener("keydown", handleKeyDown);
     return () => {
       stage.removeEventListener("scroll", handleScroll);
+      stage.removeEventListener("wheel", handleWheel);
+      stage.removeEventListener("touchstart", handleTouchStart);
+      stage.removeEventListener("pointerdown", handlePointerDown);
+      stage.removeEventListener("keydown", handleKeyDown);
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
         scrollFrameRef.current = null;
       }
-      if (scrollSnapTimerRef.current !== null) {
-        window.clearTimeout(scrollSnapTimerRef.current);
-        scrollSnapTimerRef.current = null;
-      }
     };
-  }, [alignStageToSpreadIndex, updateVisibleSpreadFromScroll]);
+  }, [markUserPageScrollInput, updateVisibleSpreadFromScroll]);
 
   useEffect(() => {
     const nextSpreadIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
@@ -1724,20 +1749,16 @@ export function EditorShell() {
                 <ChevronRight size={16} />
               </button>
             </div>
-            <div className="page-tab-list" role="tablist" aria-label="ページ選択">
-              {pageSpreads.map((spread, index) => (
-                <button
-                  key={spread.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={index === clampedVisibleSpreadIndex}
-                  className={index === clampedVisibleSpreadIndex ? "is-active" : ""}
-                  onClick={() => goToSpreadIndex(index)}
-                >
-                  {pageSpreadLabel(spread)}
-                </button>
-              ))}
-            </div>
+            <label className="page-jump-control">
+              <span>ページ移動</span>
+              <select value={clampedVisibleSpreadIndex} onChange={(event) => goToSpreadIndex(Number(event.target.value))} aria-label="移動するページ">
+                {pageSpreads.map((spread, index) => (
+                  <option key={spread.id} value={index}>
+                    {pageSpreadLabel(spread)}
+                  </option>
+                ))}
+              </select>
+            </label>
           </nav>
         </section>
 
