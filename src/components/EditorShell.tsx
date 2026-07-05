@@ -384,14 +384,6 @@ function isShimaumaPresetId(preset: ManuscriptProject["pageSettings"]["preset"])
   return preset === "shimauma-a6" || preset === "shimauma-a5";
 }
 
-function roundUpToMultiple(value: number, multiple: number): number {
-  if (multiple <= 1) {
-    return value;
-  }
-
-  return Math.ceil(value / multiple) * multiple;
-}
-
 function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -1458,37 +1450,11 @@ export function EditorShell() {
     setStatusText("PDFをダウンロードしました");
   };
 
-  const rebuildPdfPreviewWithBlankPages = async () => {
-    if (!pdfPreview) {
-      return;
-    }
-
-    try {
-      setStatusText("白紙追加版PDFプレビューを作成中");
-      const minimumPageCount = Math.max(pdfPreview.previewPageCount, pdfPreview.result.pageCount);
-      const targetPageCount = pdfPreview.isShimauma ? roundUpToMultiple(minimumPageCount, 4) : minimumPageCount;
-      const result = await buildProjectPdf(pdfPreview.project, {
-        padToPageCount: targetPageCount,
-        padToMultipleOf: pdfPreview.isShimauma ? 4 : undefined
-      });
-      openPdfPreview(pdfPreview.project, result);
-      setStatusText("白紙追加版PDFプレビューを作成しました");
-    } catch (error) {
-      window.console.error(error);
-      window.alert(error instanceof Error ? error.message : "白紙追加版PDFを作成できませんでした。");
-    }
-  };
-
   const exportPdf = async () => {
     try {
       setStatusText("PDFプレビューを作成中");
       const latestProject = projectWithLatestContent(project);
-      const isShimauma = isShimaumaPresetId(latestProject.pageSettings.preset);
-      const targetPageCount = isShimauma ? roundUpToMultiple(pageFrameCount, 4) : pageFrameCount;
-      const result = await buildProjectPdf(latestProject, {
-        padToPageCount: targetPageCount,
-        padToMultipleOf: isShimauma ? 4 : undefined
-      });
+      const result = await buildProjectPdf(latestProject);
       openPdfPreview(latestProject, result);
       flushPendingChapterContent();
       setStatusText("PDFプレビューを確認してください");
@@ -1904,7 +1870,6 @@ export function EditorShell() {
           preview={pdfPreview}
           onClose={closePdfPreview}
           onDownload={downloadPdfPreview}
-          onPad={rebuildPdfPreviewWithBlankPages}
         />
       ) : null}
       {printDomActive && printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
@@ -1915,22 +1880,17 @@ export function EditorShell() {
 function PdfPreviewDialog({
   preview,
   onClose,
-  onDownload,
-  onPad
+  onDownload
 }: {
   preview: PdfPreviewState;
   onClose: () => void;
   onDownload: () => void;
-  onPad: () => void;
 }) {
   const pdfPageCount = preview.result.pageCount;
   const previewPageCount = preview.previewPageCount;
-  const expectedPageCount = preview.isShimauma ? roundUpToMultiple(previewPageCount, 4) : previewPageCount;
-  const mismatch = pdfPageCount !== expectedPageCount;
+  const mismatch = pdfPageCount !== previewPageCount;
   const missingPages = preview.isShimauma && preview.result.missingPagesForShimauma > 0 ? preview.result.missingPagesForShimauma : 0;
   const canDownload = missingPages === 0 && !mismatch;
-  const targetPageCount = preview.isShimauma ? roundUpToMultiple(Math.max(pdfPageCount, expectedPageCount), 4) : Math.max(pdfPageCount, expectedPageCount);
-  const pagesToAdd = Math.max(0, targetPageCount - pdfPageCount);
 
   return (
     <div className="pdf-preview-backdrop" role="dialog" aria-modal="true" aria-labelledby="pdf-preview-title">
@@ -1947,8 +1907,6 @@ function PdfPreviewDialog({
         <div className="pdf-preview-summary">
           <span>原稿プレビュー: {previewPageCount}ページ</span>
           <span>PDF: {pdfPageCount}ページ</span>
-          {expectedPageCount !== previewPageCount ? <span>出力目標: {expectedPageCount}ページ</span> : null}
-          {preview.result.paddedPages > 0 ? <span>白紙追加: {preview.result.paddedPages}ページ</span> : null}
         </div>
         {mismatch ? (
           <p className="pdf-preview-warning">
@@ -1962,11 +1920,6 @@ function PdfPreviewDialog({
         ) : null}
         <iframe className="pdf-preview-frame" src={preview.url} title="PDFプレビュー" />
         <footer className="pdf-preview-actions">
-          {pagesToAdd > 0 ? (
-            <button type="button" onClick={onPad}>
-              白紙を追加して{targetPageCount}ページにする
-            </button>
-          ) : null}
           <button type="button" onClick={onDownload} disabled={!canDownload}>
             PDFをダウンロード
           </button>
