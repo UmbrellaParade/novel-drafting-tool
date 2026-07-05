@@ -937,8 +937,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <Redo2 size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
-        <ToolButton label="本文" active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
-          <span className="ruby-tool-label">本文</span>
+        <ToolButton label="選択行を通常文に戻す" active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
+          <span className="ruby-tool-label">通常文</span>
         </ToolButton>
         <ToolButton label="見出し1" active={editor?.isActive("heading", { level: 1 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
           <Heading1 size={18} />
@@ -1120,11 +1120,11 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           onChange={(event) => setTextSizePt(Number(event.target.value))}
           aria-label="文字サイズpt"
         />
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedTextSize}>選択</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("all")}>全部</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>見出し</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>本文</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearTextSizes}>解除</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedTextSize}>選択部分</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("all")}>全体</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>見出し全体</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>本文のみ</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearTextSizes}>サイズ解除</button>
         <span className="toolbar-divider" />
         <span className="image-size-chip">行間</span>
         <input
@@ -1139,8 +1139,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           aria-label="選択範囲の行間倍率"
         />
         <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedLineHeight}>選択ロック</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearSelectedLineHeight}>解除</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearAllLineHeights}>全解除</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearSelectedLineHeight}>行間解除</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearAllLineHeights}>全行間解除</button>
       </div>
       <input
         ref={imageInputRef}
