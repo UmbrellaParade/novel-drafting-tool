@@ -3,6 +3,9 @@ import { downloadBlob } from "./storage";
 import { sanitizeFileName, stripHtml } from "./defaultProject";
 
 const mmToTwip = (value: number) => Math.round(value * 56.6929133858);
+const PX_PER_MM = 96 / 25.4;
+const DEFAULT_DOCX_IMAGE_WIDTH_PX = 320;
+const DOCX_QR_IMAGE_WIDTH_PX = 96;
 
 type TocExportEntry = {
   title: string;
@@ -40,6 +43,16 @@ type ZipEntry = {
   data: Uint8Array;
 };
 
+type DocxBlock =
+  | { kind: "paragraph" | "heading"; text: string }
+  | { kind: "pageBreak"; text: "" }
+  | { kind: "image"; src: string; alt: string; widthPx?: number; heightPx?: number }
+  | { kind: "qrCard"; title: string; description: string; src: string; widthPx?: number; heightPx?: number };
+
+type DocxModule = typeof import("docx");
+type DocxParagraph = InstanceType<DocxModule["Paragraph"]>;
+type DocxImageRun = InstanceType<DocxModule["ImageRun"]>;
+
 export async function exportProjectDocx(project: ManuscriptProject): Promise<void> {
   const docx = await import("docx");
   const children: InstanceType<typeof docx.Paragraph>[] = [];
@@ -47,8 +60,10 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
   const uiFont = "Noto Sans JP";
   const lineSpacingTwips = Math.round(project.pageSettings.fontSizePt * 20 * project.pageSettings.lineHeight);
   const paragraphAfterTwips = mmToTwip(project.pageSettings.paragraphSpacingMm);
+  const contentWidthPx = Math.round(Math.max(20, project.pageSettings.pageWidthMm - project.pageSettings.marginLeftMm - project.pageSettings.marginRightMm) * PX_PER_MM);
+  const maxImageHeightPx = Math.round(Math.max(30, project.pageSettings.imageMaxHeightMm) * PX_PER_MM);
 
-  project.chapters.forEach((chapter, chapterIndex) => {
+  for (const [chapterIndex, chapter] of project.chapters.entries()) {
     if (chapterIndex > 0) {
       children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
     }
@@ -66,10 +81,32 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
       })
     );
 
-    parseHtmlBlocks(chapter.content).forEach((block) => {
+    for (const block of parseDocxBlocks(chapter.content)) {
       if (block.kind === "pageBreak") {
         children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
-        return;
+        continue;
+      }
+
+      if (block.kind === "image") {
+        const imageParagraph = await createDocxImageParagraph(docx, block, {
+          maxWidthPx: contentWidthPx,
+          maxHeightPx: maxImageHeightPx
+        });
+        if (imageParagraph) {
+          children.push(imageParagraph);
+        }
+        continue;
+      }
+
+      if (block.kind === "qrCard") {
+        const qrParagraph = await createDocxQrCardParagraph(docx, block, {
+          maxWidthPx: contentWidthPx,
+          maxHeightPx: maxImageHeightPx,
+          font: bodyFont,
+          fontSizePt: project.pageSettings.fontSizePt
+        });
+        children.push(...qrParagraph);
+        continue;
       }
 
       children.push(
@@ -89,8 +126,8 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
           }
         })
       );
-    });
-  });
+    }
+  }
 
   const document = new docx.Document({
     creator: "Umbrella Parade",
@@ -172,6 +209,195 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
   downloadBlob(blob, `${sanitizeFileName(project.title)}_Kindle.docx`);
 }
 
+async function createDocxImageParagraph(
+  docx: DocxModule,
+  block: Extract<DocxBlock, { kind: "image" }>,
+  options: { maxWidthPx: number; maxHeightPx: number }
+): Promise<DocxParagraph | null> {
+  const image = await createDocxImageRun(docx, block.src, {
+    requestedWidthPx: block.widthPx,
+    requestedHeightPx: block.heightPx,
+    maxWidthPx: options.maxWidthPx,
+    maxHeightPx: options.maxHeightPx,
+    alt: block.alt
+  });
+
+  if (!image) {
+    return null;
+  }
+
+  return new docx.Paragraph({
+    alignment: docx.AlignmentType.CENTER,
+    spacing: {
+      before: mmToTwip(2),
+      after: mmToTwip(2)
+    },
+    children: [image]
+  });
+}
+
+async function createDocxQrCardParagraph(
+  docx: DocxModule,
+  block: Extract<DocxBlock, { kind: "qrCard" }>,
+  options: { maxWidthPx: number; maxHeightPx: number; font: string; fontSizePt: number }
+): Promise<DocxParagraph[]> {
+  const paragraphs: DocxParagraph[] = [];
+
+  if (block.title) {
+    paragraphs.push(
+      new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: mmToTwip(1) },
+        children: [
+          new docx.TextRun({
+            text: block.title,
+            bold: true,
+            font: options.font,
+            size: Math.round(options.fontSizePt * 2)
+          })
+        ]
+      })
+    );
+  }
+
+  if (block.src) {
+    const image = await createDocxImageRun(docx, block.src, {
+      requestedWidthPx: Math.min(block.widthPx ?? DOCX_QR_IMAGE_WIDTH_PX, options.maxWidthPx),
+      requestedHeightPx: block.heightPx,
+      maxWidthPx: options.maxWidthPx,
+      maxHeightPx: options.maxHeightPx,
+      alt: block.title
+    });
+
+    if (image) {
+      paragraphs.push(
+        new docx.Paragraph({
+          alignment: docx.AlignmentType.CENTER,
+          spacing: { after: mmToTwip(1) },
+          children: [image]
+        })
+      );
+    }
+  }
+
+  if (block.description) {
+    paragraphs.push(
+      new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        spacing: { after: mmToTwip(2) },
+        children: [
+          new docx.TextRun({
+            text: block.description,
+            font: options.font,
+            size: Math.round(options.fontSizePt * 1.8)
+          })
+        ]
+      })
+    );
+  }
+
+  if (paragraphs.length === 0) {
+    paragraphs.push(
+      new docx.Paragraph({
+        children: [
+          new docx.TextRun({
+            text: block.title || "QR",
+            font: options.font,
+            size: Math.round(options.fontSizePt * 2)
+          })
+        ]
+      })
+    );
+  }
+
+  return paragraphs;
+}
+
+async function createDocxImageRun(
+  docx: DocxModule,
+  src: string,
+  options: {
+    requestedWidthPx?: number;
+    requestedHeightPx?: number;
+    maxWidthPx: number;
+    maxHeightPx: number;
+    alt: string;
+  }
+): Promise<DocxImageRun | null> {
+  try {
+    const { bytes, mimeType } = await loadImageBytes(src);
+    const imageType = docxImageTypeForMimeType(mimeType);
+    if (!imageType) {
+      return null;
+    }
+
+    const intrinsic = await readImageIntrinsicSize(src);
+    const fallbackRatio = 0.75;
+    const ratio = intrinsic && intrinsic.width > 0 && intrinsic.height > 0 ? intrinsic.height / intrinsic.width : fallbackRatio;
+    let width = Math.round(options.requestedWidthPx ?? intrinsic?.width ?? DEFAULT_DOCX_IMAGE_WIDTH_PX);
+    let height = Math.round(options.requestedHeightPx ?? width * ratio);
+    width = Math.max(24, Math.min(options.maxWidthPx, width));
+    height = Math.max(24, Math.min(options.maxHeightPx, height));
+
+    if (height >= options.maxHeightPx && ratio > 0) {
+      width = Math.max(24, Math.min(width, Math.round(height / ratio)));
+    }
+
+    return new docx.ImageRun({
+      type: imageType,
+      data: bytes,
+      transformation: {
+        width,
+        height
+      },
+      altText: {
+        name: options.alt || "image",
+        title: options.alt,
+        description: options.alt
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+function docxImageTypeForMimeType(mimeType: string): "jpg" | "png" | "gif" | "bmp" | null {
+  const normalized = normalizeImageMimeType(mimeType);
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) {
+    return "jpg";
+  }
+  if (normalized.includes("png")) {
+    return "png";
+  }
+  if (normalized.includes("gif")) {
+    return "gif";
+  }
+  if (normalized.includes("bmp")) {
+    return "bmp";
+  }
+  return null;
+}
+
+function readImageIntrinsicSize(src: string): Promise<{ width: number; height: number } | null> {
+  if (typeof Image === "undefined") {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    const timeout = window.setTimeout(() => resolve(null), 2500);
+    image.onload = () => {
+      window.clearTimeout(timeout);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      window.clearTimeout(timeout);
+      resolve(null);
+    };
+    image.src = src;
+  });
+}
+
 export async function exportProjectEpub(project: ManuscriptProject): Promise<void> {
   const assetState: EpubAssetState = { nextIndex: 1, assets: [], sourceMap: new Map() };
   const chapters: EpubChapter[] = [];
@@ -235,6 +461,9 @@ async function buildEpubChapter(title: string, html: string, chapterNumber: numb
 
   template.content.querySelectorAll<HTMLElement>("figure[data-type='qr-card']").forEach((figure) => {
     figure.removeAttribute("data-src");
+    ["src", "instanceid", "url", "template", "label", "description"].forEach((attribute) => {
+      figure.removeAttribute(attribute);
+    });
   });
 
   const navItems: EpubNavItem[] = [];
@@ -755,14 +984,18 @@ function hasPageBreakBefore(element: HTMLElement): boolean {
   return element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before");
 }
 
-function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | "pageBreak"; text: string }> {
+function parseDocxBlocks(html: string): DocxBlock[] {
   const template = document.createElement("template");
   template.innerHTML = html;
-  const blocks: Array<{ kind: "paragraph" | "heading" | "pageBreak"; text: string }> = [];
+  const blocks: DocxBlock[] = [];
 
-  template.content.querySelectorAll("section[data-type='table-of-contents'],p,h1,h2,h3,li,blockquote,div[data-type='page-break'],figure[data-type='qr-card']").forEach((node) => {
+  template.content.querySelectorAll("section[data-type='table-of-contents'],p,h1,h2,h3,li,blockquote,div[data-type='page-break'],figure[data-type='qr-card'],img").forEach((node) => {
     const element = node as HTMLElement;
     if (element.closest("section[data-type='table-of-contents']") && !element.matches("section[data-type='table-of-contents']")) {
+      return;
+    }
+
+    if (element.matches("img") && element.closest("figure[data-type='qr-card']")) {
       return;
     }
 
@@ -784,10 +1017,26 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
       return;
     }
 
+    if (element.matches("img")) {
+      const image = readDocxImageBlock(element as HTMLImageElement);
+      if (image) {
+        blocks.push(image);
+      }
+      return;
+    }
+
     if (element.matches("figure[data-type='qr-card']")) {
       const title = element.dataset.title ?? element.querySelector(".qr-card-title")?.textContent ?? "QRリンク";
       const description = element.dataset.description ?? element.querySelector(".qr-card-description")?.textContent ?? "";
-      blocks.push({ kind: "paragraph", text: description ? `${title}: ${description}` : title });
+      const image = element.querySelector<HTMLImageElement>("img");
+      blocks.push({
+        kind: "qrCard",
+        title,
+        description,
+        src: element.dataset.src ?? image?.getAttribute("src") ?? "",
+        widthPx: readElementDimensionPx(element, "width"),
+        heightPx: readElementDimensionPx(element, "height")
+      });
       return;
     }
 
@@ -807,4 +1056,53 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
   }
 
   return blocks;
+}
+
+function readDocxImageBlock(image: HTMLImageElement): Extract<DocxBlock, { kind: "image" }> | null {
+  const src = image.getAttribute("src") ?? "";
+  if (!src) {
+    return null;
+  }
+
+  return {
+    kind: "image",
+    src,
+    alt: image.getAttribute("alt") ?? image.getAttribute("title") ?? "",
+    widthPx: readElementDimensionPx(image, "width"),
+    heightPx: readElementDimensionPx(image, "height")
+  };
+}
+
+function readElementDimensionPx(element: HTMLElement, dimension: "width" | "height"): number | undefined {
+  const datasetValue = dimension === "width" ? element.dataset.width : element.dataset.height;
+  const attributeValue = element.getAttribute(dimension);
+  const styleValue = element.style[dimension];
+
+  return parseCssDimensionPx(datasetValue) ?? parseCssDimensionPx(attributeValue) ?? parseCssDimensionPx(styleValue);
+}
+
+function parseCssDimensionPx(value: string | null | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  const numeric = Number.parseFloat(trimmed);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return undefined;
+  }
+
+  if (trimmed.endsWith("mm")) {
+    return Math.round(numeric * PX_PER_MM);
+  }
+
+  if (trimmed.endsWith("cm")) {
+    return Math.round(numeric * PX_PER_MM * 10);
+  }
+
+  if (trimmed.endsWith("pt")) {
+    return Math.round(numeric * (96 / 72));
+  }
+
+  return Math.round(numeric);
 }
