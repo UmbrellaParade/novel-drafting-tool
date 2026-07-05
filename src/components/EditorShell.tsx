@@ -86,14 +86,6 @@ type QrDraft = {
   template: QrCardTemplateId;
 };
 
-type PdfPreviewState = {
-  url: string;
-  project: ManuscriptProject;
-  result: RasterPdfBuildResult;
-  previewPageCount: number;
-  isShimauma: boolean;
-};
-
 type PdfExportSnapshot = {
   project: ManuscriptProject;
   chapter: Chapter;
@@ -719,7 +711,6 @@ export function EditorShell() {
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
   const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
-  const [pdfPreview, setPdfPreview] = useState<PdfPreviewState | null>(null);
   const [fastEditing, setFastEditing] = useState(false);
   const bundledDriveSettings = hasBundledGoogleDriveSettings();
   const pageStageRef = useRef<HTMLDivElement | null>(null);
@@ -736,7 +727,6 @@ export function EditorShell() {
   const pendingChapterContentRef = useRef<string | null>(null);
   const contentCommitTimerRef = useRef<number | null>(null);
   const fastEditingTimerRef = useRef<number | null>(null);
-  const pdfPreviewUrlRef = useRef<string | null>(null);
   // ページ設定（フォント・余白等）変更のdebounce用
   const pageSettingTimerRef = useRef<number | null>(null);
   const pendingPageSettingsRef = useRef<Partial<PageSettings>>({});
@@ -785,10 +775,6 @@ export function EditorShell() {
       }
       if (scrollLockFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollLockFrameRef.current);
-      }
-      if (pdfPreviewUrlRef.current) {
-        URL.revokeObjectURL(pdfPreviewUrlRef.current);
-        pdfPreviewUrlRef.current = null;
       }
     };
   }, []);
@@ -1657,35 +1643,8 @@ export function EditorShell() {
     }
   };
 
-  const setPdfPreviewState = (nextPreview: PdfPreviewState | null) => {
-    if (pdfPreviewUrlRef.current && pdfPreviewUrlRef.current !== nextPreview?.url) {
-      URL.revokeObjectURL(pdfPreviewUrlRef.current);
-    }
-    pdfPreviewUrlRef.current = nextPreview?.url ?? null;
-    setPdfPreview(nextPreview);
-  };
-
-  const openPdfPreview = (latestProject: ManuscriptProject, result: RasterPdfBuildResult, previewPageCount = pageFrameCount) => {
-    const blob = new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" });
-    setPdfPreviewState({
-      url: URL.createObjectURL(blob),
-      project: latestProject,
-      result,
-      previewPageCount,
-      isShimauma: isShimaumaPresetId(latestProject.pageSettings.preset)
-    });
-  };
-
-  const closePdfPreview = () => {
-    setPdfPreviewState(null);
-  };
-
-  const downloadPdfPreview = () => {
-    if (!pdfPreview) {
-      return;
-    }
-
-    downloadBlob(new Blob([uint8ArrayToArrayBuffer(pdfPreview.result.bytes)], { type: "application/pdf" }), pdfPreview.result.fileName);
+  const downloadPdfResult = (result: RasterPdfBuildResult) => {
+    downloadBlob(new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" }), result.fileName);
     setStatusText("PDFをダウンロードしました");
   };
 
@@ -1743,8 +1702,7 @@ export function EditorShell() {
         }),
         count: exportPageCount
       });
-      openPdfPreview(latestProject, result, exportPageCount);
-      setStatusText("PDFプレビューを確認してください");
+      downloadPdfResult(result);
     } catch (error) {
       setStatusText("PDF作成に失敗");
       window.console.error(error);
@@ -2153,69 +2111,7 @@ export function EditorShell() {
           <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} collapsed={collapsedPanels.check} onToggle={() => toggleSidebarPanel("check")} />
         </aside>
       </div>
-      {pdfPreview ? (
-        <PdfPreviewDialog
-          preview={pdfPreview}
-          onClose={closePdfPreview}
-          onDownload={downloadPdfPreview}
-        />
-      ) : null}
     </main>
-  );
-}
-
-function PdfPreviewDialog({
-  preview,
-  onClose,
-  onDownload
-}: {
-  preview: PdfPreviewState;
-  onClose: () => void;
-  onDownload: () => void;
-}) {
-  const pdfPageCount = preview.result.pageCount;
-  const previewPageCount = preview.previewPageCount;
-  const mismatch = pdfPageCount !== previewPageCount;
-  const missingPages = preview.isShimauma && preview.result.missingPagesForShimauma > 0 ? preview.result.missingPagesForShimauma : 0;
-  const canDownload = missingPages === 0 && !mismatch;
-  const page = preview.project.pageSettings;
-
-  return (
-    <div className="pdf-preview-backdrop" role="dialog" aria-modal="true" aria-labelledby="pdf-preview-title">
-      <section className="pdf-preview-dialog">
-        <header className="pdf-preview-header">
-          <div>
-            <h2 id="pdf-preview-title">本用PDFプレビュー</h2>
-            <p>ブラウザの印刷情報を入れないPDFです。ページ数と見た目を確認してください。</p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="PDFプレビューを閉じる">
-            <XCircle size={18} />
-          </button>
-        </header>
-        <div className="pdf-preview-summary">
-          <span>原稿プレビュー: {previewPageCount}ページ</span>
-          <span>PDF: {pdfPageCount}ページ</span>
-          <span>サイズ: {page.pageWidthMm}×{page.pageHeightMm}mm</span>
-        </div>
-        {mismatch ? (
-          <p className="pdf-preview-warning">
-            原稿画面とPDFのページ数が違います。出稿事故を防ぐため、文字・画像・行間を調整してページ数が一致してからダウンロードしてください。
-          </p>
-        ) : null}
-        {missingPages > 0 ? (
-          <p className="pdf-preview-warning">
-            しまうま出稿では4ページ単位が必要です。現在のPDFは{pdfPageCount}ページなので、あと{missingPages}ページ必要です。
-          </p>
-        ) : null}
-        <iframe className="pdf-preview-frame" src={preview.url} title="PDFプレビュー" />
-        <footer className="pdf-preview-actions">
-          <button type="button" onClick={onDownload} disabled={!canDownload}>
-            PDFをダウンロード
-          </button>
-          <button type="button" onClick={onClose}>閉じる</button>
-        </footer>
-      </section>
-    </div>
   );
 }
 
