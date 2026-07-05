@@ -40,6 +40,8 @@ export type QrLink = {
 export type DriveState = {
   fileId?: string;
   lastSavedAt?: string;
+  folderId?: string;
+  folderName?: string;
 };
 
 export type TocSettings = {

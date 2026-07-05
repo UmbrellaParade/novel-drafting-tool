@@ -11,10 +11,16 @@ declare global {
 const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_SETTINGS_STORAGE_KEY = "umbrella-parade:google-drive-settings";
+const DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
 
 export type GoogleDriveSettings = {
   clientId: string;
   apiKey: string;
+};
+
+export type DriveFolder = {
+  id: string;
+  name: string;
 };
 
 type TokenResponse = {
@@ -30,13 +36,13 @@ type GoogleApi = {
   load: (library: string, callback: () => void) => void;
   client: {
     init: (config: { apiKey?: string; discoveryDocs: string[] }) => Promise<void>;
-    request: (request: {
+    request: <T = { id: string }>(request: {
       path: string;
-      method: "POST" | "PATCH";
-      params: { uploadType: "multipart" };
-      headers: Record<string, string>;
-      body: string;
-    }) => Promise<{ result: { id: string } }>;
+      method?: "GET" | "POST" | "PATCH";
+      params?: Record<string, string | number | boolean | undefined>;
+      headers?: Record<string, string>;
+      body?: string;
+    }) => Promise<{ result: T }>;
   };
 };
 
@@ -53,7 +59,9 @@ type GoogleIdentity = {
 };
 
 type DriveClient = {
-  saveProject: (project: ManuscriptProject) => Promise<{ fileId: string; savedAt: string }>;
+  saveProject: (project: ManuscriptProject, folderId?: string) => Promise<{ fileId: string; savedAt: string; folderId?: string }>;
+  listFolders: () => Promise<DriveFolder[]>;
+  createFolder: (name: string) => Promise<DriveFolder>;
 };
 
 let tokenClient: TokenClient | null;
@@ -135,7 +143,9 @@ export async function connectGoogleDrive(): Promise<DriveClient> {
   await requestAccessToken();
 
   return {
-    saveProject
+    saveProject,
+    listFolders,
+    createFolder
   };
 }
 
@@ -182,15 +192,22 @@ function requestAccessToken(): Promise<void> {
   });
 }
 
-async function saveProject(project: ManuscriptProject): Promise<{ fileId: string; savedAt: string }> {
+async function saveProject(project: ManuscriptProject, folderId = project.drive?.folderId): Promise<{ fileId: string; savedAt: string; folderId?: string }> {
   if (!window.gapi) {
     throw new Error("Google APIを読み込めませんでした。");
   }
 
-  const metadata = {
+  const targetFolderId = folderId?.trim() ?? "";
+  const canUpdateExistingFile = (project.drive?.folderId ?? "") === targetFolderId;
+  const existingFileId = canUpdateExistingFile ? project.drive?.fileId : undefined;
+  const metadata: { name: string; mimeType: string; parents?: string[] } = {
     name: `${sanitizeFileName(project.title)}.json`,
     mimeType: "application/json"
   };
+  if (targetFolderId && !existingFileId) {
+    metadata.parents = [targetFolderId];
+  }
+
   const boundary = `drafting-tool-${Date.now()}`;
   const body = [
     `--${boundary}`,
@@ -204,8 +221,7 @@ async function saveProject(project: ManuscriptProject): Promise<{ fileId: string
     `--${boundary}--`
   ].join("\r\n");
 
-  const existingFileId = project.drive?.fileId;
-  const response = await window.gapi.client.request({
+  const response = await window.gapi.client.request<{ id: string }>({
     path: existingFileId ? `/upload/drive/v3/files/${existingFileId}` : "/upload/drive/v3/files",
     method: existingFileId ? "PATCH" : "POST",
     params: { uploadType: "multipart" },
@@ -217,7 +233,56 @@ async function saveProject(project: ManuscriptProject): Promise<{ fileId: string
 
   return {
     fileId: response.result.id,
-    savedAt: new Date().toISOString()
+    savedAt: new Date().toISOString(),
+    ...(targetFolderId ? { folderId: targetFolderId } : {})
+  };
+}
+
+async function listFolders(): Promise<DriveFolder[]> {
+  if (!window.gapi) {
+    throw new Error("Google APIを読み込めませんでした。");
+  }
+
+  const response = await window.gapi.client.request<{ files?: DriveFolder[] }>({
+    path: "/drive/v3/files",
+    method: "GET",
+    params: {
+      q: `mimeType='${DRIVE_FOLDER_MIME_TYPE}' and trashed=false`,
+      fields: "files(id,name)",
+      orderBy: "name",
+      pageSize: 100
+    }
+  });
+
+  return (response.result.files ?? []).filter((folder) => folder.id && folder.name);
+}
+
+async function createFolder(name: string): Promise<DriveFolder> {
+  if (!window.gapi) {
+    throw new Error("Google APIを読み込めませんでした。");
+  }
+
+  const folderName = name.trim();
+  if (!folderName) {
+    throw new Error("フォルダ名を入力してください。");
+  }
+
+  const response = await window.gapi.client.request<DriveFolder>({
+    path: "/drive/v3/files",
+    method: "POST",
+    params: { fields: "id,name" },
+    headers: {
+      "Content-Type": "application/json; charset=UTF-8"
+    },
+    body: JSON.stringify({
+      name: folderName,
+      mimeType: DRIVE_FOLDER_MIME_TYPE
+    })
+  });
+
+  return {
+    id: response.result.id,
+    name: response.result.name || folderName
   };
 }
 

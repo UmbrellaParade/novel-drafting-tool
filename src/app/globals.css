@@ -516,6 +516,58 @@ h1 {
   line-height: 1.6;
 }
 
+.drive-folder-box {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid #e1d7ca;
+  border-radius: 8px;
+  background: #fffefa;
+}
+
+.drive-folder-current {
+  display: grid;
+  gap: 3px;
+}
+
+.drive-folder-current span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.drive-folder-current strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.drive-folder-select {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 6px 8px;
+  border: 1px solid #d8cdbc;
+  border-radius: 7px;
+  background: #fffdf8;
+  color: var(--ink);
+  font-size: 12px;
+  outline: none;
+}
+
+.drive-folder-select:focus {
+  border-color: var(--rain);
+  box-shadow: 0 0 0 3px rgba(58, 130, 120, 0.14);
+}
+
+.drive-folder-box .drive-actions,
+.drive-folder-box .drive-note {
+  margin-bottom: 0;
+}
+
 .drive-advanced-settings {
   display: grid;
   gap: 8px;

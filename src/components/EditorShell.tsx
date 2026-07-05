@@ -35,6 +35,7 @@ import {
   loadGoogleDriveSettings,
   resetGoogleDriveClient,
   saveGoogleDriveSettings,
+  type DriveFolder,
   type GoogleDriveSettings
 } from "@/lib/googleDrive";
 import { exportProjectDocx, exportProjectEpub, exportProjectPdf } from "@/lib/exporters";
@@ -403,6 +404,7 @@ export function EditorShell() {
   const [statusText, setStatusText] = useState("起動中");
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
+  const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [driveSettingsDraft, setDriveSettingsDraft] = useState<GoogleDriveSettings>(EMPTY_DRIVE_SETTINGS);
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
@@ -1124,6 +1126,73 @@ export function EditorShell() {
     setStatusText("Google Drive設定をクリアしました");
   };
 
+  const ensureDriveClient = async () => {
+    if (!isDriveConfigured()) {
+      throw new Error(googleDriveSetupMessage());
+    }
+
+    const client = driveClient ?? (await connectGoogleDrive());
+    setDriveClient(client);
+    return client;
+  };
+
+  const updateDriveFolder = (folder: DriveFolder | null) => {
+    updateProject((previous) => {
+      const nextDrive = { ...(previous.drive ?? {}) };
+      if (folder) {
+        nextDrive.folderId = folder.id;
+        nextDrive.folderName = folder.name;
+      } else {
+        delete nextDrive.folderId;
+        delete nextDrive.folderName;
+      }
+
+      return {
+        ...previous,
+        drive: nextDrive
+      };
+    });
+    setStatusText(folder ? `Drive保存先: ${folder.name}` : "Drive保存先: マイドライブ直下");
+  };
+
+  const loadDriveFolders = async () => {
+    try {
+      const client = await ensureDriveClient();
+      const folders = await client.listFolders();
+      setDriveFolders(folders);
+      setStatusText("Driveフォルダ一覧を取得しました");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Driveフォルダ一覧を取得できませんでした。");
+    }
+  };
+
+  const selectDriveFolder = (folderId: string) => {
+    if (!folderId) {
+      updateDriveFolder(null);
+      return;
+    }
+
+    const folder = driveFolders.find((candidate) => candidate.id === folderId);
+    updateDriveFolder(folder ?? { id: folderId, name: "選択フォルダ" });
+  };
+
+  const createDriveFolder = async () => {
+    const folderName = window.prompt("Google Driveに作る保存先フォルダ名", `${project?.title || "Umbrella Parade"} 原稿`);
+    if (!folderName?.trim()) {
+      return;
+    }
+
+    try {
+      const client = await ensureDriveClient();
+      const folder = await client.createFolder(folderName);
+      setDriveFolders((previous) => [folder, ...previous.filter((candidate) => candidate.id !== folder.id)]);
+      updateDriveFolder(folder);
+      setStatusText(`Drive保存先を作成: ${folder.name}`);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Driveフォルダを作成できませんでした。");
+    }
+  };
+
   const exportJson = () => {
     const latestProject = projectWithLatestContent(project);
     exportProjectJson(latestProject);
@@ -1171,18 +1240,21 @@ export function EditorShell() {
       }
 
       const latestProject = projectWithLatestContent(project);
-      const client = driveClient ?? (await connectGoogleDrive());
-      setDriveClient(client);
-      const result = await client.saveProject(latestProject);
+      const client = await ensureDriveClient();
+      const result = await client.saveProject(latestProject, latestProject.drive?.folderId);
+      const savedFolderId = result.folderId ?? latestProject.drive?.folderId ?? "";
+      const savedFolderName = savedFolderId ? latestProject.drive?.folderName : undefined;
       flushPendingChapterContent();
       updateProject((previous) => ({
         ...previous,
         drive: {
           fileId: result.fileId,
-          lastSavedAt: result.savedAt
+          lastSavedAt: result.savedAt,
+          ...(savedFolderId ? { folderId: savedFolderId } : {}),
+          ...(savedFolderName ? { folderName: savedFolderName } : {})
         }
       }));
-      setStatusText("Google Drive保存");
+      setStatusText(savedFolderName ? `Google Drive保存: ${savedFolderName}` : "Google Drive保存");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Google Drive保存に失敗しました。");
     }
@@ -1585,9 +1657,15 @@ export function EditorShell() {
             settings={driveSettingsDraft}
             isConfigured={isDriveConfigured()}
             hasBundledSettings={bundledDriveSettings}
+            currentFolderId={project.drive?.folderId ?? ""}
+            currentFolderName={project.drive?.folderName ?? ""}
+            folders={driveFolders}
             onChange={setDriveSettingsDraft}
             onSave={saveDriveSettingsFromDraft}
             onClear={clearDriveSettingsFromDraft}
+            onLoadFolders={() => void loadDriveFolders()}
+            onSelectFolder={selectDriveFolder}
+            onCreateFolder={() => void createDriveFolder()}
           />
           <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} />
         </aside>
@@ -1865,24 +1943,66 @@ function DriveSettingsPanel({
   settings,
   isConfigured,
   hasBundledSettings,
+  currentFolderId,
+  currentFolderName,
+  folders,
   onChange,
   onSave,
-  onClear
+  onClear,
+  onLoadFolders,
+  onSelectFolder,
+  onCreateFolder
 }: {
   settings: GoogleDriveSettings;
   isConfigured: boolean;
   hasBundledSettings: boolean;
+  currentFolderId: string;
+  currentFolderName: string;
+  folders: DriveFolder[];
   onChange: (settings: GoogleDriveSettings) => void;
   onSave: () => void;
   onClear: () => void;
+  onLoadFolders: () => void;
+  onSelectFolder: (folderId: string) => void;
+  onCreateFolder: () => void;
 }) {
   const statusLabel = hasBundledSettings ? "アプリ内蔵" : isConfigured ? "開発者設定済み" : "未設定";
+  const currentFolderLabel = currentFolderName || (currentFolderId ? "現在の保存先" : "マイドライブ直下");
+  const folderOptions =
+    currentFolderId && !folders.some((folder) => folder.id === currentFolderId)
+      ? [{ id: currentFolderId, name: currentFolderLabel }, ...folders]
+      : folders;
 
   return (
     <section className="tool-panel drive-settings-panel">
       <div className="panel-title-row">
         <h2>Google Drive設定</h2>
         <span className={`mini-badge ${isConfigured ? "is-ok" : ""}`}>{statusLabel}</span>
+      </div>
+      <div className="drive-folder-box">
+        <div className="drive-folder-current">
+          <span>保存先</span>
+          <strong>{currentFolderLabel}</strong>
+        </div>
+        <select className="drive-folder-select" value={currentFolderId} disabled={!isConfigured} onChange={(event) => onSelectFolder(event.target.value)}>
+          <option value="">マイドライブ直下</option>
+          {folderOptions.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.name}
+            </option>
+          ))}
+        </select>
+        <div className="drive-actions">
+          <button type="button" disabled={!isConfigured} onClick={onLoadFolders}>
+            <FolderOpen size={16} />
+            フォルダ取得
+          </button>
+          <button type="button" disabled={!isConfigured} onClick={onCreateFolder}>
+            <Plus size={16} />
+            新規フォルダ
+          </button>
+        </div>
+        <p className="drive-note">選んだ保存先はこの原稿に保存され、次回のDrive保存にも引き継がれます。</p>
       </div>
       {hasBundledSettings ? (
         <>

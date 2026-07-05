@@ -1,4 +1,4 @@
-import type { ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId } from "./types";
+import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId } from "./types";
 
 export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
   "noto-serif-jp": {
@@ -162,11 +162,34 @@ export function normalizeProject(project: ManuscriptProject): ManuscriptProject 
     ...project,
     pageSettings: normalizePageSettings(project.pageSettings),
     tocSettings: normalizeTocSettings(project.tocSettings),
+    drive: normalizeDriveState(project.drive),
     qrLinks: (project.qrLinks ?? []).map((link) => ({
       ...link,
       template: QR_CARD_TEMPLATE_IDS.has(link.template ?? "umbrella") ? link.template ?? "umbrella" : "umbrella"
     }))
   };
+}
+
+function normalizeDriveState(state?: Partial<DriveState>): DriveState | undefined {
+  if (!state) {
+    return undefined;
+  }
+
+  const drive: DriveState = {};
+  if (typeof state.fileId === "string" && state.fileId.trim()) {
+    drive.fileId = state.fileId.trim();
+  }
+  if (typeof state.lastSavedAt === "string" && state.lastSavedAt.trim()) {
+    drive.lastSavedAt = state.lastSavedAt.trim();
+  }
+  if (typeof state.folderId === "string" && state.folderId.trim()) {
+    drive.folderId = state.folderId.trim();
+  }
+  if (typeof state.folderName === "string" && state.folderName.trim()) {
+    drive.folderName = state.folderName.trim();
+  }
+
+  return Object.keys(drive).length ? drive : undefined;
 }
 
 export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettings {

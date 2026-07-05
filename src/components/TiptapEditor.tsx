@@ -620,6 +620,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         .run()
     );
     if (applied) {
+      syncRenderedImageWidth(editor, target, nextWidth);
+      window.requestAnimationFrame(() => syncRenderedImageWidth(editor, target, nextWidth));
       setToolbarState((previous) => (previous.hasImageSelection ? { ...previous, selectedImageWidth: nextWidth } : previous));
     }
   };
@@ -1745,6 +1747,34 @@ function syncRenderedImage(editor: Editor, target: ImageReplacementTarget, next:
   image.setAttribute("src", next.src);
   image.setAttribute("alt", next.alt);
   image.setAttribute("title", next.title);
+}
+
+function syncRenderedImageWidth(editor: Editor, target: ImageReplacementTarget | null, width: number): void {
+  const image = target ? selectedRenderedImageByTarget(editor, target) : selectedRenderedImage(editor);
+  if (!image) {
+    return;
+  }
+
+  const nextWidth = `${Math.round(width)}px`;
+  image.style.width = nextWidth;
+  image.style.height = "auto";
+  image.setAttribute("width", String(Math.round(width)));
+  image.removeAttribute("height");
+
+  const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
+  if (wrapper) {
+    wrapper.style.width = nextWidth;
+  }
+}
+
+function selectedRenderedImageByTarget(editor: Editor, target: ImageReplacementTarget): HTMLImageElement | null {
+  const images = renderedImages(editor);
+  return (
+    images.find((candidate) => candidate.getAttribute("src") === target.src && candidate.getAttribute("title") === target.title) ??
+    images.find((candidate) => candidate.getAttribute("src") === target.src) ??
+    images.find((candidate) => candidate.closest(".ProseMirror-selectednode")) ??
+    null
+  );
 }
 
 function currentBreakableNodeName(editor: Editor): string {
