@@ -23,7 +23,6 @@ import {
   Scan,
   ScissorsLineDashed,
   Trash2,
-  Type,
   Undo2,
   X,
 } from "lucide-react";
@@ -659,7 +658,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <Heading1 size={18} />
         </ToolButton>
         <ToolButton label="ルビ" active={rubyPanelOpen} disabled={disabled} onClick={openRubyPanel}>
-          <Type size={18} />
+          <span className="ruby-tool-label">ルビ</span>
         </ToolButton>
         <span className="toolbar-divider" />
         <ToolButton label="左揃え" active={editor?.isActive({ textAlign: "left" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("left").run()}>
@@ -980,8 +979,13 @@ function currentPageFrame(editor: Editor, x: number): { contentBottom: number } 
     return null;
   }
 
-  const firstLeft = firstFrame.getBoundingClientRect().left;
-  const pageIndex = Math.max(0, Math.min(frames.length - 1, Math.floor((x - firstLeft + 2) / pagePitch)));
+  const firstFrameRect = firstFrame.getBoundingClientRect();
+  const visualPagePitch = frames[1] ? frames[1].getBoundingClientRect().left - firstFrameRect.left : firstFrameRect.width;
+  if (visualPagePitch <= 0) {
+    return null;
+  }
+
+  const pageIndex = Math.max(0, Math.min(frames.length - 1, Math.floor((x - firstFrameRect.left + 2) / visualPagePitch)));
   const frame = frames[pageIndex];
   const guide = frame.querySelector<HTMLElement>(".page-safe-guide");
   if (guide) {

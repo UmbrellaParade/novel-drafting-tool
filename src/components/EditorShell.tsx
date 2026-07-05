@@ -295,10 +295,12 @@ export function EditorShell() {
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
-  const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0 });
+  const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
+  const [visiblePageIndex, setVisiblePageIndex] = useState(0);
   const [printDomActive, setPrintDomActive] = useState(false);
   const [fastEditing, setFastEditing] = useState(false);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
+  const visiblePageIndexRef = useRef(0);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pendingChapterContentRef = useRef<string | null>(null);
@@ -422,10 +424,13 @@ export function EditorShell() {
   }, [activeChapter, layoutChapterContent, project]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
   const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
+  const clampedVisiblePageIndex = Math.max(0, Math.min(visiblePageIndex, pageFrameCount - 1));
   const pageViewportStyle = {
     "--page-scale": pageFit.scale,
+    "--visible-page-index": clampedVisiblePageIndex,
+    "--visible-page-offset": `calc(-${clampedVisiblePageIndex} * (var(--page-width) + var(--page-gap)))`,
     width: pageFit.width ? `${pageFit.width}px` : undefined,
-    height: pageFit.height ? `${pageFit.height}px` : undefined
+    minHeight: pageFit.height ? `${pageFit.height}px` : undefined
   } as React.CSSProperties;
 
   const updateProject = useCallback((updater: (previous: ManuscriptProject) => ManuscriptProject) => {
@@ -525,25 +530,32 @@ export function EditorShell() {
     [updateProject]
   );
 
-  const handlePageStageWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
-    if (event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
-      return;
-    }
+  const handlePageStageScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      event.currentTarget.style.setProperty("--page-scroll-top", `${event.currentTarget.scrollTop}px`);
+      const pageStep = pageFit.pageStep;
+      if (pageStep <= 0) {
+        return;
+      }
 
-    const stage = event.currentTarget;
-    const maxScrollLeft = stage.scrollWidth - stage.clientWidth;
-    if (maxScrollLeft <= 0) {
-      return;
-    }
+      const nextPageIndex = Math.max(0, Math.min(pageFrameCount - 1, Math.round(event.currentTarget.scrollTop / pageStep)));
+      if (nextPageIndex === visiblePageIndexRef.current) {
+        return;
+      }
 
-    const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, stage.scrollLeft + event.deltaY));
-    if (nextScrollLeft === stage.scrollLeft) {
-      return;
-    }
+      visiblePageIndexRef.current = nextPageIndex;
+      setVisiblePageIndex(nextPageIndex);
+    },
+    [pageFit.pageStep, pageFrameCount]
+  );
 
-    event.preventDefault();
-    stage.scrollLeft = nextScrollLeft;
-  }, []);
+  useEffect(() => {
+    const nextPageIndex = Math.max(0, Math.min(visiblePageIndexRef.current, pageFrameCount - 1));
+    if (nextPageIndex !== visiblePageIndexRef.current) {
+      visiblePageIndexRef.current = nextPageIndex;
+      setVisiblePageIndex(nextPageIndex);
+    }
+  }, [pageFrameCount]);
 
   useEffect(() => {
     if (!layoutSignature) {
@@ -615,6 +627,7 @@ export function EditorShell() {
         frameHandle = null;
         const documentElement = stage.querySelector<HTMLElement>(".paged-document");
         const frame = stage.querySelector<HTMLElement>(".page-frame");
+        const secondFrame = stage.querySelectorAll<HTMLElement>(".page-frame")[1];
         if (!documentElement || !frame) {
           return;
         }
@@ -622,21 +635,26 @@ export function EditorShell() {
         const stageRect = stage.getBoundingClientRect();
         const pageWidth = frame.offsetWidth;
         const pageHeight = frame.offsetHeight;
-        const trackWidth = documentElement.offsetWidth;
-        if (pageWidth <= 0 || pageHeight <= 0 || trackWidth <= 0) {
+        const pageGap = secondFrame ? Math.max(0, secondFrame.offsetLeft - frame.offsetLeft - pageWidth) : 0;
+        if (pageWidth <= 0 || pageHeight <= 0) {
           return;
         }
 
         const availableWidth = Math.max(160, stageRect.width - 20);
         const availableHeight = Math.max(160, stageRect.height - 20);
         const scale = Math.max(0.32, Math.min(1, availableWidth / pageWidth, availableHeight / pageHeight));
+        const scaledPageHeight = pageHeight * scale;
+        const scaledPageGap = pageGap * scale;
         const nextFit = {
           scale: Number(scale.toFixed(4)),
-          width: Math.ceil(trackWidth * scale),
-          height: Math.ceil(pageHeight * scale)
+          width: Math.ceil(pageWidth * scale),
+          height: Math.ceil(pageFrameCount * scaledPageHeight + Math.max(0, pageFrameCount - 1) * scaledPageGap),
+          pageStep: Math.max(1, scaledPageHeight + scaledPageGap)
         };
         setPageFit((previous) =>
-          previous.scale === nextFit.scale && previous.width === nextFit.width && previous.height === nextFit.height ? previous : nextFit
+          previous.scale === nextFit.scale && previous.width === nextFit.width && previous.height === nextFit.height && previous.pageStep === nextFit.pageStep
+            ? previous
+            : nextFit
         );
       });
     };
@@ -696,9 +714,15 @@ export function EditorShell() {
   const jumpToHeading = (index: number) => {
     setMobileTab("draft");
     window.requestAnimationFrame(() => {
-      const headings = pageStageRef.current?.querySelectorAll<HTMLElement>(".manuscript-prose h1");
-      const target = headings?.[index];
-      target?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      const stage = pageStageRef.current;
+      if (!stage) {
+        return;
+      }
+
+      const targetPageIndex = Math.max(0, Math.min(pageFrameCount - 1, (headingPageNumbers[index] ?? 1) - 1));
+      visiblePageIndexRef.current = targetPageIndex;
+      setVisiblePageIndex(targetPageIndex);
+      stage.scrollTo({ top: targetPageIndex * Math.max(1, pageFit.pageStep), behavior: "smooth" });
     });
   };
 
@@ -1165,12 +1189,13 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
+        <div ref={pageStageRef} className="page-stage" onScroll={handlePageStageScroll}>
           <div className="page-viewport" style={pageViewportStyle}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
               data-rendered-pages={pageFrameCount}
+              data-visible-page={clampedVisiblePageIndex + 1}
             >
               <div className="page-frame-track" aria-hidden="true">
                 {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
@@ -1195,6 +1220,11 @@ export function EditorShell() {
                   onReady={setActiveEditor}
                 />
               </div>
+            </div>
+            <div className="page-scroll-track" aria-hidden="true">
+              {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
+                <div key={pageIndex} className="page-scroll-slot" />
+              ))}
             </div>
           </div>
           </div>
