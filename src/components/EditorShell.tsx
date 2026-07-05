@@ -6,6 +6,8 @@ import QRCode from "qrcode";
 import {
   BookOpen,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Cloud,
   CloudCog,
   FileJson,
@@ -297,6 +299,22 @@ function findSpreadIndexForPage(spreads: PageSpread[], pageIndex: number): numbe
   return foundIndex >= 0 ? foundIndex : Math.max(0, spreads.length - 1);
 }
 
+function pageSpreadLabel(spread: PageSpread): string {
+  if (spread.pages.length <= 1) {
+    return String((spread.pages[0] ?? 0) + 1);
+  }
+
+  return `${(spread.pages[0] ?? 0) + 1}-${(spread.pages[spread.pages.length - 1] ?? 0) + 1}`;
+}
+
+function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true'], [role='textbox']"));
+}
+
 function readCssLengthPx(host: HTMLElement, variableName: string): number {
   const probe = document.createElement("div");
   probe.style.position = "absolute";
@@ -384,6 +402,7 @@ export function EditorShell() {
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const visibleSpreadIndexRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
+  const scrollLockFrameRef = useRef<number | null>(null);
   const pendingScrollTopRef = useRef(0);
   const fastEditingRef = useRef(false);
   const editingScrollLockRef = useRef<{ top: number; left: number } | null>(null);
@@ -437,6 +456,9 @@ export function EditorShell() {
       }
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
+      }
+      if (scrollLockFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollLockFrameRef.current);
       }
     };
   }, []);
@@ -523,6 +545,9 @@ export function EditorShell() {
   const spreadStartPageIndex = visibleSpread.pages[0] ?? 0;
   const spreadPageCount = Math.max(1, visibleSpread.pages.length);
   const maxSpreadPageCount = pageSpreads.some((spread) => spread.pages.length > 1) ? 2 : 1;
+  const visibleSpreadLabel = pageSpreadLabel(visibleSpread);
+  const canGoPreviousPage = clampedVisibleSpreadIndex > 0;
+  const canGoNextPage = clampedVisibleSpreadIndex < pageSpreads.length - 1;
   const pageViewportStyle = {
     "--page-scale": pageFit.scale,
     "--visible-page-index": spreadStartPageIndex,
@@ -550,26 +575,30 @@ export function EditorShell() {
     if (!stage || !locked) {
       return;
     }
+    if (scrollLockFrameRef.current !== null) {
+      return;
+    }
 
-    const restore = () => {
+    scrollLockFrameRef.current = window.requestAnimationFrame(() => {
+      scrollLockFrameRef.current = null;
       if (!fastEditingRef.current) {
         return;
       }
 
       const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
       const nextTop = Math.max(0, Math.min(locked.top, maxScrollTop));
-      if (Math.abs(stage.scrollTop - nextTop) > 1) {
+      const needsTopRestore = Math.abs(stage.scrollTop - nextTop) > 1;
+      const needsLeftRestore = Math.abs(stage.scrollLeft - locked.left) > 1;
+      if (needsTopRestore) {
         stage.scrollTop = nextTop;
       }
-      if (Math.abs(stage.scrollLeft - locked.left) > 1) {
+      if (needsLeftRestore) {
         stage.scrollLeft = locked.left;
       }
-      stage.style.setProperty("--page-scroll-top", `${stage.scrollTop}px`);
-    };
-
-    window.requestAnimationFrame(restore);
-    window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
-    window.setTimeout(restore, 80);
+      if (needsTopRestore || needsLeftRestore) {
+        stage.style.setProperty("--page-scroll-top", `${stage.scrollTop}px`);
+      }
+    });
   }, []);
 
   const markTypingActivity = useCallback(() => {
@@ -669,6 +698,26 @@ export function EditorShell() {
     [updateProject]
   );
 
+  const goToSpreadIndex = useCallback(
+    (spreadIndex: number, behavior: ScrollBehavior = "smooth") => {
+      if (pageSpreads.length === 0) {
+        return;
+      }
+
+      const nextIndex = Math.max(0, Math.min(pageSpreads.length - 1, spreadIndex));
+      const stage = pageStageRef.current;
+      const nextTop = nextIndex * Math.max(1, pageFit.pageStep);
+      visibleSpreadIndexRef.current = nextIndex;
+      pendingScrollTopRef.current = nextTop;
+      setVisibleSpreadIndex(nextIndex);
+      if (stage) {
+        stage.scrollTo({ top: nextTop, behavior });
+        stage.style.setProperty("--page-scroll-top", `${nextTop}px`);
+      }
+    },
+    [pageFit.pageStep, pageSpreads.length]
+  );
+
   const updateVisibleSpreadFromScroll = useCallback(
     (stage: HTMLDivElement, scrollTop: number) => {
       stage.style.setProperty("--page-scroll-top", `${scrollTop}px`);
@@ -727,6 +776,26 @@ export function EditorShell() {
       setVisibleSpreadIndex(nextSpreadIndex);
     }
   }, [pageSpreads.length]);
+
+  useEffect(() => {
+    const handlePageKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isTextInputTarget(event.target)) {
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goToSpreadIndex(visibleSpreadIndexRef.current + 1);
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goToSpreadIndex(visibleSpreadIndexRef.current - 1);
+      }
+    };
+
+    window.addEventListener("keydown", handlePageKey);
+    return () => window.removeEventListener("keydown", handlePageKey);
+  }, [goToSpreadIndex]);
 
   useEffect(() => {
     if (!layoutSignature) {
@@ -892,9 +961,7 @@ export function EditorShell() {
 
       const targetPageIndex = Math.max(0, Math.min(pageFrameCount - 1, (headingPageNumbers[index] ?? 1) - 1));
       const targetSpreadIndex = findSpreadIndexForPage(pageSpreads, targetPageIndex);
-      visibleSpreadIndexRef.current = targetSpreadIndex;
-      setVisibleSpreadIndex(targetSpreadIndex);
-      stage.scrollTo({ top: targetSpreadIndex * Math.max(1, pageFit.pageStep), behavior: "smooth" });
+      goToSpreadIndex(targetSpreadIndex);
     });
   };
 
@@ -1415,6 +1482,33 @@ export function EditorShell() {
             </div>
           </div>
           </div>
+          <nav className="page-navigation" aria-label="ページ送り">
+            <div className="page-stepper">
+              <button type="button" onClick={() => goToSpreadIndex(clampedVisibleSpreadIndex - 1)} disabled={!canGoPreviousPage} aria-label="前のページへ">
+                <ChevronLeft size={16} />
+                <Minus size={14} />
+              </button>
+              <span className="page-stepper-current">{visibleSpreadLabel} / {pageFrameCount}頁</span>
+              <button type="button" onClick={() => goToSpreadIndex(clampedVisibleSpreadIndex + 1)} disabled={!canGoNextPage} aria-label="次のページへ">
+                <Plus size={14} />
+                <ChevronRight size={16} />
+              </button>
+            </div>
+            <div className="page-tab-list" role="tablist" aria-label="ページ選択">
+              {pageSpreads.map((spread, index) => (
+                <button
+                  key={spread.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === clampedVisibleSpreadIndex}
+                  className={index === clampedVisibleSpreadIndex ? "is-active" : ""}
+                  onClick={() => goToSpreadIndex(index)}
+                >
+                  {pageSpreadLabel(spread)}
+                </button>
+              ))}
+            </div>
+          </nav>
         </section>
 
         <aside className={`right-rail mobile-panel ${mobileTab === "check" ? "is-mobile-active" : ""}`}>

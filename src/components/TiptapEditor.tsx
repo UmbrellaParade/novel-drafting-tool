@@ -89,6 +89,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   const onChangeRef = useRef(onChange);
   const onTypingActivityRef = useRef(onTypingActivity);
   const onPasteLayoutHintsRef = useRef(onPasteLayoutHints);
+  const lastDirectTypingActivityRef = useRef(0);
   // getHTML()のdebounce用タイマー（画像リサイズ中の連続シリアライズを防止）
   const onUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onUpdateIdleRef = useRef<number | null>(null);
@@ -155,12 +156,14 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
           event.key === "Enter" ||
           event.key === "Tab";
         if (isEditingKey) {
+          lastDirectTypingActivityRef.current = Date.now();
           onTypingActivity?.();
         }
         return false;
       },
       handleScrollToSelection: () => true,
       handlePaste: (_view, event) => {
+        lastDirectTypingActivityRef.current = Date.now();
         onTypingActivity?.();
         const clipboard = event.clipboardData;
         const pastedEditor = editorRef.current;
@@ -190,8 +193,10 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       }
     },
     onUpdate: ({ editor }) => {
-      // 画像リサイズ・テキスト削除など、すべての変更でfastEditingフラグを立てる
-      onTypingActivityRef.current?.();
+      // キー入力直後のupdateでは同じ通知を二重に走らせない。
+      if (Date.now() - lastDirectTypingActivityRef.current > 120) {
+        onTypingActivityRef.current?.();
+      }
 
       // getHTML()は重いため、80msのdebounceで連続呼び出しをまとめる
       // （画像を1pxドラッグするたびにシリアライズが走るのを防ぐ）
