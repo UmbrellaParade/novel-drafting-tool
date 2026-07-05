@@ -55,6 +55,21 @@ type PdfTocBlock = {
 
 type PdfBlock = PdfTextBlock | PdfImageBlock | PdfQrBlock | PdfTocBlock | { kind: "pageBreak" };
 
+export type ProjectPdfBuildOptions = {
+  padToPageCount?: number;
+  padToMultipleOf?: number;
+  enforceShimaumaMultiple?: boolean;
+};
+
+export type ProjectPdfBuildResult = {
+  bytes: Uint8Array;
+  pageCount: number;
+  contentPageCount: number;
+  paddedPages: number;
+  fileName: string;
+  missingPagesForShimauma: number;
+};
+
 type EpubAsset = {
   id: string;
   href: string;
@@ -280,7 +295,7 @@ export async function exportProjectEpub(project: ManuscriptProject): Promise<voi
   downloadBlob(new Blob([epubBuffer], { type: "application/epub+zip" }), `${sanitizeFileName(project.title)}.epub`);
 }
 
-export async function exportProjectPdf(project: ManuscriptProject): Promise<void> {
+export async function buildProjectPdf(project: ManuscriptProject, options: ProjectPdfBuildOptions = {}): Promise<ProjectPdfBuildResult> {
   const [{ PDFDocument, rgb }, fontkitModule] = await Promise.all([import("pdf-lib"), import("@pdf-lib/fontkit")]);
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit("default" in fontkitModule ? fontkitModule.default : fontkitModule);
@@ -352,21 +367,55 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
   }
 
   drawPdfPageChromeOnAllPages(state);
-  const exportedPageCount = pdfDoc.getPageCount();
-  if (isShimaumaPreset(project.pageSettings.preset) && exportedPageCount % 4 !== 0) {
-    const missingPages = 4 - (exportedPageCount % 4);
+  const contentPageCount = pdfDoc.getPageCount();
+  const minimumPageCount = Math.max(contentPageCount, Math.floor(options.padToPageCount ?? 0));
+  const targetPageCount = options.padToMultipleOf && options.padToMultipleOf > 1
+    ? roundUpToMultiple(minimumPageCount, options.padToMultipleOf)
+    : minimumPageCount;
+  for (let pageIndex = contentPageCount; pageIndex < targetPageCount; pageIndex += 1) {
+    pdfDoc.addPage([pageWidth, pageHeight]);
+  }
+
+  const pageCount = pdfDoc.getPageCount();
+  const missingPagesForShimauma = isShimaumaPreset(project.pageSettings.preset) && pageCount % 4 !== 0 ? 4 - (pageCount % 4) : 0;
+  if (options.enforceShimaumaMultiple && missingPagesForShimauma > 0) {
     throw new Error(
-      `しまうま出稿用PDFは4ページ単位にする必要があります。現在のPDFは${exportedPageCount}ページです。あと${missingPages}ページ分の白紙や奥付などを追加してから書き出してください。`
+      `しまうま出稿用PDFは4ページ単位にする必要があります。現在のPDFは${pageCount}ページです。あと${missingPagesForShimauma}ページ分の白紙や奥付などを追加してから書き出してください。`
     );
   }
 
   const bytes = await pdfDoc.save();
-  const pdfBytes = new Uint8Array(bytes);
-  downloadBlob(new Blob([pdfBytes.buffer], { type: "application/pdf" }), `${sanitizeFileName(project.title)}_book.pdf`);
+  return {
+    bytes: new Uint8Array(bytes),
+    pageCount,
+    contentPageCount,
+    paddedPages: pageCount - contentPageCount,
+    fileName: `${sanitizeFileName(project.title)}_book.pdf`,
+    missingPagesForShimauma
+  };
+}
+
+export async function exportProjectPdf(project: ManuscriptProject): Promise<void> {
+  const result = await buildProjectPdf(project, { enforceShimaumaMultiple: true });
+  downloadBlob(new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" }), result.fileName);
 }
 
 function isShimaumaPreset(preset: ManuscriptProject["pageSettings"]["preset"]): boolean {
   return preset === "shimauma-a6" || preset === "shimauma-a5";
+}
+
+function roundUpToMultiple(value: number, multiple: number): number {
+  if (multiple <= 1) {
+    return value;
+  }
+
+  return Math.ceil(value / multiple) * multiple;
+}
+
+function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 async function buildEpubChapter(title: string, html: string, chapterNumber: number, assetState: EpubAssetState): Promise<EpubChapter> {

@@ -27,7 +27,7 @@ import {
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
-import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
+import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import {
   clearGoogleDriveSettings,
   connectGoogleDrive,
@@ -39,7 +39,7 @@ import {
   type DriveFolder,
   type GoogleDriveSettings
 } from "@/lib/googleDrive";
-import { exportProjectDocx, exportProjectEpub, exportProjectPdf } from "@/lib/exporters";
+import { buildProjectPdf, exportProjectDocx, exportProjectEpub, type ProjectPdfBuildResult } from "@/lib/exporters";
 
 type MobileTab = "draft" | "chapters" | "check";
 
@@ -83,6 +83,14 @@ type QrDraft = {
   description: string;
   category: string;
   template: QrCardTemplateId;
+};
+
+type PdfPreviewState = {
+  url: string;
+  project: ManuscriptProject;
+  result: ProjectPdfBuildResult;
+  previewPageCount: number;
+  isShimauma: boolean;
 };
 
 type SidebarPanelId = "outline" | "toc" | "project" | "qr" | "drive" | "check";
@@ -372,6 +380,20 @@ function pageSpreadLabel(spread: PageSpread): string {
   return `${(spread.pages[0] ?? 0) + 1}-${(spread.pages[spread.pages.length - 1] ?? 0) + 1}`;
 }
 
+function roundUpToMultiple(value: number, multiple: number): number {
+  if (multiple <= 1) {
+    return value;
+  }
+
+  return Math.ceil(value / multiple) * multiple;
+}
+
+function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function isTextInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -469,6 +491,7 @@ export function EditorShell() {
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
   const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
   const [printDomActive, setPrintDomActive] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState<PdfPreviewState | null>(null);
   const [fastEditing, setFastEditing] = useState(false);
   const bundledDriveSettings = hasBundledGoogleDriveSettings();
   const pageStageRef = useRef<HTMLDivElement | null>(null);
@@ -485,6 +508,7 @@ export function EditorShell() {
   const pendingChapterContentRef = useRef<string | null>(null);
   const contentCommitTimerRef = useRef<number | null>(null);
   const fastEditingTimerRef = useRef<number | null>(null);
+  const pdfPreviewUrlRef = useRef<string | null>(null);
   // ページ設定（フォント・余白等）変更のdebounce用
   const pageSettingTimerRef = useRef<number | null>(null);
   const pendingPageSettingsRef = useRef<Partial<PageSettings>>({});
@@ -533,6 +557,10 @@ export function EditorShell() {
       }
       if (scrollLockFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollLockFrameRef.current);
+      }
+      if (pdfPreviewUrlRef.current) {
+        URL.revokeObjectURL(pdfPreviewUrlRef.current);
+        pdfPreviewUrlRef.current = null;
       }
     };
   }, []);
@@ -1394,17 +1422,71 @@ export function EditorShell() {
     }
   };
 
+  const setPdfPreviewState = (nextPreview: PdfPreviewState | null) => {
+    if (pdfPreviewUrlRef.current && pdfPreviewUrlRef.current !== nextPreview?.url) {
+      URL.revokeObjectURL(pdfPreviewUrlRef.current);
+    }
+    pdfPreviewUrlRef.current = nextPreview?.url ?? null;
+    setPdfPreview(nextPreview);
+  };
+
+  const openPdfPreview = (latestProject: ManuscriptProject, result: ProjectPdfBuildResult) => {
+    const blob = new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" });
+    setPdfPreviewState({
+      url: URL.createObjectURL(blob),
+      project: latestProject,
+      result,
+      previewPageCount: pageFrameCount,
+      isShimauma: latestProject.pageSettings.preset === "shimauma-a6" || latestProject.pageSettings.preset === "shimauma-a5"
+    });
+  };
+
+  const closePdfPreview = () => {
+    setPdfPreviewState(null);
+  };
+
+  const downloadPdfPreview = () => {
+    if (!pdfPreview) {
+      return;
+    }
+
+    downloadBlob(new Blob([uint8ArrayToArrayBuffer(pdfPreview.result.bytes)], { type: "application/pdf" }), pdfPreview.result.fileName);
+    setStatusText("PDFをダウンロードしました");
+  };
+
+  const rebuildPdfPreviewWithBlankPages = async () => {
+    if (!pdfPreview) {
+      return;
+    }
+
+    try {
+      setStatusText("白紙追加版PDFプレビューを作成中");
+      const minimumPageCount = Math.max(pdfPreview.previewPageCount, pdfPreview.result.pageCount);
+      const targetPageCount = pdfPreview.isShimauma ? roundUpToMultiple(minimumPageCount, 4) : minimumPageCount;
+      const result = await buildProjectPdf(pdfPreview.project, {
+        padToPageCount: targetPageCount,
+        padToMultipleOf: pdfPreview.isShimauma ? 4 : undefined
+      });
+      openPdfPreview(pdfPreview.project, result);
+      setStatusText("白紙追加版PDFプレビューを作成しました");
+    } catch (error) {
+      window.console.error(error);
+      window.alert(error instanceof Error ? error.message : "白紙追加版PDFを作成できませんでした。");
+    }
+  };
+
   const exportPdf = async () => {
     try {
-      setStatusText("本用PDFを作成中");
+      setStatusText("PDFプレビューを作成中");
       const latestProject = projectWithLatestContent(project);
-      await exportProjectPdf(latestProject);
+      const result = await buildProjectPdf(latestProject);
+      openPdfPreview(latestProject, result);
       flushPendingChapterContent();
-      setStatusText("本用PDFを書き出し");
+      setStatusText("PDFプレビューを確認してください");
     } catch (error) {
-      setStatusText("PDF書き出しに失敗");
+      setStatusText("PDFプレビュー作成に失敗");
       window.console.error(error);
-      window.alert(error instanceof Error ? error.message : "PDFを書き出せませんでした。");
+      window.alert(error instanceof Error ? error.message : "PDFプレビューを作成できませんでした。");
     }
   };
 
@@ -1808,8 +1890,79 @@ export function EditorShell() {
           <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} collapsed={collapsedPanels.check} onToggle={() => toggleSidebarPanel("check")} />
         </aside>
       </div>
+      {pdfPreview ? (
+        <PdfPreviewDialog
+          preview={pdfPreview}
+          onClose={closePdfPreview}
+          onDownload={downloadPdfPreview}
+          onPad={rebuildPdfPreviewWithBlankPages}
+        />
+      ) : null}
       {printDomActive && printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
     </main>
+  );
+}
+
+function PdfPreviewDialog({
+  preview,
+  onClose,
+  onDownload,
+  onPad
+}: {
+  preview: PdfPreviewState;
+  onClose: () => void;
+  onDownload: () => void;
+  onPad: () => void;
+}) {
+  const pdfPageCount = preview.result.pageCount;
+  const previewPageCount = preview.previewPageCount;
+  const mismatch = pdfPageCount !== previewPageCount;
+  const missingPages = preview.isShimauma && preview.result.missingPagesForShimauma > 0 ? preview.result.missingPagesForShimauma : 0;
+  const canDownload = missingPages === 0;
+  const targetPageCount = preview.isShimauma ? roundUpToMultiple(Math.max(pdfPageCount, previewPageCount), 4) : Math.max(pdfPageCount, previewPageCount);
+  const pagesToAdd = Math.max(0, targetPageCount - pdfPageCount);
+
+  return (
+    <div className="pdf-preview-backdrop" role="dialog" aria-modal="true" aria-labelledby="pdf-preview-title">
+      <section className="pdf-preview-dialog">
+        <header className="pdf-preview-header">
+          <div>
+            <h2 id="pdf-preview-title">PDFプレビュー</h2>
+            <p>書き出す前にページ数と見た目を確認してください。</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="PDFプレビューを閉じる">
+            <XCircle size={18} />
+          </button>
+        </header>
+        <div className="pdf-preview-summary">
+          <span>原稿プレビュー: {previewPageCount}ページ</span>
+          <span>PDF: {pdfPageCount}ページ</span>
+          {preview.result.paddedPages > 0 ? <span>白紙追加: {preview.result.paddedPages}ページ</span> : null}
+        </div>
+        {mismatch ? (
+          <p className="pdf-preview-warning">
+            原稿画面とPDFのページ数が違います。PDFは別レイアウトで再生成されるため、画像や行間の差で1ページずれることがあります。
+          </p>
+        ) : null}
+        {missingPages > 0 ? (
+          <p className="pdf-preview-warning">
+            しまうま出稿では4ページ単位が必要です。現在のPDFは{pdfPageCount}ページなので、あと{missingPages}ページ必要です。
+          </p>
+        ) : null}
+        <iframe className="pdf-preview-frame" src={preview.url} title="PDFプレビュー" />
+        <footer className="pdf-preview-actions">
+          {pagesToAdd > 0 ? (
+            <button type="button" onClick={onPad}>
+              白紙を追加して{targetPageCount}ページにする
+            </button>
+          ) : null}
+          <button type="button" onClick={onDownload} disabled={!canDownload}>
+            PDFをダウンロード
+          </button>
+          <button type="button" onClick={onClose}>閉じる</button>
+        </footer>
+      </section>
+    </div>
   );
 }
 
