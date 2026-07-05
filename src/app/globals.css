@@ -245,10 +245,30 @@ h1 {
   margin-bottom: 12px;
 }
 
+.tool-panel.is-collapsed .panel-title-row {
+  margin-bottom: 0;
+}
+
 .panel-title-row h2 {
   margin: 0;
   font-size: 15px;
   line-height: 1.25;
+}
+
+.panel-title-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.panel-collapse-content {
+  display: contents;
+}
+
+.panel-collapse-button svg {
+  transition: transform 0.12s ease;
 }
 
 .mini-badge {

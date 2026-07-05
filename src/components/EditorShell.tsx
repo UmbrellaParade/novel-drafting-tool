@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Cloud,
@@ -83,6 +84,19 @@ type QrDraft = {
   template: QrCardTemplateId;
 };
 
+type SidebarPanelId = "outline" | "toc" | "project" | "qr" | "drive" | "check";
+type SidebarCollapseState = Record<SidebarPanelId, boolean>;
+
+const SIDEBAR_COLLAPSE_STORAGE_KEY = "umbrella-parade:sidebar-collapsed-panels";
+const DEFAULT_SIDEBAR_COLLAPSE_STATE: SidebarCollapseState = {
+  outline: false,
+  toc: false,
+  project: false,
+  qr: false,
+  drive: false,
+  check: false
+};
+
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value);
 
@@ -92,6 +106,44 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   }, [delayMs, value]);
 
   return debouncedValue;
+}
+
+function readSidebarCollapseState(): SidebarCollapseState {
+  if (typeof window === "undefined") {
+    return DEFAULT_SIDEBAR_COLLAPSE_STATE;
+  }
+
+  try {
+    const saved = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY);
+    if (!saved) {
+      return DEFAULT_SIDEBAR_COLLAPSE_STATE;
+    }
+
+    const parsed = JSON.parse(saved) as Partial<Record<SidebarPanelId, unknown>>;
+    return {
+      ...DEFAULT_SIDEBAR_COLLAPSE_STATE,
+      outline: typeof parsed.outline === "boolean" ? parsed.outline : DEFAULT_SIDEBAR_COLLAPSE_STATE.outline,
+      toc: typeof parsed.toc === "boolean" ? parsed.toc : DEFAULT_SIDEBAR_COLLAPSE_STATE.toc,
+      project: typeof parsed.project === "boolean" ? parsed.project : DEFAULT_SIDEBAR_COLLAPSE_STATE.project,
+      qr: typeof parsed.qr === "boolean" ? parsed.qr : DEFAULT_SIDEBAR_COLLAPSE_STATE.qr,
+      drive: typeof parsed.drive === "boolean" ? parsed.drive : DEFAULT_SIDEBAR_COLLAPSE_STATE.drive,
+      check: typeof parsed.check === "boolean" ? parsed.check : DEFAULT_SIDEBAR_COLLAPSE_STATE.check
+    };
+  } catch {
+    return DEFAULT_SIDEBAR_COLLAPSE_STATE;
+  }
+}
+
+function saveSidebarCollapseState(state: SidebarCollapseState): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage may be unavailable in private or restricted browsing modes.
+  }
 }
 
 const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: string; qrDark: string }> = {
@@ -409,6 +461,7 @@ export function EditorShell() {
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [driveSettingsDraft, setDriveSettingsDraft] = useState<GoogleDriveSettings>(EMPTY_DRIVE_SETTINGS);
+  const [collapsedPanels, setCollapsedPanels] = useState<SidebarCollapseState>(() => readSidebarCollapseState());
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
@@ -601,6 +654,17 @@ export function EditorShell() {
         ...updater(previous),
         updatedAt: new Date().toISOString()
       };
+    });
+  }, []);
+
+  const toggleSidebarPanel = useCallback((panelId: SidebarPanelId) => {
+    setCollapsedPanels((previous) => {
+      const next = {
+        ...previous,
+        [panelId]: !previous[panelId]
+      };
+      saveSidebarCollapseState(next);
+      return next;
     });
   }, []);
 
@@ -1578,16 +1642,20 @@ export function EditorShell() {
 
       <div className="workspace-grid">
         <aside className={`left-rail mobile-panel ${mobileTab === "chapters" ? "is-mobile-active" : ""}`}>
-          <OutlinePanel items={outlineItems} onJump={jumpToHeading} />
+          <OutlinePanel items={outlineItems} collapsed={collapsedPanels.outline} onToggle={() => toggleSidebarPanel("outline")} onJump={jumpToHeading} />
           <TableOfContentsPanel
             entries={tocEntries}
             settings={project.tocSettings}
+            collapsed={collapsedPanels.toc}
+            onToggle={() => toggleSidebarPanel("toc")}
             onSettingChange={updateTocSetting}
             onInsert={insertTableOfContents}
             onRefresh={refreshTableOfContents}
           />
           <ProjectPanel
             project={project}
+            collapsed={collapsedPanels.project}
+            onToggle={() => toggleSidebarPanel("project")}
             onProjectChange={updateProject}
             onPreset={handlePreset}
             onPageChange={updatePageSetting}
@@ -1677,6 +1745,8 @@ export function EditorShell() {
           <QrLibraryPanel
             panelRef={qrPanelRef}
             links={project.qrLinks}
+            collapsed={collapsedPanels.qr}
+            onToggle={() => toggleSidebarPanel("qr")}
             onAdd={addQrLink}
             onInsert={insertQrLink}
             onUpdate={updateQrLink}
@@ -1690,6 +1760,8 @@ export function EditorShell() {
             currentFolderId={project.drive?.folderId ?? ""}
             currentFolderName={project.drive?.folderName ?? ""}
             folders={driveFolders}
+            collapsed={collapsedPanels.drive}
+            onToggle={() => toggleSidebarPanel("drive")}
             onChange={setDriveSettingsDraft}
             onSave={saveDriveSettingsFromDraft}
             onClear={clearDriveSettingsFromDraft}
@@ -1697,7 +1769,7 @@ export function EditorShell() {
             onSelectFolder={selectDriveFolder}
             onCreateFolder={() => void createDriveFolder()}
           />
-          <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} />
+          <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} collapsed={collapsedPanels.check} onToggle={() => toggleSidebarPanel("check")} />
         </aside>
       </div>
       {printDomActive && printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
@@ -1745,14 +1817,61 @@ function PrintDocument({
   );
 }
 
+function CollapsibleToolPanel({
+  title,
+  className = "",
+  collapsed,
+  onToggle,
+  badge,
+  titleAction,
+  panelRef,
+  children
+}: {
+  title: string;
+  className?: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  badge?: ReactNode;
+  titleAction?: ReactNode;
+  panelRef?: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  return (
+    <section ref={panelRef} className={`tool-panel ${className} ${collapsed ? "is-collapsed" : ""}`.trim()}>
+      <div className="panel-title-row">
+        <h2>{title}</h2>
+        <div className="panel-title-controls">
+          {badge}
+          {titleAction}
+          <button
+            className="panel-collapse-button icon-button small"
+            type="button"
+            aria-expanded={!collapsed}
+            title={collapsed ? "開く" : "折りたたむ"}
+            aria-label={`${title}を${collapsed ? "開く" : "折りたたむ"}`}
+            onClick={onToggle}
+          >
+            {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+          </button>
+        </div>
+      </div>
+      {collapsed ? null : <div className="panel-collapse-content">{children}</div>}
+    </section>
+  );
+}
+
 function ProjectPanel({
   project,
+  collapsed,
+  onToggle,
   onProjectChange,
   onPreset,
   onPageChange,
   onReset
 }: {
   project: ManuscriptProject;
+  collapsed: boolean;
+  onToggle: () => void;
   onProjectChange: (updater: (previous: ManuscriptProject) => ManuscriptProject) => void;
   onPreset: (preset: PagePresetId) => void;
   onPageChange: (key: keyof PageSettings, value: PageSettings[keyof PageSettings]) => void;
@@ -1771,13 +1890,16 @@ function ProjectPanel({
   };
 
   return (
-    <section className="tool-panel">
-      <div className="panel-title-row">
-        <h2>プロジェクト</h2>
+    <CollapsibleToolPanel
+      title="プロジェクト"
+      collapsed={collapsed}
+      onToggle={onToggle}
+      titleAction={
         <button className="icon-button" type="button" title="新規" aria-label="新規" onClick={onReset}>
           <Plus size={17} />
         </button>
-      </div>
+      }
+    >
       <label className="field">
         <span>作品名</span>
         <input value={project.title} onChange={(event) => updateProjectText("title", event.target.value)} />
@@ -1834,17 +1956,23 @@ function ProjectPanel({
         <label><input type="checkbox" checked={settings.showBleedGuide} onChange={(event) => onPageChange("showBleedGuide", event.target.checked)} /> 塗り足し</label>
         <label><input type="checkbox" checked={settings.showSafeArea} onChange={(event) => onPageChange("showSafeArea", event.target.checked)} /> 安全域</label>
       </div>
-    </section>
+    </CollapsibleToolPanel>
   );
 }
 
-function OutlinePanel({ items, onJump }: { items: OutlineItem[]; onJump: (index: number) => void }) {
+function OutlinePanel({
+  items,
+  collapsed,
+  onToggle,
+  onJump
+}: {
+  items: OutlineItem[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onJump: (index: number) => void;
+}) {
   return (
-    <section className="tool-panel outline-panel">
-      <div className="panel-title-row">
-        <h2>目次</h2>
-        <span className="mini-badge">H1 {items.length}件</span>
-      </div>
+    <CollapsibleToolPanel title="目次" className="outline-panel" collapsed={collapsed} onToggle={onToggle} badge={<span className="mini-badge">H1 {items.length}件</span>}>
       {items.length ? (
         <div className="outline-list">
           {items.map((item) => (
@@ -1857,19 +1985,23 @@ function OutlinePanel({ items, onJump }: { items: OutlineItem[]; onJump: (index:
       ) : (
         <p className="empty-note">本文にH1見出しを入れると自動で表示されます。</p>
       )}
-    </section>
+    </CollapsibleToolPanel>
   );
 }
 
 function TableOfContentsPanel({
   entries,
   settings,
+  collapsed,
+  onToggle,
   onSettingChange,
   onInsert,
   onRefresh
 }: {
   entries: TocEntry[];
   settings: TocSettings;
+  collapsed: boolean;
+  onToggle: () => void;
   onSettingChange: (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => void;
   onInsert: () => void;
   onRefresh: () => void;
@@ -1886,11 +2018,7 @@ function TableOfContentsPanel({
   };
 
   return (
-    <section className="tool-panel toc-panel">
-      <div className="panel-title-row">
-        <h2>目次作成</h2>
-        <span className="mini-badge">H1 {entries.length}件</span>
-      </div>
+    <CollapsibleToolPanel title="目次作成" className="toc-panel" collapsed={collapsed} onToggle={onToggle} badge={<span className="mini-badge">H1 {entries.length}件</span>}>
       <div className="toc-form">
         <label className="toc-form-field wide">
           <span>目次タイトル</span>
@@ -1967,7 +2095,7 @@ function TableOfContentsPanel({
       ) : (
         <p className="empty-note">H1見出しを本文に入れると目次にできます。</p>
       )}
-    </section>
+    </CollapsibleToolPanel>
   );
 }
 
@@ -1978,6 +2106,8 @@ function DriveSettingsPanel({
   currentFolderId,
   currentFolderName,
   folders,
+  collapsed,
+  onToggle,
   onChange,
   onSave,
   onClear,
@@ -1991,6 +2121,8 @@ function DriveSettingsPanel({
   currentFolderId: string;
   currentFolderName: string;
   folders: DriveFolder[];
+  collapsed: boolean;
+  onToggle: () => void;
   onChange: (settings: GoogleDriveSettings) => void;
   onSave: () => void;
   onClear: () => void;
@@ -2006,11 +2138,7 @@ function DriveSettingsPanel({
       : folders;
 
   return (
-    <section className="tool-panel drive-settings-panel">
-      <div className="panel-title-row">
-        <h2>Google Drive設定</h2>
-        <span className={`mini-badge ${isConfigured ? "is-ok" : ""}`}>{statusLabel}</span>
-      </div>
+    <CollapsibleToolPanel title="Google Drive設定" className="drive-settings-panel" collapsed={collapsed} onToggle={onToggle} badge={<span className={`mini-badge ${isConfigured ? "is-ok" : ""}`}>{statusLabel}</span>}>
       <div className="drive-folder-box">
         <div className="drive-folder-current">
           <span>保存先</span>
@@ -2076,26 +2204,27 @@ function DriveSettingsPanel({
           </details>
         </>
       )}
-    </section>
+    </CollapsibleToolPanel>
   );
 }
 
 function CheckPanel({
   checks,
   characterCount,
-  estimatedPages
+  estimatedPages,
+  collapsed,
+  onToggle
 }: {
   checks: ReturnType<typeof runManuscriptChecks>;
   characterCount: number;
   estimatedPages: number;
+  collapsed: boolean;
+  onToggle: () => void;
 }) {
   const visibleChecks = checks.filter((check) => check.id !== "characters");
 
   return (
-    <section className="tool-panel check-panel">
-      <div className="panel-title-row">
-        <h2>確認</h2>
-      </div>
+    <CollapsibleToolPanel title="確認" className="check-panel" collapsed={collapsed} onToggle={onToggle}>
       <div className="check-summary-row">
         <span>{characterCount.toLocaleString("ja-JP")}字</span>
         <span>推定{estimatedPages}p</span>
@@ -2111,13 +2240,15 @@ function CheckPanel({
           </div>
         ))}
       </div>
-    </section>
+    </CollapsibleToolPanel>
   );
 }
 
 function QrLibraryPanel({
   panelRef,
   links,
+  collapsed,
+  onToggle,
   onAdd,
   onInsert,
   onUpdate,
@@ -2126,6 +2257,8 @@ function QrLibraryPanel({
 }: {
   panelRef: RefObject<HTMLElement | null>;
   links: QrLink[];
+  collapsed: boolean;
+  onToggle: () => void;
   onAdd: (draft: QrDraft, mode?: "save" | "insert") => boolean;
   onInsert: (link: QrLink) => void;
   onUpdate: (id: string, draft: QrDraft) => Promise<boolean>;
@@ -2167,10 +2300,7 @@ function QrLibraryPanel({
   };
 
   return (
-    <section ref={panelRef} className="tool-panel qr-library-panel">
-      <div className="panel-title-row">
-        <h2>QRリンク</h2>
-      </div>
+    <CollapsibleToolPanel title="QRリンク" className="qr-library-panel" collapsed={collapsed} onToggle={onToggle} panelRef={panelRef}>
       <div className="qr-form">
         <label className="qr-form-field">
           <span>太字タイトル</span>
@@ -2266,7 +2396,7 @@ function QrLibraryPanel({
           );
         })}
       </div>
-    </section>
+    </CollapsibleToolPanel>
   );
 }
 
