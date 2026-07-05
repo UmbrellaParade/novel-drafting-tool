@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TextAlign from "@tiptap/extension-text-align";
@@ -14,6 +14,7 @@ import {
   AlignRight,
   Bold,
   Check,
+  Copy,
   Heading1,
   Heading2,
   ImagePlus,
@@ -24,6 +25,7 @@ import {
   QrCode,
   Redo2,
   RefreshCw,
+  Scan,
   ScissorsLineDashed,
   Trash2,
   Type,
@@ -31,7 +33,7 @@ import {
   X,
   Underline as UnderlineIcon
 } from "lucide-react";
-import { PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
+import { BlockFontSizeExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
 
 type TiptapEditorProps = {
   content: string;
@@ -67,14 +69,26 @@ type ImageReplacementTarget = {
 };
 
 const IMAGE_SIZE_RATIOS = [0.5, 0.75, 1] as const;
+const FONT_SIZE_SCOPES = {
+  all: new Set(["paragraph", "heading", "blockquote", "listItem"]),
+  headings: new Set(["heading"]),
+  body: new Set(["paragraph", "blockquote", "listItem"])
+} as const;
+
+function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
+  event.preventDefault();
+}
 
 export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) {
+  const editorRef = useRef<Editor | null>(null);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
         horizontalRule: false
       }),
       Underline,
+      FontSizeMark,
+      BlockFontSizeExtension,
       Image.configure({
         allowBase64: true,
         inline: false,
@@ -102,6 +116,29 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
     editorProps: {
       attributes: {
         class: "manuscript-prose"
+      },
+      handlePaste: (_view, event) => {
+        const clipboard = event.clipboardData;
+        const pastedEditor = editorRef.current;
+        if (!clipboard || !pastedEditor) {
+          return false;
+        }
+
+        const imageFiles = Array.from(clipboard.files).filter((file) => file.type.startsWith("image/"));
+        if (imageFiles.length) {
+          event.preventDefault();
+          void insertClipboardImageFiles(pastedEditor, imageFiles);
+          return true;
+        }
+
+        const html = clipboard.getData("text/html");
+        if (html && /<img\b/i.test(html)) {
+          event.preventDefault();
+          void insertPastedHtmlWithImages(pastedEditor, html);
+          return true;
+        }
+
+        return false;
       }
     },
     onUpdate: ({ editor }) => {
@@ -110,8 +147,12 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
   });
 
   useEffect(() => {
+    editorRef.current = editor ?? null;
     onReady?.(editor ?? null);
-    return () => onReady?.(null);
+    return () => {
+      editorRef.current = null;
+      onReady?.(null);
+    };
   }, [editor, onReady]);
 
   if (!editor) {
@@ -138,6 +179,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   });
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
+  const [textSizePt, setTextSizePt] = useState(9);
   const disabled = !editor;
 
   useEffect(() => {
@@ -325,7 +367,25 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    editor.chain().focus().updateAttributes("image", { width: Math.round(width), height: null }).run();
+    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
+    const position = target ? resolveImagePosition(editor, target) : selectedImagePosition(editor);
+    if (position === null) {
+      return;
+    }
+
+    editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        const node = state.doc.nodeAt(position);
+        if (!node || node.type.name !== "image") {
+          return false;
+        }
+
+        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: Math.round(width), height: null }, node.marks);
+        return true;
+      })
+      .run();
   };
 
   const setImageWidthRatio = (ratio: (typeof IMAGE_SIZE_RATIOS)[number]) => {
@@ -339,7 +399,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     if (!editor) {
       return;
     }
-    setImageWidth(readCssLengthPx(editor, "--content-width"));
+    setImageWidth(readTextWidthPx(editor));
   };
 
   const setImageToPageWidth = () => {
@@ -349,12 +409,77 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     setImageWidth(readPageWidthPx(editor));
   };
 
+  const fitImageToCurrentPage = () => {
+    if (!editor || !toolbarState.hasImageSelection) {
+      return;
+    }
+
+    const image = selectedRenderedImage(editor);
+    if (!image) {
+      return;
+    }
+
+    const rect = image.getBoundingClientRect();
+    const frame = currentPageFrame(editor, rect.left);
+    if (!frame) {
+      setImageToPageWidth();
+      return;
+    }
+
+    const aspectRatio = image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : Math.max(0.1, rect.width / Math.max(1, rect.height));
+    const verticalPadding = readCssLengthPx(editor, "--paragraph-spacing") + 8;
+    const availableHeight = Math.max(48, frame.contentBottom - rect.top - verticalPadding);
+    const maxByHeight = availableHeight * aspectRatio;
+    const maxByWidth = readPageWidthPx(editor);
+    setImageWidth(Math.max(48, Math.min(maxByWidth, maxByHeight)));
+  };
+
+  const matchPreviousImageSize = () => {
+    if (!editor || !toolbarState.hasImageSelection) {
+      return;
+    }
+
+    const selected = selectedRenderedImage(editor);
+    if (!selected) {
+      return;
+    }
+
+    const images = renderedImages(editor);
+    const selectedIndex = images.indexOf(selected);
+    const previousImage = selectedIndex > 0 ? images[selectedIndex - 1] : null;
+    const width = previousImage ? parseImageDimension(previousImage.style.width || previousImage.getAttribute("width")) ?? Math.round(previousImage.getBoundingClientRect().width) : null;
+    if (!width) {
+      window.alert("前にある画像が見つかりません。");
+      return;
+    }
+
+    setImageWidth(width);
+  };
+
   const resetImageSize = () => {
     if (!editor || !toolbarState.hasImageSelection) {
       return;
     }
 
-    editor.chain().focus().updateAttributes("image", { width: null, height: null }).run();
+    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
+    const position = target ? resolveImagePosition(editor, target) : selectedImagePosition(editor);
+    if (position === null) {
+      return;
+    }
+
+    editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        const node = state.doc.nodeAt(position);
+        if (!node || node.type.name !== "image") {
+          return false;
+        }
+
+        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: null, height: null }, node.marks);
+        return true;
+      })
+      .run();
   };
 
   const deleteSelectedContent = () => {
@@ -362,7 +487,62 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
+    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
+    const position = target ? resolveImagePosition(editor, target) : null;
+    if (toolbarState.hasImageSelection && position !== null) {
+      const node = editor.state.doc.nodeAt(position);
+      if (node?.type.name === "image") {
+        editor
+          .chain()
+          .focus()
+          .command(({ tr }) => {
+            tr.delete(position, position + node.nodeSize);
+            return true;
+          })
+          .run();
+        return;
+      }
+    }
+
     editor.chain().focus().deleteSelection().run();
+  };
+
+  const applySelectedTextSize = () => {
+    if (!editor) {
+      return;
+    }
+
+    if (editor.state.selection.empty) {
+      window.alert("文字サイズを変える範囲をドラッグで選択してください。");
+      return;
+    }
+
+    editor.chain().focus().setMark("fontSize", { size: `${textSizePt}pt` }).run();
+  };
+
+  const applyBlockTextSize = (scope: keyof typeof FONT_SIZE_SCOPES) => {
+    if (!editor) {
+      return;
+    }
+
+    const fontSize = `${textSizePt}pt`;
+    const targets = FONT_SIZE_SCOPES[scope];
+    editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        let changed = false;
+        state.doc.descendants((node, position) => {
+          if (!targets.has(node.type.name)) {
+            return;
+          }
+
+          tr.setNodeMarkup(position, undefined, { ...node.attrs, fontSize }, node.marks);
+          changed = true;
+        });
+        return changed;
+      })
+      .run();
   };
 
   const pageWidth = editor ? readPageWidthPx(editor) : 420;
@@ -452,15 +632,23 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <div className="image-size-controls" aria-label="画像サイズ">
           <span className="image-size-chip">画像</span>
           {IMAGE_SIZE_RATIOS.map((ratio) => (
-            <button key={ratio} type="button" onClick={() => setImageWidthRatio(ratio)}>
+            <button key={ratio} type="button" onMouseDown={preserveEditorSelection} onClick={() => setImageWidthRatio(ratio)}>
               {Math.round(ratio * 100)}%
             </button>
           ))}
-          <button type="button" onClick={setImageToTextWidth}>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={setImageToTextWidth}>
             本文幅
           </button>
-          <button type="button" onClick={setImageToPageWidth}>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={setImageToPageWidth}>
             紙面幅
+          </button>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={fitImageToCurrentPage}>
+            <Scan size={15} />
+            頁最大
+          </button>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={matchPreviousImageSize}>
+            <Copy size={15} />
+            前画像
           </button>
           <input
             className="image-size-range"
@@ -481,7 +669,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             aria-label="画像幅px"
           />
           <span className="image-size-unit">px</span>
-          <button type="button" onClick={resetImageSize}>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={resetImageSize}>
             自動
           </button>
           <label className="image-replace-button" onPointerDown={prepareReplaceImage}>
@@ -503,11 +691,28 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
               }}
             />
           </label>
-          <button className="danger" type="button" onClick={deleteSelectedContent} title="削除" aria-label="削除">
+          <button className="danger" type="button" onMouseDown={preserveEditorSelection} onClick={deleteSelectedContent} title="削除" aria-label="削除">
             <Trash2 size={16} />
           </button>
         </div>
       ) : null}
+      <div className="text-size-controls" aria-label="文字サイズ">
+        <span className="image-size-chip">文字pt</span>
+        <input
+          className="text-size-number"
+          type="number"
+          min={4}
+          max={72}
+          step={0.1}
+          value={textSizePt}
+          onChange={(event) => setTextSizePt(Number(event.target.value))}
+          aria-label="文字サイズpt"
+        />
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedTextSize}>選択</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("all")}>全部</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>見出し</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>本文</button>
+      </div>
       <input
         ref={imageInputRef}
         className="hidden"
@@ -530,8 +735,83 @@ function parseImageDimension(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
 }
 
+async function insertClipboardImageFiles(editor: Editor, files: File[]): Promise<void> {
+  for (const file of files) {
+    const src = await fileToDataUrl(file);
+    editor
+      .chain()
+      .focus()
+      .setImage({
+        src,
+        alt: file.name,
+        title: file.name,
+        width: Math.round(readPageWidthPx(editor) * 0.75)
+      })
+      .run();
+  }
+}
+
+async function insertPastedHtmlWithImages(editor: Editor, html: string): Promise<void> {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const images = Array.from(template.content.querySelectorAll<HTMLImageElement>("img"));
+  await Promise.all(
+    images.map(async (image, index) => {
+      const src = image.getAttribute("src");
+      if (!src) {
+        return;
+      }
+
+      image.setAttribute("src", await toEmbeddableImageSrc(src));
+      image.setAttribute("alt", image.getAttribute("alt") || image.getAttribute("title") || `貼り付け画像 ${index + 1}`);
+      image.setAttribute("title", image.getAttribute("title") || image.getAttribute("alt") || `貼り付け画像 ${index + 1}`);
+    })
+  );
+
+  editor.chain().focus().insertContent(template.innerHTML).run();
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("画像を読み込めませんでした。"));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function toEmbeddableImageSrc(src: string): Promise<string> {
+  if (src.startsWith("data:") || src.startsWith("blob:")) {
+    return src;
+  }
+
+  try {
+    const response = await fetch(src, { mode: "cors", credentials: "include" });
+    if (!response.ok) {
+      return src;
+    }
+
+    const blob = await response.blob();
+    if (!blob.type.startsWith("image/")) {
+      return src;
+    }
+
+    return await fileToDataUrl(new File([blob], "pasted-image", { type: blob.type }));
+  } catch {
+    return src;
+  }
+}
+
 function readPageWidthPx(editor: Editor): number {
-  return readCssLengthPx(editor, "--page-width");
+  const frame = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-frame");
+  const width = frame?.getBoundingClientRect().width ?? 0;
+  return Number.isFinite(width) && width > 0 ? width : readCssLengthPx(editor, "--page-width");
+}
+
+function readTextWidthPx(editor: Editor): number {
+  const guide = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-safe-guide");
+  const width = guide?.getBoundingClientRect().width ?? 0;
+  return Number.isFinite(width) && width > 0 ? width : readCssLengthPx(editor, "--content-width");
 }
 
 function readCssLengthPx(editor: Editor, variableName: string): number {
@@ -546,6 +826,57 @@ function readCssLengthPx(editor: Editor, variableName: string): number {
   const width = probe.getBoundingClientRect().width;
   probe.remove();
   return Number.isFinite(width) && width > 0 ? width : 320;
+}
+
+function renderedImages(editor: Editor): HTMLImageElement[] {
+  return Array.from(editor.view.dom.querySelectorAll<HTMLImageElement>("img:not(.qr-card-image)"));
+}
+
+function selectedRenderedImage(editor: Editor): HTMLImageElement | null {
+  const target = readSelectedImageTarget(editor);
+  const images = renderedImages(editor);
+  if (!target) {
+    return images.find((image) => image.closest(".ProseMirror-selectednode")) ?? null;
+  }
+
+  return (
+    images.find((image) => image.getAttribute("src") === target.src && image.getAttribute("title") === target.title) ??
+    images.find((image) => image.getAttribute("src") === target.src) ??
+    images.find((image) => image.closest(".ProseMirror-selectednode")) ??
+    null
+  );
+}
+
+function currentPageFrame(editor: Editor, x: number): { contentBottom: number } | null {
+  const stage = editor.view.dom.closest(".page-stage");
+  const frames = Array.from(stage?.querySelectorAll<HTMLElement>(".page-frame") ?? []);
+  const firstFrame = frames[0];
+  if (!firstFrame) {
+    return null;
+  }
+
+  const pagePitch = frames[1] ? frames[1].offsetLeft - firstFrame.offsetLeft : firstFrame.offsetWidth;
+  if (pagePitch <= 0) {
+    return null;
+  }
+
+  const firstLeft = firstFrame.getBoundingClientRect().left;
+  const pageIndex = Math.max(0, Math.min(frames.length - 1, Math.floor((x - firstLeft + 2) / pagePitch)));
+  const frame = frames[pageIndex];
+  const guide = frame.querySelector<HTMLElement>(".page-safe-guide");
+  if (guide) {
+    return {
+      contentBottom: guide.getBoundingClientRect().bottom
+    };
+  }
+
+  const frameRect = frame.getBoundingClientRect();
+  const marginTop = readCssLengthPx(editor, "--margin-top");
+  const contentHeight = readCssLengthPx(editor, "--content-height");
+
+  return {
+    contentBottom: frameRect.top + marginTop + contentHeight
+  };
 }
 
 function selectedImagePosition(editor: Editor): number | null {
@@ -651,6 +982,7 @@ function ToolButton({ label, active, disabled, onClick, children }: ToolButtonPr
       title={label}
       aria-label={label}
       disabled={disabled}
+      onMouseDown={preserveEditorSelection}
       onClick={onClick}
     >
       {children}

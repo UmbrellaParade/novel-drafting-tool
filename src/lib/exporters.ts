@@ -291,7 +291,7 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
     contentWidth,
     y: contentTop,
     colors: {
-      paper: rgb(1, 0.992, 0.973),
+      paper: rgb(1, 1, 1),
       ink: rgb(0.122, 0.114, 0.102),
       muted: rgb(0.478, 0.443, 0.408),
       white: rgb(1, 1, 1),

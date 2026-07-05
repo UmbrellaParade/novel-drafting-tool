@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
@@ -38,6 +38,7 @@ const tabLabels: Record<MobileTab, string> = {
 const PAGE_GAP_MM = 14;
 const MAX_PAGE_FRAMES = 160;
 const DOCUMENT_CHAPTER_TITLE = "本文";
+const AUTOSAVE_DELAY_MS = 1600;
 
 type OutlineItem = {
   id: string;
@@ -180,6 +181,22 @@ function sameStringList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function googleDriveSetupMessage(): string {
+  return [
+    "Google Drive連携にはGoogle CloudのOAuth設定が必要です。",
+    "",
+    "1. Google Cloud ConsoleでGoogle Drive APIを有効化",
+    "2. OAuth同意画面を作成",
+    "3. OAuthクライアントID（ウェブ）とAPIキーを作成",
+    "4. 承認済みのJavaScript生成元に https://umbrellaparade.github.io を追加",
+    "5. .env.local に以下を設定して再ビルド",
+    "   NEXT_PUBLIC_GOOGLE_CLIENT_ID=作成したクライアントID",
+    "   NEXT_PUBLIC_GOOGLE_API_KEY=作成したAPIキー",
+    "",
+    "GitHub Pages版で使う場合は、同じ値をGitHub Actionsの環境変数/Secretsにも設定してビルドしてください。"
+  ].join("\n");
+}
+
 export function EditorShell() {
   const [project, setProject] = useState<ManuscriptProject | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("draft");
@@ -230,7 +247,7 @@ export function EditorShell() {
           setStatusText("ブラウザ保存に失敗");
           window.console.error(error);
         });
-    }, 500);
+    }, AUTOSAVE_DELAY_MS);
 
     return () => window.clearTimeout(handle);
   }, [project]);
@@ -242,7 +259,9 @@ export function EditorShell() {
     return project.chapters[0] ?? null;
   }, [project]);
   const activeChapterContent = activeChapter?.content ?? "";
-  const outlineItems = useMemo(() => extractOutlineItems(activeChapterContent), [activeChapterContent]);
+  const deferredChapterContent = useDeferredValue(activeChapterContent);
+  const outlineItems = useMemo(() => extractOutlineItems(deferredChapterContent), [deferredChapterContent]);
+  const printChapter = useMemo(() => (activeChapter ? { ...activeChapter, content: deferredChapterContent } : null), [activeChapter, deferredChapterContent]);
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
   const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
@@ -253,10 +272,10 @@ export function EditorShell() {
 
     return JSON.stringify({
       activeChapterId: activeChapter.id,
-      content: activeChapter.content,
+      content: deferredChapterContent,
       pageSettings: project.pageSettings
     });
-  }, [activeChapter, project]);
+  }, [activeChapter, deferredChapterContent, project]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
   const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
 
@@ -443,7 +462,7 @@ export function EditorShell() {
   const saveToDrive = async () => {
     try {
       if (!isDriveConfigured()) {
-        window.alert("Google Drive連携を使うには .env.local に NEXT_PUBLIC_GOOGLE_CLIENT_ID と NEXT_PUBLIC_GOOGLE_API_KEY を設定して、再ビルドしてください。");
+        window.alert(googleDriveSetupMessage());
         return;
       }
 
@@ -791,7 +810,7 @@ export function EditorShell() {
           <CheckPanel project={project} checks={checks} />
         </aside>
       </div>
-      <PrintDocument project={project} chapter={activeChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} />
+      {printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
     </main>
   );
 }
@@ -1196,7 +1215,7 @@ function printStyle(project: ManuscriptProject) {
         margin: 0 !important;
         padding: 0 !important;
         overflow: hidden !important;
-        background: #fffdf8 !important;
+        background: #ffffff !important;
         color: #1f1d1a !important;
         box-shadow: none !important;
         break-after: page;

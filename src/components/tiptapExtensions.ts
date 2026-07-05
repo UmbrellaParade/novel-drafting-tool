@@ -1,4 +1,60 @@
-import { Extension, mergeAttributes, Node } from "@tiptap/core";
+import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
+
+function readFontSize(element: HTMLElement): string | null {
+  return element.style.fontSize || element.getAttribute("data-font-size") || null;
+}
+
+function fontSizeAttributes(fontSize: string | null | undefined): Record<string, string> {
+  if (!fontSize) {
+    return {};
+  }
+
+  return {
+    "data-font-size": fontSize,
+    style: `font-size: ${fontSize}`
+  };
+}
+
+export const FontSizeMark = Mark.create({
+  name: "fontSize",
+
+  addAttributes() {
+    return {
+      size: {
+        default: null,
+        parseHTML: (element) => readFontSize(element as HTMLElement),
+        renderHTML: (attributes) => fontSizeAttributes(attributes.size)
+      }
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "span[style*=font-size]" }, { tag: "span[data-font-size]" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ["span", mergeAttributes(HTMLAttributes), 0];
+  }
+});
+
+export const BlockFontSizeExtension = Extension.create({
+  name: "blockFontSize",
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["paragraph", "heading", "blockquote", "listItem"],
+        attributes: {
+          fontSize: {
+            default: null,
+            parseHTML: (element) => readFontSize(element as HTMLElement),
+            renderHTML: (attributes) => fontSizeAttributes(attributes.fontSize)
+          }
+        }
+      }
+    ];
+  }
+});
 
 export const PageBreakBeforeExtension = Extension.create({
   name: "pageBreakBefore",
