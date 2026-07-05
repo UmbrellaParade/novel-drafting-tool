@@ -25,7 +25,7 @@ import {
   XCircle
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
-import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks } from "@/lib/defaultProject";
+import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import {
@@ -39,7 +39,7 @@ import {
   type DriveFolder,
   type GoogleDriveSettings
 } from "@/lib/googleDrive";
-import { buildProjectPdf, exportProjectDocx, exportProjectEpub, type ProjectPdfBuildResult } from "@/lib/exporters";
+import { exportProjectDocx, exportProjectEpub } from "@/lib/exporters";
 
 type MobileTab = "draft" | "chapters" | "check";
 
@@ -61,6 +61,7 @@ const FAST_EDITING_RESET_MS = 3000;
 const PAGE_SCROLL_ALIGN_TOLERANCE_PX = 1.5;
 const PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS = 450;
 const PAGE_USER_SCROLL_WINDOW_MS = 900;
+const PDF_EXPORT_DPI = 300;
 
 type OutlineItem = {
   id: string;
@@ -88,9 +89,28 @@ type QrDraft = {
 type PdfPreviewState = {
   url: string;
   project: ManuscriptProject;
-  result: ProjectPdfBuildResult;
+  result: RasterPdfBuildResult;
   previewPageCount: number;
   isShimauma: boolean;
+};
+
+type PdfExportSnapshot = {
+  project: ManuscriptProject;
+  chapter: Chapter;
+  sectionTitles: string[];
+  pageCount: number;
+};
+
+type PdfExportLayoutMeasurement = {
+  pageCount: number;
+  sectionTitles: string[];
+};
+
+type RasterPdfBuildResult = {
+  bytes: Uint8Array;
+  pageCount: number;
+  fileName: string;
+  missingPagesForShimauma: number;
 };
 
 type SidebarPanelId = "outline" | "toc" | "project" | "qr" | "drive" | "check";
@@ -390,6 +410,219 @@ function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
+const mmToPt = (value: number) => (value * 72) / 25.4;
+
+function missingPagesForShimauma(project: ManuscriptProject, pageCount: number): number {
+  return isShimaumaPresetId(project.pageSettings.preset) && pageCount % 4 !== 0 ? 4 - (pageCount % 4) : 0;
+}
+
+async function nextAnimationFrame(): Promise<void> {
+  await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+async function waitForPdfExportDom(root: HTMLElement): Promise<void> {
+  await document.fonts?.ready;
+  const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
+  await Promise.all(
+    images.map((image) => {
+      if (image.complete && image.naturalWidth > 0) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener("error", () => resolve(), { once: true });
+      });
+    })
+  );
+}
+async function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((nextBlob) => {
+      if (nextBlob) {
+        resolve(nextBlob);
+      } else {
+        reject(new Error("PDF用ページ画像を作成できませんでした。"));
+      }
+    }, "image/png");
+  });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnapshot): Promise<RasterPdfBuildResult> {
+  const [{ default: html2canvas }, { PDFDocument }] = await Promise.all([import("html2canvas"), import("pdf-lib")]);
+  await waitForPdfExportDom(root);
+
+  const pageElements = Array.from(root.querySelectorAll<HTMLElement>(".pdf-export-page"));
+  if (pageElements.length !== snapshot.pageCount) {
+    throw new Error(`原稿ツールのページ数とPDF化するページ数が一致しません。原稿: ${snapshot.pageCount}ページ / PDF化対象: ${pageElements.length}ページ`);
+  }
+
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.setTitle(snapshot.project.title);
+
+  const pageWidthPt = mmToPt(snapshot.project.pageSettings.pageWidthMm);
+  const pageHeightPt = mmToPt(snapshot.project.pageSettings.pageHeightMm);
+  const renderScale = PDF_EXPORT_DPI / 96;
+
+  for (const pageElement of pageElements) {
+    const canvas = await html2canvas(pageElement, {
+      backgroundColor: "#ffffff",
+      scale: renderScale,
+      useCORS: true,
+      allowTaint: false,
+      logging: false,
+      imageTimeout: 30000,
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: Math.ceil(pageElement.scrollWidth),
+      windowHeight: Math.ceil(pageElement.scrollHeight)
+    });
+    const imageBytes = await canvasToPngBytes(canvas);
+    canvas.width = 0;
+    canvas.height = 0;
+
+    const image = await pdfDoc.embedPng(imageBytes);
+    const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+    page.drawImage(image, {
+      x: 0,
+      y: 0,
+      width: pageWidthPt,
+      height: pageHeightPt
+    });
+  }
+
+  const bytes = await pdfDoc.save();
+  const pageCount = pageElements.length;
+  return {
+    bytes: new Uint8Array(bytes),
+    pageCount,
+    fileName: `${sanitizeFileName(snapshot.project.title)}_book.pdf`,
+    missingPagesForShimauma: missingPagesForShimauma(snapshot.project, pageCount)
+  };
+}
+
+function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): void {
+  const page = snapshot.project.pageSettings;
+  const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
+  const columnGapMm = page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
+  const pagedContentWidthMm = contentWidthMm * snapshot.pageCount + columnGapMm * Math.max(0, snapshot.pageCount - 1);
+  root.style.setProperty("--page-width", `${page.pageWidthMm}mm`);
+  root.style.setProperty("--page-height", `${page.pageHeightMm}mm`);
+  root.style.setProperty("--margin-top", `${page.marginTopMm}mm`);
+  root.style.setProperty("--margin-bottom", `${page.marginBottomMm}mm`);
+  root.style.setProperty("--margin-left", `${page.marginLeftMm}mm`);
+  root.style.setProperty("--margin-right", `${page.marginRightMm}mm`);
+  root.style.setProperty("--manuscript-font-family", MANUSCRIPT_FONTS[page.fontFamily ?? "noto-serif-jp"].css);
+  root.style.setProperty("--manuscript-font-size", `${page.fontSizePt}pt`);
+  root.style.setProperty("--ruby-font-size", `${page.rubySizePt}pt`);
+  root.style.setProperty("--line-height", String(page.lineHeight));
+  root.style.setProperty("--paragraph-spacing", `${page.paragraphSpacingMm}mm`);
+  root.style.setProperty("--image-max-height", `${page.imageMaxHeightMm}mm`);
+  root.style.setProperty("--page-gap", `${PAGE_GAP_MM}mm`);
+  root.style.setProperty("--content-width", "calc(var(--page-width) - var(--margin-left) - var(--margin-right))");
+  root.style.setProperty("--content-height", "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))");
+  root.style.setProperty("--column-gap", "calc(var(--margin-left) + var(--margin-right) + var(--page-gap))");
+  root.style.setProperty("--paged-content-width", `${pagedContentWidthMm}mm`);
+}
+
+function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
+  const page = snapshot.project.pageSettings;
+  const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
+  const pagePitchMm = contentWidthMm + page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
+  const root = document.createElement("div");
+  root.className = "pdf-export-document";
+  root.lang = "ja";
+  root.setAttribute("aria-hidden", "true");
+  setPdfExportStyleVars(root, snapshot);
+
+  for (let pageIndex = 0; pageIndex < snapshot.pageCount; pageIndex += 1) {
+    const pageElement = document.createElement("section");
+    pageElement.className = "pdf-export-page";
+    pageElement.dataset.pageNumber = String(pageIndex + 1);
+
+    const header = document.createElement("header");
+    header.className = "pdf-export-page-header";
+    const title = snapshot.sectionTitles[pageIndex] ?? "";
+    if (title) {
+      const span = document.createElement("span");
+      span.textContent = title;
+      header.append(span);
+    }
+    pageElement.append(header);
+
+    const contentWindow = document.createElement("div");
+    contentWindow.className = "pdf-export-content-window";
+    const flow = document.createElement("div");
+    flow.className = "pdf-export-flow manuscript-prose";
+    flow.style.marginLeft = `-${pageIndex * pagePitchMm}mm`;
+    flow.innerHTML = snapshot.chapter.content;
+    contentWindow.append(flow);
+    pageElement.append(contentWindow);
+
+    const footer = document.createElement("footer");
+    footer.className = "pdf-export-page-footer";
+    if (page.showPageNumber) {
+      const span = document.createElement("span");
+      span.textContent = String(pageIndex + 1);
+      footer.append(span);
+    }
+    pageElement.append(footer);
+
+    root.append(pageElement);
+  }
+
+  return root;
+}
+
+async function measurePdfExportLayout(snapshot: PdfExportSnapshot): Promise<PdfExportLayoutMeasurement> {
+  const measurementRoot = createPdfExportDom({ ...snapshot, sectionTitles: [], pageCount: 1 });
+  document.body.append(measurementRoot);
+  try {
+    await nextAnimationFrame();
+    await waitForPdfExportDom(measurementRoot);
+    await nextAnimationFrame();
+
+    const contentWindow = measurementRoot.querySelector<HTMLElement>(".pdf-export-content-window");
+    const flow = measurementRoot.querySelector<HTMLElement>(".pdf-export-flow");
+    if (!contentWindow || !flow) {
+      throw new Error("PDF用ページの測定に失敗しました。");
+    }
+
+    const contentWidth = contentWindow.getBoundingClientRect().width || contentWindow.offsetWidth;
+    const computedColumnGap = Number.parseFloat(window.getComputedStyle(flow).columnGap);
+    const columnGap = Number.isFinite(computedColumnGap) ? computedColumnGap : 0;
+    const pagePitch = contentWidth + columnGap;
+    if (contentWidth <= 0 || pagePitch <= 0) {
+      throw new Error("PDF用ページサイズを測定できませんでした。");
+    }
+
+    const pageCount = Math.max(1, Math.min(Math.ceil((flow.scrollWidth + 1) / pagePitch), MAX_PAGE_FRAMES));
+    const sectionTitles = Array.from({ length: pageCount }, () => "");
+    const firstContentLeft = contentWindow.getBoundingClientRect().left;
+
+    flow.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
+      if (heading.closest("[data-type='table-of-contents']")) {
+        return;
+      }
+
+      const title = heading.textContent?.trim();
+      if (!title) {
+        return;
+      }
+
+      const pageIndex = Math.max(0, Math.min(pageCount - 1, Math.floor((heading.getBoundingClientRect().left - firstContentLeft + 2) / pagePitch)));
+      for (let index = pageIndex; index < sectionTitles.length; index += 1) {
+        sectionTitles[index] = title;
+      }
+    });
+
+    return { pageCount, sectionTitles };
+  } finally {
+    measurementRoot.remove();
+  }
+}
+
 function isTextInputTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -486,7 +719,6 @@ export function EditorShell() {
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
   const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
-  const [printDomActive, setPrintDomActive] = useState(false);
   const [pdfPreview, setPdfPreview] = useState<PdfPreviewState | null>(null);
   const [fastEditing, setFastEditing] = useState(false);
   const bundledDriveSettings = hasBundledGoogleDriveSettings();
@@ -566,18 +798,6 @@ export function EditorShell() {
   }, [fastEditing]);
 
   useEffect(() => {
-    const activatePrintDom = () => setPrintDomActive(true);
-    const deactivatePrintDom = () => setPrintDomActive(false);
-
-    window.addEventListener("beforeprint", activatePrintDom);
-    window.addEventListener("afterprint", deactivatePrintDom);
-    return () => {
-      window.removeEventListener("beforeprint", activatePrintDom);
-      window.removeEventListener("afterprint", deactivatePrintDom);
-    };
-  }, []);
-
-  useEffect(() => {
     if (!project) {
       return;
     }
@@ -631,7 +851,6 @@ export function EditorShell() {
     () => outlineItems.map((item) => ({ ...item, page: headingPageNumbers[item.index] ?? null })),
     [headingPageNumbers, outlineItems]
   );
-  const printChapter = useMemo(() => (activeChapter ? { ...activeChapter, content: layoutChapterContent } : null), [activeChapter, layoutChapterContent]);
 
   const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject) : []), [layoutProject]);
   const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject) : 1), [layoutProject]);
@@ -1446,13 +1665,13 @@ export function EditorShell() {
     setPdfPreview(nextPreview);
   };
 
-  const openPdfPreview = (latestProject: ManuscriptProject, result: ProjectPdfBuildResult) => {
+  const openPdfPreview = (latestProject: ManuscriptProject, result: RasterPdfBuildResult, previewPageCount = pageFrameCount) => {
     const blob = new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" });
     setPdfPreviewState({
       url: URL.createObjectURL(blob),
       project: latestProject,
       result,
-      previewPageCount: pageFrameCount,
+      previewPageCount,
       isShimauma: isShimaumaPresetId(latestProject.pageSettings.preset)
     });
   };
@@ -1471,8 +1690,9 @@ export function EditorShell() {
   };
 
   const exportPdf = async () => {
+    let exportRoot: HTMLElement | null = null;
     try {
-      setStatusText("本用PDFを作成中");
+      setStatusText("原稿ツールのページからPDFを作成中");
       const latestProject = projectWithLatestOutputState(project);
       const latestChapter = latestProject.chapters[0];
       if (!latestChapter) {
@@ -1480,22 +1700,57 @@ export function EditorShell() {
         return;
       }
 
-      const result = await buildProjectPdf(latestProject);
-      if (result.missingPagesForShimauma > 0) {
+      const baseSnapshot: PdfExportSnapshot = {
+        project: latestProject,
+        chapter: latestChapter,
+        sectionTitles: [],
+        pageCount: 1
+      };
+      const measuredLayout = await measurePdfExportLayout(baseSnapshot);
+      const exportPageCount = measuredLayout.pageCount;
+      const missingPages = missingPagesForShimauma(latestProject, exportPageCount);
+      if (missingPages > 0) {
         window.alert(
-          `しまうま出稿では4ページ単位が必要です。現在のPDFは${result.pageCount}ページなので、本文・奥付・QRページなど意図した内容であと${result.missingPagesForShimauma}ページ分を調整してからPDF保存してください。`
+          `しまうま出稿では4ページ単位が必要です。現在の原稿ツールは${exportPageCount}ページなので、本文・奥付・QRページなど意図した内容であと${missingPages}ページ分を調整してからPDF保存してください。`
         );
         setStatusText("PDFは4ページ単位に調整が必要です");
         return;
       }
 
+      const snapshot: PdfExportSnapshot = {
+        project: latestProject,
+        chapter: latestChapter,
+        sectionTitles: measuredLayout.sectionTitles,
+        pageCount: exportPageCount
+      };
+      exportRoot = createPdfExportDom(snapshot);
+      document.body.append(exportRoot);
+      await nextAnimationFrame();
+      await nextAnimationFrame();
+
+      const result = await buildRasterPdfFromDom(exportRoot, snapshot);
+      if (result.pageCount !== exportPageCount) {
+        throw new Error(`原稿ツールとPDFのページ数が一致しません。原稿: ${exportPageCount}ページ / PDF: ${result.pageCount}ページ`);
+      }
+
       flushPendingChapterContent();
-      openPdfPreview(latestProject, result);
+      setPageSectionTitles((previous) => (sameStringList(previous, measuredLayout.sectionTitles) ? previous : measuredLayout.sectionTitles));
+      setMeasuredPages({
+        signature: JSON.stringify({
+          activeChapterId: latestChapter.id,
+          content: latestChapter.content,
+          pageSettings: latestProject.pageSettings
+        }),
+        count: exportPageCount
+      });
+      openPdfPreview(latestProject, result, exportPageCount);
       setStatusText("PDFプレビューを確認してください");
     } catch (error) {
       setStatusText("PDF作成に失敗");
       window.console.error(error);
       window.alert(error instanceof Error ? error.message : "PDFを作成できませんでした。");
+    } finally {
+      exportRoot?.remove();
     }
   };
 
@@ -1705,7 +1960,6 @@ export function EditorShell() {
 
   return (
     <main className="app-shell" style={pageStyle}>
-      <style>{printStyle(project)}</style>
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark">UP</span>
@@ -1906,9 +2160,6 @@ export function EditorShell() {
           onDownload={downloadPdfPreview}
         />
       ) : null}
-      {printDomActive && printChapter ? (
-        <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} />
-      ) : null}
     </main>
   );
 }
@@ -1964,46 +2215,6 @@ function PdfPreviewDialog({
           <button type="button" onClick={onClose}>閉じる</button>
         </footer>
       </section>
-    </div>
-  );
-}
-
-function PrintDocument({
-  project,
-  chapter,
-  sectionTitles,
-  pageCount
-}: {
-  project: ManuscriptProject;
-  chapter: Chapter;
-  sectionTitles: string[];
-  pageCount: number;
-}) {
-  const page = project.pageSettings;
-  const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
-  const pagePitchMm = contentWidthMm + page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
-
-  return (
-    <div className="print-document" aria-hidden="true" lang="ja">
-      {Array.from({ length: pageCount }, (_, pageIndex) => (
-        <section key={pageIndex} className="print-page">
-          <header className="print-page-header">
-            {sectionTitles[pageIndex] ? <span>{sectionTitles[pageIndex]}</span> : null}
-          </header>
-          {page.showBleedGuide ? <div className="print-bleed-guide" /> : null}
-          {page.showSafeArea ? <div className="print-safe-guide" /> : null}
-          <div className="print-content-window">
-            <div
-              className="print-flow manuscript-prose"
-              style={{ marginLeft: `-${pageIndex * pagePitchMm}mm` }}
-              dangerouslySetInnerHTML={{ __html: chapter.content }}
-            />
-          </div>
-          <footer className="print-page-footer">
-            {page.showPageNumber ? <span>{pageIndex + 1}</span> : null}
-          </footer>
-        </section>
-      ))}
     </div>
   );
 }
@@ -2645,153 +2856,4 @@ function NumberField({
       />
     </label>
   );
-}
-
-function printStyle(project: ManuscriptProject) {
-  const page = project.pageSettings;
-  return `
-    .print-document {
-      display: none;
-    }
-
-    @media print {
-      @page {
-        size: ${page.pageWidthMm}mm ${page.pageHeightMm}mm;
-        margin: 0;
-      }
-
-      html,
-      body {
-        background: #ffffff !important;
-        width: ${page.pageWidthMm}mm !important;
-        min-height: auto !important;
-        overflow: visible !important;
-      }
-
-      .app-shell > :not(.print-document) {
-        display: none !important;
-      }
-
-      .app-shell {
-        display: block !important;
-        background: #ffffff !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        width: ${page.pageWidthMm}mm !important;
-        height: auto !important;
-        max-height: none !important;
-        overflow: visible !important;
-      }
-
-      .print-document {
-        display: block !important;
-        width: ${page.pageWidthMm}mm !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        background: #ffffff !important;
-      }
-
-      .print-page {
-        position: relative;
-        width: ${page.pageWidthMm}mm !important;
-        height: ${page.pageHeightMm}mm !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-        background: #ffffff !important;
-        color: #1f1d1a !important;
-        box-shadow: none !important;
-        break-after: page;
-        page-break-after: always;
-        print-color-adjust: exact;
-        -webkit-print-color-adjust: exact;
-      }
-
-      .print-page:last-child {
-        break-after: auto;
-        page-break-after: auto;
-      }
-
-      .print-page-header,
-      .print-page-footer {
-        position: absolute;
-        left: ${page.marginLeftMm}mm;
-        right: ${page.marginRightMm}mm;
-        z-index: 3;
-        display: flex;
-        justify-content: flex-end;
-        gap: 4mm;
-        overflow: hidden;
-        color: #7a7168;
-        font-family: var(--font-sans), sans-serif;
-        font-size: 7pt;
-        line-height: 1.25;
-      }
-
-      .print-page-header {
-        top: max(2mm, calc(${page.marginTopMm}mm / 2 - 3pt));
-      }
-
-      .print-page-footer {
-        bottom: max(2mm, calc(${page.marginBottomMm}mm / 2 - 3pt));
-      }
-
-      .print-page-header span,
-      .print-page-footer span {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .print-bleed-guide,
-      .print-safe-guide {
-        display: none !important;
-      }
-
-      .print-content-window {
-        position: absolute;
-        top: ${page.marginTopMm}mm;
-        left: ${page.marginLeftMm}mm;
-        z-index: 1;
-        width: calc(${page.pageWidthMm}mm - ${page.marginLeftMm}mm - ${page.marginRightMm}mm);
-        height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm);
-        overflow: hidden !important;
-      }
-
-      .print-flow.manuscript-prose {
-        width: var(--paged-content-width) !important;
-        height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm) !important;
-        min-height: calc(${page.pageHeightMm}mm - ${page.marginTopMm}mm - ${page.marginBottomMm}mm) !important;
-        max-height: none !important;
-        columns: calc(${page.pageWidthMm}mm - ${page.marginLeftMm}mm - ${page.marginRightMm}mm) auto !important;
-        column-width: calc(${page.pageWidthMm}mm - ${page.marginLeftMm}mm - ${page.marginRightMm}mm) !important;
-        column-gap: calc(${page.marginLeftMm}mm + ${page.marginRightMm}mm + ${PAGE_GAP_MM}mm) !important;
-        column-fill: auto !important;
-        overflow: visible !important;
-        outline: 0 !important;
-      }
-
-      .print-flow .page-break-before,
-      .print-flow [data-page-break-before="true"] {
-        break-before: column !important;
-      }
-
-      .print-flow .page-break-before::before,
-      .print-flow [data-page-break-before="true"]::before {
-        content: none !important;
-      }
-
-      .print-flow .page-break {
-        height: 1px !important;
-        margin: 0 !important;
-        border: 0 !important;
-        break-after: column !important;
-      }
-
-      .print-flow .page-break::before {
-        content: none !important;
-      }
-    }
-  `;
 }

@@ -1013,6 +1013,110 @@ h1 {
   outline: none;
 }
 
+.pdf-export-document {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  z-index: -1;
+  display: block;
+  width: var(--page-width);
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  pointer-events: none;
+  background: #ffffff;
+  color: #1f1d1a;
+}
+
+.pdf-export-page {
+  position: relative;
+  width: var(--page-width);
+  height: var(--page-height);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #ffffff;
+  color: #1f1d1a;
+  box-shadow: none;
+  border: 0;
+}
+
+.pdf-export-page-header,
+.pdf-export-page-footer {
+  position: absolute;
+  left: var(--margin-left);
+  right: var(--margin-right);
+  z-index: 3;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4mm;
+  overflow: hidden;
+  color: #7a7168;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 7pt;
+  line-height: 1.25;
+}
+
+.pdf-export-page-header {
+  top: max(2mm, calc(var(--margin-top) / 2 - 3pt));
+}
+
+.pdf-export-page-footer {
+  bottom: max(2mm, calc(var(--margin-bottom) / 2 - 3pt));
+}
+
+.pdf-export-page-header span,
+.pdf-export-page-footer span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-export-content-window {
+  position: absolute;
+  top: var(--margin-top);
+  left: var(--margin-left);
+  z-index: 1;
+  width: calc(var(--page-width) - var(--margin-left) - var(--margin-right));
+  height: calc(var(--page-height) - var(--margin-top) - var(--margin-bottom));
+  overflow: hidden;
+}
+
+.pdf-export-flow.manuscript-prose {
+  width: var(--paged-content-width);
+  height: calc(var(--page-height) - var(--margin-top) - var(--margin-bottom));
+  min-height: calc(var(--page-height) - var(--margin-top) - var(--margin-bottom));
+  max-height: none;
+  columns: calc(var(--page-width) - var(--margin-left) - var(--margin-right)) auto;
+  column-width: calc(var(--page-width) - var(--margin-left) - var(--margin-right));
+  column-gap: calc(var(--margin-left) + var(--margin-right) + var(--page-gap));
+  column-fill: auto;
+  overflow: visible;
+  outline: 0;
+}
+
+.pdf-export-flow .page-break-before,
+.pdf-export-flow [data-page-break-before="true"] {
+  break-before: column;
+}
+
+.pdf-export-flow .page-break-before::before,
+.pdf-export-flow [data-page-break-before="true"]::before {
+  content: none;
+}
+
+.pdf-export-flow .page-break {
+  height: 1px;
+  margin: 0;
+  border: 0;
+  break-after: column;
+}
+
+.pdf-export-flow .page-break::before {
+  content: none;
+}
+
 .paper-page {
   position: relative;
   flex: 0 0 auto;

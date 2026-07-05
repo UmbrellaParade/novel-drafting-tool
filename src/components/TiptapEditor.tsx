@@ -936,10 +936,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <ToolButton label="進む" disabled={disabled} onClick={() => editor?.chain().focus().redo().run()}>
           <Redo2 size={18} />
         </ToolButton>
-        <span className="toolbar-divider" />
-        <ToolButton label="選択行を通常文に戻す" active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
-          <span className="ruby-tool-label">通常文</span>
-        </ToolButton>
         <ToolButton label="見出し1" active={editor?.isActive("heading", { level: 1 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
           <Heading1 size={18} />
         </ToolButton>
