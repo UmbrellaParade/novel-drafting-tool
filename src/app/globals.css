@@ -1463,9 +1463,11 @@ h1 {
   max-height: min(max(var(--image-max-height), calc(var(--content-height) - 4mm)), calc(var(--page-height) - 8mm));
   height: auto;
   margin: 4mm auto;
-  break-before: avoid-column;
+  break-before: auto;
   break-inside: avoid-column;
+  page-break-before: auto;
   page-break-inside: avoid;
+  -webkit-column-break-before: auto;
   object-fit: contain;
 }
 
@@ -1474,9 +1476,11 @@ h1 {
   max-width: var(--content-width);
   justify-content: center;
   margin: 4mm 0;
-  break-before: avoid-column;
+  break-before: auto;
   break-inside: avoid-column;
+  page-break-before: auto;
   page-break-inside: avoid;
+  -webkit-column-break-before: auto;
 }
 
 .manuscript-prose [data-resize-container][data-node="image"] [data-resize-wrapper] {
