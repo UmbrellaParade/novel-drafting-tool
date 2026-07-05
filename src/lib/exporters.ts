@@ -1,4 +1,4 @@
-import type { ManuscriptProject, QrCardTemplateId } from "./types";
+import type { ManuscriptProject, QrCardTemplateId, TocStyleId } from "./types";
 import { downloadBlob } from "./storage";
 import { sanitizeFileName, stripHtml } from "./defaultProject";
 import type { PDFDocument, PDFFont, PDFImage, PDFPage, RGB } from "pdf-lib";
@@ -36,7 +36,20 @@ type PdfQrBlock = {
   width?: number;
 };
 
-type PdfBlock = PdfTextBlock | PdfImageBlock | PdfQrBlock | { kind: "pageBreak" };
+type TocExportEntry = {
+  title: string;
+  page: number | null;
+};
+
+type PdfTocBlock = {
+  kind: "toc";
+  title: string;
+  subtitle: string;
+  style: TocStyleId;
+  items: TocExportEntry[];
+};
+
+type PdfBlock = PdfTextBlock | PdfImageBlock | PdfQrBlock | PdfTocBlock | { kind: "pageBreak" };
 
 type EpubAsset = {
   id: string;
@@ -320,6 +333,8 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
         await drawImageBlock(state, block);
       } else if (block.kind === "qr") {
         await drawQrBlock(state, block);
+      } else if (block.kind === "toc") {
+        drawTocBlock(state, block);
       } else {
         if (block.level === 1) {
           state.chapterTitle = normalizePdfText(block.text) || state.chapterTitle;
@@ -373,7 +388,7 @@ async function buildEpubChapter(title: string, html: string, chapterNumber: numb
   });
 
   const navItems: EpubNavItem[] = [];
-  const headings = [...template.content.querySelectorAll<HTMLElement>("h1")];
+  const headings = [...template.content.querySelectorAll<HTMLElement>("h1")].filter((heading) => !heading.closest("[data-type='table-of-contents']"));
   if (headings.length === 0) {
     const heading = document.createElement("h1");
     heading.textContent = title;
@@ -554,6 +569,88 @@ img {
 [data-page-break-before="true"] {
   break-before: page;
   page-break-before: always;
+}
+
+.manuscript-toc {
+  display: block;
+  margin: 1.4em auto;
+  padding: 1.4em;
+  border: 1px solid #37312c;
+  background: #ffffff;
+}
+
+.toc-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.45em;
+  font-weight: bold;
+}
+
+.toc-subtitle {
+  margin: 0.4em 0 1.2em;
+  text-align: center;
+  color: #6b6258;
+  font-size: 0.9em;
+}
+
+.toc-subtitle-empty {
+  display: none;
+}
+
+.toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc-entry {
+  display: table;
+  width: 100%;
+  margin: 0.35em 0;
+}
+
+.toc-entry-title,
+.toc-entry-leader,
+.toc-entry-page {
+  display: table-cell;
+  vertical-align: baseline;
+}
+
+.toc-entry-title {
+  width: auto;
+}
+
+.toc-entry-leader {
+  width: 100%;
+  border-bottom: 1px dotted currentColor;
+  opacity: 0.42;
+}
+
+.toc-entry-page {
+  min-width: 2.5em;
+  color: #1f5c54;
+  text-align: right;
+}
+
+.manuscript-toc-rain {
+  border-color: #2f716a;
+  background: #eef8f5;
+}
+
+.manuscript-toc-antique {
+  border: 1.5px double #5b422d;
+  background: #fff8e8;
+}
+
+.manuscript-toc-midnight {
+  border-color: #d6b56b;
+  background: #151c2d;
+  color: #fff7e5;
+}
+
+.manuscript-toc-midnight .toc-subtitle,
+.manuscript-toc-midnight .toc-entry-page {
+  color: #e8cf8b;
 }
 
 .qr-card {
@@ -841,6 +938,114 @@ function drawTextBlock(state: PdfRenderState, text: string, level: 0 | 1 | 2 | 3
   state.y -= spaceAfter;
 }
 
+function drawTocBlock(state: PdfRenderState, block: PdfTocBlock): void {
+  const theme = tocPdfTheme(state, block.style);
+  const baseSize = projectFontSize(state);
+  const titleSize = baseSize * 1.55;
+  const subtitleSize = baseSize * 0.86;
+  const entrySize = baseSize;
+  const title = normalizePdfText(block.title) || "目次";
+  const subtitle = normalizePdfText(block.subtitle);
+  const topPadding = mmToPt(4);
+  const bottomPadding = mmToPt(4);
+  const entryLineHeight = entrySize * 1.65;
+
+  ensureVerticalSpace(state, topPadding + titleSize * 2.2);
+  state.page.drawLine({
+    start: { x: state.contentX, y: state.y },
+    end: { x: state.contentX + state.contentWidth, y: state.y },
+    thickness: theme.borderWidth,
+    color: theme.border
+  });
+  state.y -= topPadding;
+
+  const titleWidth = state.uiFont.widthOfTextAtSize(title, titleSize);
+  state.page.drawText(title, {
+    x: state.contentX + (state.contentWidth - titleWidth) / 2,
+    y: state.y - titleSize,
+    font: state.uiFont,
+    size: titleSize,
+    color: theme.ink
+  });
+  state.y -= titleSize * 1.55;
+
+  if (subtitle) {
+    const subtitleLines = wrapText(subtitle, state.uiFont, subtitleSize, state.contentWidth);
+    for (const line of subtitleLines) {
+      ensureVerticalSpace(state, subtitleSize * 1.35);
+      const lineWidth = state.uiFont.widthOfTextAtSize(line, subtitleSize);
+      state.page.drawText(line, {
+        x: state.contentX + (state.contentWidth - lineWidth) / 2,
+        y: state.y - subtitleSize,
+        font: state.uiFont,
+        size: subtitleSize,
+        color: theme.muted
+      });
+      state.y -= subtitleSize * 1.35;
+    }
+    state.y -= mmToPt(2);
+  }
+
+  for (const item of block.items) {
+    const itemTitle = normalizePdfText(item.title);
+    if (!itemTitle) {
+      continue;
+    }
+
+    const pageText = item.page === null ? "..." : String(item.page);
+    const pageWidth = state.uiFont.widthOfTextAtSize(pageText, entrySize);
+    const titleWidthLimit = Math.max(mmToPt(24), state.contentWidth - pageWidth - mmToPt(10));
+    const titleLines = wrapText(itemTitle, state.font, entrySize, titleWidthLimit);
+
+    titleLines.forEach((line, lineIndex) => {
+      ensureVerticalSpace(state, entryLineHeight);
+      state.page.drawText(line, {
+        x: state.contentX,
+        y: state.y - entrySize,
+        font: state.font,
+        size: entrySize,
+        color: theme.ink
+      });
+
+      if (lineIndex === 0) {
+        const lineWidth = state.font.widthOfTextAtSize(line, entrySize);
+        const dotsX = state.contentX + Math.min(titleWidthLimit, lineWidth) + mmToPt(2);
+        const pageX = state.contentX + state.contentWidth - pageWidth;
+        const dotsWidth = Math.max(0, pageX - dotsX - mmToPt(2));
+        const dots = ".".repeat(Math.floor(dotsWidth / Math.max(1, state.uiFont.widthOfTextAtSize(".", entrySize))));
+        if (dots) {
+          state.page.drawText(dots, {
+            x: dotsX,
+            y: state.y - entrySize,
+            font: state.uiFont,
+            size: entrySize,
+            color: theme.muted
+          });
+        }
+        state.page.drawText(pageText, {
+          x: pageX,
+          y: state.y - entrySize,
+          font: state.uiFont,
+          size: entrySize,
+          color: theme.accent
+        });
+      }
+
+      state.y -= entryLineHeight;
+    });
+  }
+
+  ensureVerticalSpace(state, bottomPadding + mmToPt(1));
+  state.y -= bottomPadding;
+  state.page.drawLine({
+    start: { x: state.contentX, y: state.y },
+    end: { x: state.contentX + state.contentWidth, y: state.y },
+    thickness: theme.borderWidth,
+    color: theme.border
+  });
+  state.y -= mmToPt(state.project.pageSettings.paragraphSpacingMm + 2);
+}
+
 async function drawImageBlock(state: PdfRenderState, block: PdfImageBlock): Promise<void> {
   if (!block.src) {
     return;
@@ -947,6 +1152,19 @@ function qrPdfTheme(state: PdfRenderState, template: QrCardTemplateId): { backgr
     return { background: state.colors.midnightPaper, border: state.colors.gold, ink: state.colors.midnightInk, muted: state.colors.midnightInk, borderWidth: 1, qrDark: "#141c2d" };
   }
   return { background: state.colors.white, border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, borderWidth: 0.8, qrDark: "#24211d" };
+}
+
+function tocPdfTheme(state: PdfRenderState, style: TocStyleId): { border: RGB; ink: RGB; muted: RGB; accent: RGB; borderWidth: number } {
+  if (style === "rain") {
+    return { border: state.colors.rain, ink: state.colors.ink, muted: state.colors.rain, accent: state.colors.rain, borderWidth: 0.9 };
+  }
+  if (style === "antique") {
+    return { border: state.colors.antiqueInk, ink: state.colors.antiqueInk, muted: state.colors.muted, accent: state.colors.antiqueInk, borderWidth: 1.1 };
+  }
+  if (style === "midnight") {
+    return { border: state.colors.gold, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.gold, borderWidth: 1 };
+  }
+  return { border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.rain, borderWidth: 0.8 };
 }
 
 function ensureVerticalSpace(state: PdfRenderState, neededHeight: number): void {
@@ -1060,8 +1278,12 @@ function parsePdfBlocks(html: string): PdfBlock[] {
   template.innerHTML = html;
   const blocks: PdfBlock[] = [];
 
-  template.content.querySelectorAll("p,h1,h2,h3,li,blockquote,div[data-type='page-break'],figure[data-type='qr-card'],img").forEach((node) => {
+  template.content.querySelectorAll("section[data-type='table-of-contents'],p,h1,h2,h3,li,blockquote,div[data-type='page-break'],figure[data-type='qr-card'],img").forEach((node) => {
     const element = node as HTMLElement;
+    if (element.closest("section[data-type='table-of-contents']") && !element.matches("section[data-type='table-of-contents']")) {
+      return;
+    }
+
     if (element.matches("div[data-type='page-break']")) {
       blocks.push({ kind: "pageBreak" });
       return;
@@ -1081,6 +1303,17 @@ function parsePdfBlocks(html: string): PdfBlock[] {
         label: element.dataset.label ?? "Umbrella Parade 記録室",
         template: parseQrTemplate(element.dataset.template),
         width: parseHtmlDimension(element.dataset.width ?? element.style.width)
+      });
+      return;
+    }
+
+    if (element.matches("section[data-type='table-of-contents']")) {
+      blocks.push({
+        kind: "toc",
+        title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
+        subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
+        style: parseTocStyle(element.dataset.style),
+        items: parseTocEntries(element)
       });
       return;
     }
@@ -1134,6 +1367,37 @@ function parseQrTemplate(value: string | undefined): QrCardTemplateId {
   return value === "rain-letter" || value === "antique-book" || value === "midnight" || value === "umbrella" ? value : "umbrella";
 }
 
+function parseTocStyle(value: string | undefined): TocStyleId {
+  return value === "rain" || value === "antique" || value === "midnight" || value === "classic" ? value : "classic";
+}
+
+function parseTocEntries(element: HTMLElement): TocExportEntry[] {
+  const savedItems = element.dataset.items;
+  if (savedItems) {
+    try {
+      const parsed = JSON.parse(savedItems) as Array<Partial<TocExportEntry>>;
+      return parsed
+        .map((item) => ({
+          title: typeof item.title === "string" ? item.title : "",
+          page: typeof item.page === "number" && Number.isFinite(item.page) ? item.page : null
+        }))
+        .filter((item) => item.title);
+    } catch {
+      // Fall through to DOM parsing.
+    }
+  }
+
+  return [...element.querySelectorAll<HTMLElement>(".toc-entry")]
+    .map((entry) => {
+      const page = Number.parseInt(entry.querySelector(".toc-entry-page")?.textContent?.trim() ?? "", 10);
+      return {
+        title: entry.querySelector(".toc-entry-title")?.textContent?.trim() ?? "",
+        page: Number.isFinite(page) ? page : null
+      };
+    })
+    .filter((item) => item.title);
+}
+
 function hasPageBreakBefore(element: HTMLElement): boolean {
   return element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before");
 }
@@ -1143,8 +1407,12 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
   template.innerHTML = html;
   const blocks: Array<{ kind: "paragraph" | "heading" | "pageBreak"; text: string }> = [];
 
-  template.content.querySelectorAll("p,h1,h2,h3,li,blockquote,div[data-type='page-break'],figure[data-type='qr-card']").forEach((node) => {
+  template.content.querySelectorAll("section[data-type='table-of-contents'],p,h1,h2,h3,li,blockquote,div[data-type='page-break'],figure[data-type='qr-card']").forEach((node) => {
     const element = node as HTMLElement;
+    if (element.closest("section[data-type='table-of-contents']") && !element.matches("section[data-type='table-of-contents']")) {
+      return;
+    }
+
     if (element.matches("div[data-type='page-break']")) {
       blocks.push({ kind: "pageBreak", text: "" });
       return;
@@ -1152,6 +1420,19 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
 
     if (hasPageBreakBefore(element)) {
       blocks.push({ kind: "pageBreak", text: "" });
+    }
+
+    if (element.matches("section[data-type='table-of-contents']")) {
+      const title = element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次";
+      const subtitle = element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "";
+      blocks.push({ kind: "heading", text: title });
+      if (subtitle) {
+        blocks.push({ kind: "paragraph", text: subtitle });
+      }
+      parseTocEntries(element).forEach((item) => {
+        blocks.push({ kind: "paragraph", text: `${item.title} .... ${item.page ?? ""}`.trim() });
+      });
+      return;
     }
 
     if (element.matches("figure[data-type='qr-card']")) {

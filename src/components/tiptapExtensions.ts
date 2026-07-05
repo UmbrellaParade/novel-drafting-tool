@@ -28,6 +28,56 @@ function qrCardWidthAttributes(width: unknown): Record<string, string> {
   };
 }
 
+type TocNodeItem = {
+  title: string;
+  page: number | null;
+};
+
+function readTocItems(value: unknown): TocNodeItem[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => ({
+        title: typeof item?.title === "string" ? item.title : "",
+        page: typeof item?.page === "number" && Number.isFinite(item.page) ? item.page : null
+      }))
+      .filter((item) => item.title);
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  try {
+    return readTocItems(JSON.parse(value));
+  } catch {
+    return [];
+  }
+}
+
+function tocItemsFromElement(element: HTMLElement): TocNodeItem[] {
+  const savedItems = element.dataset.items;
+  if (savedItems) {
+    return readTocItems(savedItems);
+  }
+
+  return [...element.querySelectorAll<HTMLElement>(".toc-entry")].map((entry) => {
+    const pageText = entry.querySelector(".toc-entry-page")?.textContent?.trim() ?? "";
+    const page = Number.parseInt(pageText, 10);
+    return {
+      title: entry.querySelector(".toc-entry-title")?.textContent?.trim() ?? "",
+      page: Number.isFinite(page) ? page : null
+    };
+  }).filter((item) => item.title);
+}
+
+function tocStyle(value: unknown): string {
+  return value === "rain" || value === "antique" || value === "midnight" || value === "classic" ? value : "classic";
+}
+
+function tocItemsAttribute(items: unknown): string {
+  return JSON.stringify(readTocItems(items));
+}
+
 export const FontSizeMark = Mark.create({
   name: "fontSize",
 
@@ -75,7 +125,7 @@ export const PageBreakBeforeExtension = Extension.create({
   addGlobalAttributes() {
     return [
       {
-        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard"],
+        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard", "tableOfContents"],
         attributes: {
           pageBreakBefore: {
             default: false,
@@ -94,6 +144,81 @@ export const PageBreakBeforeExtension = Extension.create({
         }
       }
     ];
+  }
+});
+
+export const TableOfContentsNode = Node.create({
+  name: "tableOfContents",
+  group: "block",
+  atom: true,
+  draggable: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      title: { default: "目次" },
+      subtitle: { default: "" },
+      style: { default: "classic" },
+      items: {
+        default: "[]",
+        parseHTML: (element) => (element as HTMLElement).dataset.items ?? "[]",
+        renderHTML: (attributes) => ({
+          "data-items": tocItemsAttribute(attributes.items)
+        })
+      }
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "section[data-type='table-of-contents']",
+        getAttrs: (node) => {
+          const element = node as HTMLElement;
+          return {
+            title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
+            subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
+            style: tocStyle(element.dataset.style),
+            items: JSON.stringify(tocItemsFromElement(element))
+          };
+        }
+      }
+    ];
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const style = tocStyle(node.attrs.style);
+    const items = readTocItems(node.attrs.items);
+    const subtitle = typeof node.attrs.subtitle === "string" ? node.attrs.subtitle : "";
+
+    return [
+      "section",
+      mergeAttributes(HTMLAttributes, {
+        "data-type": "table-of-contents",
+        "data-title": node.attrs.title,
+        "data-subtitle": subtitle,
+        "data-style": style,
+        class: `manuscript-toc manuscript-toc-${style}`
+      }),
+      ["div", { class: "toc-title" }, node.attrs.title || "目次"],
+      ["p", { class: subtitle ? "toc-subtitle" : "toc-subtitle toc-subtitle-empty" }, subtitle],
+      [
+        "ol",
+        { class: "toc-list" },
+        ...items.map((item) => [
+          "li",
+          { class: "toc-entry" },
+          ["span", { class: "toc-entry-title" }, item.title],
+          ["span", { class: "toc-entry-leader" }, ""],
+          ["span", { class: "toc-entry-page" }, item.page === null ? "…" : String(item.page)]
+        ])
+      ]
+    ];
+  },
+
+  renderText({ node }) {
+    const items = readTocItems(node.attrs.items);
+    return [node.attrs.title || "目次", ...items.map((item) => `${item.title} ${item.page ?? ""}`)].join("\n");
   }
 });
 

@@ -7,9 +7,11 @@ import {
   BookOpen,
   CheckCircle2,
   Cloud,
+  CloudCog,
   FileJson,
   FileText,
   FolderOpen,
+  ListTree,
   Pencil,
   Plus,
   Printer,
@@ -19,10 +21,10 @@ import {
   XCircle
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar } from "./TiptapEditor";
-import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, runManuscriptChecks } from "@/lib/defaultProject";
-import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink } from "@/lib/types";
+import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks } from "@/lib/defaultProject";
+import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
-import { connectGoogleDrive, isDriveConfigured } from "@/lib/googleDrive";
+import { clearGoogleDriveSettings, connectGoogleDrive, isDriveConfigured, loadGoogleDriveSettings, resetGoogleDriveClient, saveGoogleDriveSettings, type GoogleDriveSettings } from "@/lib/googleDrive";
 import { exportProjectDocx, exportProjectEpub, exportProjectPdf } from "@/lib/exporters";
 
 type MobileTab = "draft" | "chapters" | "check";
@@ -47,6 +49,10 @@ type OutlineItem = {
   id: string;
   title: string;
   index: number;
+};
+
+type TocEntry = OutlineItem & {
+  page: number | null;
 };
 
 type QrDraft = {
@@ -92,6 +98,26 @@ const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: 
 };
 
 const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式サイト", template: "umbrella" };
+const EMPTY_DRIVE_SETTINGS: GoogleDriveSettings = { clientId: "", apiKey: "" };
+
+const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string }> = {
+  classic: {
+    label: "クラシック",
+    description: "白地に細い罫線"
+  },
+  rain: {
+    label: "雨の手紙",
+    description: "青緑の淡い装飾"
+  },
+  antique: {
+    label: "古書",
+    description: "古紙風の装飾"
+  },
+  midnight: {
+    label: "夜祭",
+    description: "濃色に金色の罫線"
+  }
+};
 
 function getQrCardTemplateId(value: QrCardTemplateId | undefined): QrCardTemplateId {
   return value && QR_CARD_TEMPLATES[value] ? value : "umbrella";
@@ -134,7 +160,8 @@ function normalizePageBreaks(content: string): string {
 }
 
 function normalizeDocumentProject(project: ManuscriptProject): ManuscriptProject {
-  const savedChapters = Array.isArray(project.chapters) ? project.chapters : [];
+  const normalizedProject = normalizeProject(project);
+  const savedChapters = Array.isArray(normalizedProject.chapters) ? normalizedProject.chapters : [];
   const chapters = (savedChapters.length
     ? savedChapters
     : [{ id: crypto.randomUUID(), title: DOCUMENT_CHAPTER_TITLE, content: "<p></p>" }]).map((chapter) => ({
@@ -145,7 +172,7 @@ function normalizeDocumentProject(project: ManuscriptProject): ManuscriptProject
   if (chapters.length === 1) {
     const [chapter] = chapters;
     return {
-      ...project,
+      ...normalizedProject,
       chapters: [{ ...chapter, title: DOCUMENT_CHAPTER_TITLE }],
       activeChapterId: chapter.id
     };
@@ -161,7 +188,7 @@ function normalizeDocumentProject(project: ManuscriptProject): ManuscriptProject
     .join("");
 
   return {
-    ...project,
+    ...normalizedProject,
     chapters: [
       {
         id: documentId,
@@ -174,8 +201,9 @@ function normalizeDocumentProject(project: ManuscriptProject): ManuscriptProject
 }
 
 function extractOutlineItems(html: string): OutlineItem[] {
+  const htmlWithoutToc = html.replace(/<section\b[^>]*data-type=["']table-of-contents["'][\s\S]*?<\/section>/gi, "");
   if (typeof document === "undefined") {
-    return [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match, index) => ({
+    return [...htmlWithoutToc.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map((match, index) => ({
       id: `heading-${index}`,
       title: match[1].replace(/<[^>]*>/g, "").trim() || `見出し ${index + 1}`,
       index
@@ -183,7 +211,7 @@ function extractOutlineItems(html: string): OutlineItem[] {
   }
 
   const template = document.createElement("template");
-  template.innerHTML = html;
+  template.innerHTML = htmlWithoutToc;
   return [...template.content.querySelectorAll("h1")].map((heading, index) => ({
     id: `heading-${index}`,
     title: heading.textContent?.trim() || `見出し ${index + 1}`,
@@ -195,6 +223,10 @@ function sameStringList(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function sameNumberList(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
 function googleDriveSetupMessage(): string {
   return [
     "Google Drive連携にはGoogle CloudのOAuth設定が必要です。",
@@ -203,12 +235,51 @@ function googleDriveSetupMessage(): string {
     "2. OAuth同意画面を作成",
     "3. OAuthクライアントID（ウェブ）とAPIキーを作成",
     "4. 承認済みのJavaScript生成元に https://umbrellaparade.github.io を追加",
-    "5. .env.local に以下を設定して再ビルド",
-    "   NEXT_PUBLIC_GOOGLE_CLIENT_ID=作成したクライアントID",
-    "   NEXT_PUBLIC_GOOGLE_API_KEY=作成したAPIキー",
-    "",
-    "GitHub Pages版で使う場合は、同じ値をGitHub Actionsの環境変数/Secretsにも設定してビルドしてください。"
+    "5. 右サイドバーのGoogle Drive設定にクライアントIDとAPIキーを入力"
   ].join("\n");
+}
+
+function tocItemsJson(entries: TocEntry[]): string {
+  return JSON.stringify(entries.map((entry) => ({ title: entry.title, page: entry.page })));
+}
+
+function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
+  return {
+    title: settings.title.trim() || "目次",
+    subtitle: settings.subtitle,
+    style: settings.style,
+    items: tocItemsJson(entries)
+  };
+}
+
+function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries: TocEntry[]): boolean {
+  const attrs = tableOfContentsAttrs(settings, entries);
+  let changed = false;
+
+  editor
+    .chain()
+    .command(({ state, tr }) => {
+      state.doc.descendants((node, position) => {
+        if (node.type.name !== "tableOfContents") {
+          return;
+        }
+
+        const nextAttrs = { ...node.attrs, ...attrs };
+        const isSame =
+          node.attrs.title === nextAttrs.title &&
+          node.attrs.subtitle === nextAttrs.subtitle &&
+          node.attrs.style === nextAttrs.style &&
+          node.attrs.items === nextAttrs.items;
+        if (!isSame) {
+          tr.setNodeMarkup(position, undefined, nextAttrs, node.marks);
+          changed = true;
+        }
+      });
+      return changed;
+    })
+    .run();
+
+  return changed;
 }
 
 export function EditorShell() {
@@ -217,8 +288,10 @@ export function EditorShell() {
   const [statusText, setStatusText] = useState("起動中");
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
+  const [driveSettingsDraft, setDriveSettingsDraft] = useState<GoogleDriveSettings>(EMPTY_DRIVE_SETTINGS);
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
+  const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
   const [printDomActive, setPrintDomActive] = useState(false);
   const [fastEditing, setFastEditing] = useState(false);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
@@ -250,6 +323,10 @@ export function EditorShell() {
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    setDriveSettingsDraft(loadGoogleDriveSettings());
   }, []);
 
   useEffect(() => {
@@ -313,6 +390,10 @@ export function EditorShell() {
     };
   }, [activeChapter, layoutChapterContent, project]);
   const outlineItems = useMemo(() => extractOutlineItems(layoutChapterContent), [layoutChapterContent]);
+  const tocEntries = useMemo<TocEntry[]>(
+    () => outlineItems.map((item) => ({ ...item, page: headingPageNumbers[item.index] ?? null })),
+    [headingPageNumbers, outlineItems]
+  );
   const printChapter = useMemo(() => (activeChapter ? { ...activeChapter, content: layoutChapterContent } : null), [activeChapter, layoutChapterContent]);
 
   const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject) : []), [layoutProject]);
@@ -469,19 +550,26 @@ export function EditorShell() {
       const nextCount = Math.max(estimatedPages, actualPages);
       const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
       const nextTitles = Array.from({ length: titleCount }, () => "");
+      const nextHeadingPageNumbers: number[] = [];
       const firstFrameLeft = firstFrame.getBoundingClientRect().left;
       prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
+        if (heading.closest("[data-type='table-of-contents']")) {
+          return;
+        }
+
+        const pageIndex = Math.max(0, Math.min(titleCount - 1, Math.floor((heading.getBoundingClientRect().left - firstFrameLeft + 2) / pagePitch)));
+        nextHeadingPageNumbers.push(pageIndex + 1);
         const title = heading.textContent?.trim();
         if (!title) {
           return;
         }
 
-        const pageIndex = Math.max(0, Math.min(titleCount - 1, Math.floor((heading.getBoundingClientRect().left - firstFrameLeft + 2) / pagePitch)));
         for (let index = pageIndex; index < nextTitles.length; index += 1) {
           nextTitles[index] = title;
         }
       });
       setPageSectionTitles((previous) => (sameStringList(previous, nextTitles) ? previous : nextTitles));
+      setHeadingPageNumbers((previous) => (sameNumberList(previous, nextHeadingPageNumbers) ? previous : nextHeadingPageNumbers));
 
       if (Number.isFinite(nextCount) && nextCount > pageFrameCount) {
         setMeasuredPages({ signature: layoutSignature, count: Math.min(nextCount, MAX_PAGE_FRAMES) });
@@ -490,6 +578,14 @@ export function EditorShell() {
 
     return () => window.cancelAnimationFrame(handle);
   }, [estimatedPages, layoutSignature, pageFrameCount]);
+
+  useEffect(() => {
+    if (!activeEditor || !project || fastEditing) {
+      return;
+    }
+
+    syncTableOfContentsNodes(activeEditor, project.tocSettings, tocEntries);
+  }, [activeEditor, fastEditing, project, tocEntries]);
 
   if (!project || !activeChapter) {
     return (
@@ -546,6 +642,64 @@ export function EditorShell() {
         [key]: value
       }
     }));
+  };
+
+  const updateTocSetting = (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => {
+    updateProject((previous) => ({
+      ...previous,
+      tocSettings: {
+        ...previous.tocSettings,
+        [key]: value
+      }
+    }));
+  };
+
+  const insertTableOfContents = () => {
+    if (!activeEditor) {
+      window.alert("本文エディタの準備ができてから目次を挿入してください。");
+      return;
+    }
+
+    const insertPosition = activeEditor.state.selection.to;
+    activeEditor
+      .chain()
+      .focus()
+      .insertContentAt(insertPosition, [
+        {
+          type: "tableOfContents",
+          attrs: tableOfContentsAttrs(project.tocSettings, tocEntries)
+        },
+        {
+          type: "paragraph"
+        }
+      ])
+      .run();
+    setMobileTab("draft");
+    setStatusText("目次を挿入しました");
+  };
+
+  const refreshTableOfContents = () => {
+    if (!activeEditor) {
+      return;
+    }
+
+    const changed = syncTableOfContentsNodes(activeEditor, project.tocSettings, tocEntries);
+    setStatusText(changed ? "目次を更新しました" : "目次は最新です");
+  };
+
+  const saveDriveSettingsFromDraft = () => {
+    const saved = saveGoogleDriveSettings(driveSettingsDraft);
+    setDriveSettingsDraft(saved);
+    setDriveClient(null);
+    setStatusText("Google Drive設定を保存しました");
+  };
+
+  const clearDriveSettingsFromDraft = () => {
+    clearGoogleDriveSettings();
+    resetGoogleDriveClient();
+    setDriveClient(null);
+    setDriveSettingsDraft(loadGoogleDriveSettings());
+    setStatusText("Google Drive設定をクリアしました");
   };
 
   const exportJson = () => {
@@ -901,6 +1055,13 @@ export function EditorShell() {
       <div className="workspace-grid">
         <aside className={`left-rail mobile-panel ${mobileTab === "chapters" ? "is-mobile-active" : ""}`}>
           <OutlinePanel items={outlineItems} onJump={jumpToHeading} />
+          <TableOfContentsPanel
+            entries={tocEntries}
+            settings={project.tocSettings}
+            onSettingChange={updateTocSetting}
+            onInsert={insertTableOfContents}
+            onRefresh={refreshTableOfContents}
+          />
           <ProjectPanel
             project={project}
             onProjectChange={updateProject}
@@ -960,6 +1121,13 @@ export function EditorShell() {
             onUpdate={updateQrLink}
             onTemplateChange={updateQrLinkTemplate}
             onDelete={(id) => updateProject((previous) => ({ ...previous, qrLinks: previous.qrLinks.filter((link) => link.id !== id) }))}
+          />
+          <DriveSettingsPanel
+            settings={driveSettingsDraft}
+            isConfigured={isDriveConfigured()}
+            onChange={setDriveSettingsDraft}
+            onSave={saveDriveSettingsFromDraft}
+            onClear={clearDriveSettingsFromDraft}
           />
           <CheckPanel project={project} checks={checks} />
         </aside>
@@ -1114,6 +1282,115 @@ function OutlinePanel({ items, onJump }: { items: OutlineItem[]; onJump: (index:
       ) : (
         <p className="empty-note">本文にH1見出しを入れると自動で表示されます。</p>
       )}
+    </section>
+  );
+}
+
+function TableOfContentsPanel({
+  entries,
+  settings,
+  onSettingChange,
+  onInsert,
+  onRefresh
+}: {
+  entries: TocEntry[];
+  settings: TocSettings;
+  onSettingChange: (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => void;
+  onInsert: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="tool-panel toc-panel">
+      <div className="panel-title-row">
+        <h2>目次作成</h2>
+        <span className="mini-badge">H1 {entries.length}件</span>
+      </div>
+      <div className="toc-form">
+        <label className="toc-form-field">
+          <span>目次タイトル</span>
+          <input value={settings.title} onChange={(event) => onSettingChange("title", event.target.value)} />
+        </label>
+        <label className="toc-form-field">
+          <span>副題</span>
+          <input placeholder="例: 雨の章だより" value={settings.subtitle} onChange={(event) => onSettingChange("subtitle", event.target.value)} />
+        </label>
+        <label className="toc-form-field wide">
+          <span>外観</span>
+          <select value={settings.style} onChange={(event) => onSettingChange("style", event.target.value as TocStyleId)}>
+            {(Object.entries(TOC_STYLE_OPTIONS) as Array<[TocStyleId, (typeof TOC_STYLE_OPTIONS)[TocStyleId]]>).map(([styleId, option]) => (
+              <option key={styleId} value={styleId}>{option.label} - {option.description}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="toc-actions">
+        <button type="button" disabled={!entries.length} onClick={onInsert}>
+          <ListTree size={16} />
+          本文へ挿入
+        </button>
+        <button type="button" disabled={!entries.length} onClick={onRefresh}>
+          更新
+        </button>
+      </div>
+      {entries.length ? (
+        <div className="toc-preview-list">
+          {entries.slice(0, 8).map((entry) => (
+            <div key={entry.id} className="toc-preview-item">
+              <span>{entry.title}</span>
+              <strong>{entry.page ?? "…"}</strong>
+            </div>
+          ))}
+          {entries.length > 8 ? <p className="empty-note">ほか {entries.length - 8} 件</p> : null}
+        </div>
+      ) : (
+        <p className="empty-note">H1見出しを本文に入れると目次にできます。</p>
+      )}
+    </section>
+  );
+}
+
+function DriveSettingsPanel({
+  settings,
+  isConfigured,
+  onChange,
+  onSave,
+  onClear
+}: {
+  settings: GoogleDriveSettings;
+  isConfigured: boolean;
+  onChange: (settings: GoogleDriveSettings) => void;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <section className="tool-panel drive-settings-panel">
+      <div className="panel-title-row">
+        <h2>Google Drive設定</h2>
+        <span className={`mini-badge ${isConfigured ? "is-ok" : ""}`}>{isConfigured ? "設定済み" : "未設定"}</span>
+      </div>
+      <div className="drive-form">
+        <label className="drive-form-field">
+          <span>OAuthクライアントID</span>
+          <input
+            value={settings.clientId}
+            placeholder="xxxxx.apps.googleusercontent.com"
+            onChange={(event) => onChange({ ...settings, clientId: event.target.value })}
+          />
+        </label>
+        <label className="drive-form-field">
+          <span>APIキー</span>
+          <input value={settings.apiKey} placeholder="AIza..." onChange={(event) => onChange({ ...settings, apiKey: event.target.value })} />
+        </label>
+      </div>
+      <div className="drive-actions">
+        <button type="button" onClick={onSave}>
+          <CloudCog size={16} />
+          設定を保存
+        </button>
+        <button type="button" onClick={onClear}>
+          クリア
+        </button>
+      </div>
     </section>
   );
 }

@@ -10,6 +10,12 @@ declare global {
 
 const DISCOVERY_DOC = "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest";
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_SETTINGS_STORAGE_KEY = "umbrella-parade:google-drive-settings";
+
+export type GoogleDriveSettings = {
+  clientId: string;
+  apiKey: string;
+};
 
 type TokenResponse = {
   error?: string;
@@ -52,19 +58,71 @@ type DriveClient = {
 
 let tokenClient: TokenClient | null;
 let initialized = false;
+let initializedFor = "";
 
 export function isDriveConfigured(): boolean {
-  return Boolean(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && process.env.NEXT_PUBLIC_GOOGLE_API_KEY);
+  const settings = loadGoogleDriveSettings();
+  return Boolean(settings.clientId && settings.apiKey);
+}
+
+export function loadGoogleDriveSettings(): GoogleDriveSettings {
+  const envSettings = readGoogleDriveEnvSettings();
+  if (typeof window === "undefined") {
+    return envSettings;
+  }
+
+  try {
+    const saved = window.localStorage.getItem(DRIVE_SETTINGS_STORAGE_KEY);
+    if (!saved) {
+      return envSettings;
+    }
+
+    const parsed = JSON.parse(saved) as Partial<GoogleDriveSettings>;
+    return {
+      clientId: typeof parsed.clientId === "string" && parsed.clientId.trim() ? parsed.clientId.trim() : envSettings.clientId,
+      apiKey: typeof parsed.apiKey === "string" && parsed.apiKey.trim() ? parsed.apiKey.trim() : envSettings.apiKey
+    };
+  } catch {
+    return envSettings;
+  }
+}
+
+export function saveGoogleDriveSettings(settings: GoogleDriveSettings): GoogleDriveSettings {
+  const normalized = {
+    clientId: settings.clientId.trim(),
+    apiKey: settings.apiKey.trim()
+  };
+
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(DRIVE_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+  }
+
+  resetGoogleDriveClient();
+  return normalized;
+}
+
+export function clearGoogleDriveSettings(): void {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(DRIVE_SETTINGS_STORAGE_KEY);
+  }
+  resetGoogleDriveClient();
+}
+
+export function resetGoogleDriveClient(): void {
+  tokenClient = null;
+  initialized = false;
+  initializedFor = "";
 }
 
 export async function connectGoogleDrive(): Promise<DriveClient> {
-  if (!isDriveConfigured()) {
-    throw new Error("Google Drive連携には NEXT_PUBLIC_GOOGLE_CLIENT_ID と NEXT_PUBLIC_GOOGLE_API_KEY が必要です。");
+  const settings = loadGoogleDriveSettings();
+  if (!settings.clientId || !settings.apiKey) {
+    throw new Error("Google Drive設定にクライアントIDとAPIキーを入力してください。");
   }
 
   await loadScript("https://apis.google.com/js/api.js");
   await loadScript("https://accounts.google.com/gsi/client");
-  await initializeGoogleClients();
+  await initializeGoogleClients(settings);
   await requestAccessToken();
 
   return {
@@ -72,8 +130,9 @@ export async function connectGoogleDrive(): Promise<DriveClient> {
   };
 }
 
-async function initializeGoogleClients(): Promise<void> {
-  if (initialized) {
+async function initializeGoogleClients(settings: GoogleDriveSettings): Promise<void> {
+  const settingsSignature = `${settings.clientId}:${settings.apiKey}`;
+  if (initialized && initializedFor === settingsSignature) {
     return;
   }
 
@@ -83,17 +142,18 @@ async function initializeGoogleClients(): Promise<void> {
 
   await new Promise<void>((resolve) => window.gapi?.load("client", resolve));
   await window.gapi.client.init({
-    apiKey: process.env.NEXT_PUBLIC_GOOGLE_API_KEY,
+    apiKey: settings.apiKey,
     discoveryDocs: [DISCOVERY_DOC]
   });
 
   tokenClient = window.google.accounts.oauth2.initTokenClient({
-    client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+    client_id: settings.clientId,
     scope: SCOPES,
     callback: () => undefined
   });
 
   initialized = true;
+  initializedFor = settingsSignature;
 }
 
 function requestAccessToken(): Promise<void> {
@@ -167,4 +227,11 @@ function loadScript(src: string): Promise<void> {
     script.onerror = () => reject(new Error(`${src} を読み込めませんでした`));
     document.head.appendChild(script);
   });
+}
+
+function readGoogleDriveEnvSettings(): GoogleDriveSettings {
+  return {
+    clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "",
+    apiKey: process.env.NEXT_PUBLIC_GOOGLE_API_KEY ?? ""
+  };
 }

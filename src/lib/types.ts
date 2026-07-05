@@ -1,6 +1,7 @@
 export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "custom";
 export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
 export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight";
+export type TocStyleId = "classic" | "rain" | "antique" | "midnight";
 
 export type PageSettings = {
   preset: PagePresetId;
@@ -41,6 +42,12 @@ export type DriveState = {
   lastSavedAt?: string;
 };
 
+export type TocSettings = {
+  title: string;
+  subtitle: string;
+  style: TocStyleId;
+};
+
 export type ManuscriptProject = {
   schemaVersion: 1;
   id: string;
@@ -51,6 +58,7 @@ export type ManuscriptProject = {
   chapters: Chapter[];
   activeChapterId: string;
   qrLinks: QrLink[];
+  tocSettings: TocSettings;
   drive?: DriveState;
   updatedAt: string;
 };

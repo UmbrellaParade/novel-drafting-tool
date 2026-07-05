@@ -1,4 +1,4 @@
-import type { ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId } from "./types";
+import type { ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId } from "./types";
 
 export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
   "noto-serif-jp": {
@@ -99,6 +99,13 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 };
 
 const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight"]);
+const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnight"]);
+
+export const DEFAULT_TOC_SETTINGS: TocSettings = {
+  title: "目次",
+  subtitle: "",
+  style: "classic"
+};
 
 const sampleContent = `
 <h1>第一章：雨の記憶</h1>
@@ -126,6 +133,7 @@ export function createDefaultProject(): ManuscriptProject {
       }
     ],
     activeChapterId: firstChapterId,
+    tocSettings: { ...DEFAULT_TOC_SETTINGS },
     qrLinks: [
       {
         id: crypto.randomUUID(),
@@ -152,10 +160,19 @@ export function normalizeProject(project: ManuscriptProject): ManuscriptProject 
   return {
     ...project,
     pageSettings: normalizePageSettings(project.pageSettings),
+    tocSettings: normalizeTocSettings(project.tocSettings),
     qrLinks: (project.qrLinks ?? []).map((link) => ({
       ...link,
       template: QR_CARD_TEMPLATE_IDS.has(link.template ?? "umbrella") ? link.template ?? "umbrella" : "umbrella"
     }))
+  };
+}
+
+export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettings {
+  return {
+    title: settings?.title?.trim() || DEFAULT_TOC_SETTINGS.title,
+    subtitle: settings?.subtitle ?? DEFAULT_TOC_SETTINGS.subtitle,
+    style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style
   };
 }
 

@@ -27,7 +27,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode } from "./tiptapExtensions";
+import { BlockFontSizeExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode } from "./tiptapExtensions";
 
 type TiptapEditorProps = {
   content: string;
@@ -102,6 +102,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
       }),
       PageBreakBeforeExtension,
       RubyTextNode,
+      TableOfContentsNode,
       PageBreakNode,
       QrCardNode
     ],
@@ -201,6 +202,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
+    let frameHandle: number | null = null;
     const refreshToolbarState = () => {
       const imageAttributes = editor.getAttributes("image");
       const hasImageSelection = editor.isActive("image") && Boolean(imageAttributes.src);
@@ -208,19 +210,40 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       const hasQrCardSelection = editor.isActive("qrCard");
       imageSelectionTargetRef.current = hasImageSelection ? readSelectedImageTarget(editor) : null;
       qrCardSelectionPositionRef.current = hasQrCardSelection ? selectedNodePosition(editor, "qrCard") : null;
-      setToolbarState({
+      const nextState = {
         hasImageSelection,
         selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null,
         hasQrCardSelection,
         selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null
+      };
+      setToolbarState((previous) => (sameToolbarState(previous, nextState) ? previous : nextState));
+    };
+
+    const scheduleRefreshToolbarState = () => {
+      if (frameHandle !== null) {
+        return;
+      }
+
+      frameHandle = window.requestAnimationFrame(() => {
+        frameHandle = null;
+        refreshToolbarState();
       });
     };
 
     refreshToolbarState();
-    editor.on("selectionUpdate", refreshToolbarState);
+    editor.on("selectionUpdate", scheduleRefreshToolbarState);
+    editor.on("update", scheduleRefreshToolbarState);
+    editor.on("focus", scheduleRefreshToolbarState);
+    editor.on("blur", scheduleRefreshToolbarState);
 
     return () => {
-      editor.off("selectionUpdate", refreshToolbarState);
+      if (frameHandle !== null) {
+        window.cancelAnimationFrame(frameHandle);
+      }
+      editor.off("selectionUpdate", scheduleRefreshToolbarState);
+      editor.off("update", scheduleRefreshToolbarState);
+      editor.off("focus", scheduleRefreshToolbarState);
+      editor.off("blur", scheduleRefreshToolbarState);
     };
   }, [editor]);
 
@@ -750,6 +773,15 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
 function parseImageDimension(value: unknown): number | null {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+}
+
+function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
+  return (
+    left.hasImageSelection === right.hasImageSelection &&
+    left.selectedImageWidth === right.selectedImageWidth &&
+    left.hasQrCardSelection === right.hasQrCardSelection &&
+    left.selectedQrCardWidth === right.selectedQrCardWidth
+  );
 }
 
 async function insertClipboardImageFiles(editor: Editor, files: File[]): Promise<void> {
