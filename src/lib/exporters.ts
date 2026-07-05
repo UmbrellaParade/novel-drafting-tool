@@ -15,6 +15,7 @@ type PdfTextBlock = {
   kind: "text";
   text: string;
   level: 0 | 1 | 2 | 3;
+  lineHeight?: number;
 };
 
 type PdfImageBlock = {
@@ -342,7 +343,7 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
         if (block.level === 1) {
           state.chapterTitle = normalizePdfText(block.text) || state.chapterTitle;
         }
-        drawTextBlock(state, block.text, block.level);
+        drawTextBlock(state, block);
         if (block.level === 1) {
           setPdfCurrentPageTitle(state, state.chapterTitle);
         }
@@ -946,15 +947,17 @@ function drawPdfPageChrome(state: PdfRenderState, page: PDFPage, chapterTitle: s
   }
 }
 
-function drawTextBlock(state: PdfRenderState, text: string, level: 0 | 1 | 2 | 3): void {
-  const normalized = normalizePdfText(text);
+function drawTextBlock(state: PdfRenderState, block: PdfTextBlock): void {
+  const normalized = normalizePdfText(block.text);
   if (!normalized) {
     return;
   }
 
   const baseSize = projectFontSize(state);
+  const level = block.level;
   const size = level === 1 ? baseSize * 1.55 : level === 2 ? baseSize * 1.32 : level === 3 ? baseSize * 1.16 : baseSize;
-  const lineHeight = size * (level === 0 ? state.project.pageSettings.lineHeight : 1.35);
+  const lineHeightRatio = block.lineHeight ?? (level === 0 ? state.project.pageSettings.lineHeight : 1.35);
+  const lineHeight = size * lineHeightRatio;
   const spaceAfter = mmToPt(level === 0 ? state.project.pageSettings.paragraphSpacingMm : state.project.pageSettings.paragraphSpacingMm * 2);
   const lines = wrapText(normalized, state.font, size, state.contentWidth);
 
@@ -1381,7 +1384,8 @@ function parsePdfBlocks(html: string): PdfBlock[] {
     blocks.push({
       kind: "text",
       text,
-      level: element.matches("h1") ? 1 : element.matches("h2") ? 2 : element.matches("h3") ? 3 : 0
+      level: element.matches("h1") ? 1 : element.matches("h2") ? 2 : element.matches("h3") ? 3 : 0,
+      lineHeight: parseHtmlLineHeight(element)
     });
   });
 
@@ -1402,6 +1406,16 @@ function parseHtmlDimension(value: string | null): number | undefined {
 
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseHtmlLineHeight(element: HTMLElement): number | undefined {
+  const value = element.dataset.lineHeight || element.style.lineHeight || "";
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0.8 || parsed > 3.5) {
+    return undefined;
+  }
+
+  return value.trim().endsWith("%") ? parsed / 100 : parsed;
 }
 
 function parseQrTemplate(value: string | undefined): QrCardTemplateId {

@@ -4,6 +4,10 @@ function readFontSize(element: HTMLElement): string | null {
   return element.style.fontSize || element.getAttribute("data-font-size") || null;
 }
 
+function readLineHeight(element: HTMLElement): string | null {
+  return element.style.lineHeight || element.getAttribute("data-line-height") || null;
+}
+
 function fontSizeAttributes(fontSize: string | null | undefined): Record<string, string> {
   if (!fontSize) {
     return {};
@@ -12,6 +16,18 @@ function fontSizeAttributes(fontSize: string | null | undefined): Record<string,
   return {
     "data-font-size": fontSize,
     style: `font-size: ${fontSize}`
+  };
+}
+
+function lineHeightAttributes(lineHeight: string | number | null | undefined, locked: unknown): Record<string, string> {
+  if (!lineHeight) {
+    return {};
+  }
+
+  return {
+    "data-line-height": String(lineHeight),
+    ...(locked ? { "data-line-height-locked": "true" } : {}),
+    style: `line-height: ${lineHeight}`
   };
 }
 
@@ -127,6 +143,30 @@ export const BlockFontSizeExtension = Extension.create({
             default: null,
             parseHTML: (element) => readFontSize(element as HTMLElement),
             renderHTML: (attributes) => fontSizeAttributes(attributes.fontSize)
+          }
+        }
+      }
+    ];
+  }
+});
+
+export const BlockLineHeightExtension = Extension.create({
+  name: "blockLineHeight",
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["paragraph", "heading", "blockquote", "listItem"],
+        attributes: {
+          lineHeight: {
+            default: null,
+            parseHTML: (element) => readLineHeight(element as HTMLElement),
+            renderHTML: (attributes) => lineHeightAttributes(attributes.lineHeight, attributes.lineHeightLocked)
+          },
+          lineHeightLocked: {
+            default: false,
+            parseHTML: (element) => (element as HTMLElement).getAttribute("data-line-height-locked") === "true",
+            renderHTML: () => ({})
           }
         }
       }

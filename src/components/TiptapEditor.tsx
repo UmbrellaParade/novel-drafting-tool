@@ -25,7 +25,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode } from "./tiptapExtensions";
 
 type TiptapEditorProps = {
   content: string;
@@ -75,6 +75,7 @@ const FONT_SIZE_SCOPES = {
   body: new Set(["paragraph", "blockquote", "listItem"])
 } as const;
 
+const LINE_HEIGHT_BLOCK_TYPES = new Set(["paragraph", "heading", "blockquote", "listItem"]);
 const EDITOR_HTML_COMMIT_DELAY_MS = 1200;
 const EDITOR_HTML_IDLE_TIMEOUT_MS = 1800;
 const IMAGE_FIT_PADDING_PX = 8;
@@ -114,6 +115,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       Underline,
       FontSizeMark,
       BlockFontSizeExtension,
+      BlockLineHeightExtension,
       Image.configure({
         allowBase64: true,
         inline: false,
@@ -282,6 +284,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
   const [textSizePt, setTextSizePt] = useState(9);
+  const [lineHeightValue, setLineHeightValue] = useState(1.75);
   const [qrPresetWidth, setQrPresetWidth] = useState(320);
   const [imageWidthDraft, setImageWidthDraft] = useState("");
   const imageWidthInputFocusedRef = useRef(false);
@@ -822,6 +825,97 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       .run();
   };
 
+  const applySelectedLineHeight = () => {
+    if (!editor) {
+      return;
+    }
+
+    const nextLineHeight = normalizeLineHeightValue(lineHeightValue);
+    setLineHeightValue(nextLineHeight);
+    withStablePageStageScroll(editor, () => {
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          let changed = false;
+          const { from, to } = selectedLineHeightRange(editor);
+          state.doc.nodesBetween(from, to, (node, position) => {
+            if (!LINE_HEIGHT_BLOCK_TYPES.has(node.type.name)) {
+              return;
+            }
+
+            tr.setNodeMarkup(position, undefined, {
+              ...node.attrs,
+              lineHeight: nextLineHeight,
+              lineHeightLocked: true
+            }, node.marks);
+            changed = true;
+          });
+          return changed;
+        })
+        .run();
+    });
+  };
+
+  const clearSelectedLineHeight = () => {
+    if (!editor) {
+      return;
+    }
+
+    withStablePageStageScroll(editor, () => {
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          let changed = false;
+          const { from, to } = selectedLineHeightRange(editor);
+          state.doc.nodesBetween(from, to, (node, position) => {
+            if (!LINE_HEIGHT_BLOCK_TYPES.has(node.type.name) || (!node.attrs.lineHeight && !node.attrs.lineHeightLocked)) {
+              return;
+            }
+
+            tr.setNodeMarkup(position, undefined, {
+              ...node.attrs,
+              lineHeight: null,
+              lineHeightLocked: false
+            }, node.marks);
+            changed = true;
+          });
+          return changed;
+        })
+        .run();
+    });
+  };
+
+  const clearAllLineHeights = () => {
+    if (!editor) {
+      return;
+    }
+
+    withStablePageStageScroll(editor, () => {
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          let changed = false;
+          state.doc.descendants((node, position) => {
+            if (!LINE_HEIGHT_BLOCK_TYPES.has(node.type.name) || (!node.attrs.lineHeight && !node.attrs.lineHeightLocked)) {
+              return;
+            }
+
+            tr.setNodeMarkup(position, undefined, {
+              ...node.attrs,
+              lineHeight: null,
+              lineHeightLocked: false
+            }, node.marks);
+            changed = true;
+          });
+          return changed;
+        })
+        .run();
+    });
+  };
+
   const pageWidth = editor ? readPageWidthPx(editor) : 420;
   const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
@@ -1031,6 +1125,22 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>見出し</button>
         <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>本文</button>
         <button type="button" onMouseDown={preserveEditorSelection} onClick={clearTextSizes}>解除</button>
+        <span className="toolbar-divider" />
+        <span className="image-size-chip">行間</span>
+        <input
+          className="text-size-number"
+          type="number"
+          min={0.8}
+          max={3.5}
+          step={0.01}
+          value={lineHeightValue}
+          onChange={(event) => setLineHeightValue(Number(event.target.value))}
+          onBlur={() => setLineHeightValue((value) => normalizeLineHeightValue(value))}
+          aria-label="選択範囲の行間倍率"
+        />
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedLineHeight}>選択ロック</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearSelectedLineHeight}>解除</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearAllLineHeights}>全解除</button>
       </div>
       <input
         ref={imageInputRef}
@@ -1062,6 +1172,33 @@ function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
     left.selectedQrCardWidth === right.selectedQrCardWidth &&
     left.selectedQrCardHeight === right.selectedQrCardHeight
   );
+}
+
+function normalizeLineHeightValue(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1.75;
+  }
+
+  return Math.round(Math.max(0.8, Math.min(3.5, value)) * 100) / 100;
+}
+
+function selectedLineHeightRange(editor: Editor): { from: number; to: number } {
+  const { selection } = editor.state;
+  if (!selection.empty) {
+    return { from: selection.from, to: selection.to };
+  }
+
+  for (let depth = selection.$from.depth; depth > 0; depth -= 1) {
+    const node = selection.$from.node(depth);
+    if (LINE_HEIGHT_BLOCK_TYPES.has(node.type.name)) {
+      return {
+        from: selection.$from.before(depth),
+        to: selection.$from.after(depth)
+      };
+    }
+  }
+
+  return { from: selection.from, to: selection.to };
 }
 
 function restorePageStageScroll(editor: Editor, scrollTop: number, scrollLeft: number): void {
