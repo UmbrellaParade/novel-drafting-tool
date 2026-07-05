@@ -764,10 +764,12 @@ h1 {
   font-weight: 700;
 }
 
-.image-size-controls button {
+.image-size-controls button,
+.image-replace-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
   min-height: 30px;
   padding: 0 9px;
   border: 1px solid #d8cdbc;
@@ -775,9 +777,11 @@ h1 {
   background: #fbf7ef;
   color: var(--ink);
   font-weight: 700;
+  cursor: pointer;
 }
 
-.image-size-controls button:hover {
+.image-size-controls button:hover,
+.image-replace-button:hover {
   border-color: var(--rain);
   background: #eaf3f0;
   color: #1f5c54;

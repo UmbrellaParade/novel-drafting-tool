@@ -23,6 +23,7 @@ import {
   Pilcrow,
   QrCode,
   Redo2,
+  RefreshCw,
   ScissorsLineDashed,
   Trash2,
   Type,
@@ -56,6 +57,13 @@ type ToolbarState = {
   canRedo: boolean;
   hasImageSelection: boolean;
   selectedImageWidth: number | null;
+};
+
+type ImageReplacementTarget = {
+  position: number | null;
+  src: string;
+  alt: string;
+  title: string;
 };
 
 const IMAGE_SIZE_RATIOS = [0.5, 0.75, 1] as const;
@@ -119,6 +127,8 @@ export function TiptapEditor({ content, onChange, onReady }: TiptapEditorProps) 
 
 export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const imageSelectionTargetRef = useRef<ImageReplacementTarget | null>(null);
+  const imageReplaceTargetRef = useRef<ImageReplacementTarget | null>(null);
   const rubyReadingInputRef = useRef<HTMLInputElement | null>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
     canUndo: false,
@@ -144,6 +154,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     const refreshToolbarState = () => {
       const imageAttributes = editor.getAttributes("image");
       const hasImageSelection = editor.isActive("image") && Boolean(imageAttributes.src);
+      imageSelectionTargetRef.current = hasImageSelection ? readSelectedImageTarget(editor) : null;
       setToolbarState({
         canUndo: editor.can().undo(),
         canRedo: editor.can().redo(),
@@ -244,7 +255,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     editor.chain().focus().updateAttributes(currentBreakableNodeName(editor), { pageBreakBefore: true }).run();
   };
 
-  const handleImageFile = (file: File) => {
+  const handleImageFile = (file: File, mode: "insert" | "replace" = "insert") => {
     if (!editor) {
       return;
     }
@@ -252,6 +263,41 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     const reader = new FileReader();
     reader.onload = () => {
       const src = String(reader.result);
+      if (mode === "replace") {
+        const target = imageReplaceTargetRef.current;
+        imageReplaceTargetRef.current = null;
+        const position = target ? resolveImagePosition(editor, target) : null;
+        const imageNode = position !== null ? editor.state.doc.nodeAt(position) : null;
+        const replaced = Boolean(
+          position !== null &&
+            imageNode &&
+            imageNode.type.name === "image" &&
+            editor
+              .chain()
+              .focus()
+              .insertContentAt(
+                { from: position, to: position + imageNode.nodeSize },
+                {
+                  type: "image",
+                  attrs: {
+                    ...imageNode.attrs,
+                    src,
+                    alt: file.name,
+                    title: file.name
+                  }
+                }
+              )
+              .run()
+        );
+
+        if (!replaced) {
+          window.alert("置換する画像をもう一度選択してください。");
+        } else if (target) {
+          syncRenderedImage(editor, target, { src, alt: file.name, title: file.name });
+        }
+        return;
+      }
+
       editor
         .chain()
         .focus()
@@ -264,6 +310,14 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         .run();
     };
     reader.readAsDataURL(file);
+  };
+
+  const prepareReplaceImage = () => {
+    if (!editor || !toolbarState.hasImageSelection) {
+      return;
+    }
+
+    imageReplaceTargetRef.current = imageSelectionTargetRef.current ?? readSelectedImageTarget(editor);
   };
 
   const setImageWidth = (width: number) => {
@@ -430,6 +484,25 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <button type="button" onClick={resetImageSize}>
             自動
           </button>
+          <label className="image-replace-button" onPointerDown={prepareReplaceImage}>
+            <RefreshCw size={15} />
+            置換
+            <input
+              className="hidden"
+              type="file"
+              accept="image/*"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  imageReplaceTargetRef.current = imageReplaceTargetRef.current ?? imageSelectionTargetRef.current ?? (editor ? readSelectedImageTarget(editor) : null);
+                  handleImageFile(file, "replace");
+                } else {
+                  imageReplaceTargetRef.current = null;
+                }
+                event.currentTarget.value = "";
+              }}
+            />
+          </label>
           <button className="danger" type="button" onClick={deleteSelectedContent} title="削除" aria-label="削除">
             <Trash2 size={16} />
           </button>
@@ -473,6 +546,84 @@ function readCssLengthPx(editor: Editor, variableName: string): number {
   const width = probe.getBoundingClientRect().width;
   probe.remove();
   return Number.isFinite(width) && width > 0 ? width : 320;
+}
+
+function selectedImagePosition(editor: Editor): number | null {
+  const { selection } = editor.state;
+  if (selection instanceof NodeSelection && selection.node.type.name === "image") {
+    return selection.from;
+  }
+
+  const attrs = editor.getAttributes("image") as { src?: unknown };
+  const targetSrc = typeof attrs.src === "string" ? attrs.src : "";
+  let closestPosition: number | null = null;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  editor.state.doc.descendants((node, position) => {
+    if (node.type.name !== "image" || (targetSrc && node.attrs.src !== targetSrc)) {
+      return;
+    }
+
+    const distance = Math.abs(position - selection.from);
+    if (distance < closestDistance) {
+      closestPosition = position;
+      closestDistance = distance;
+    }
+  });
+
+  return closestPosition;
+}
+
+function readSelectedImageTarget(editor: Editor): ImageReplacementTarget | null {
+  const attrs = editor.getAttributes("image") as { src?: unknown; alt?: unknown; title?: unknown };
+  const src = typeof attrs.src === "string" ? attrs.src : "";
+  if (!src) {
+    return null;
+  }
+
+  return {
+    position: selectedImagePosition(editor),
+    src,
+    alt: typeof attrs.alt === "string" ? attrs.alt : "",
+    title: typeof attrs.title === "string" ? attrs.title : ""
+  };
+}
+
+function resolveImagePosition(editor: Editor, target: ImageReplacementTarget): number | null {
+  const currentNode = target.position !== null ? editor.state.doc.nodeAt(target.position) : null;
+  if (currentNode?.type.name === "image" && currentNode.attrs.src === target.src) {
+    return target.position;
+  }
+
+  let position: number | null = null;
+  editor.state.doc.descendants((node, candidatePosition) => {
+    if (position !== null || node.type.name !== "image") {
+      return;
+    }
+
+    const sameSrc = target.src && node.attrs.src === target.src;
+    const sameAlt = target.alt && node.attrs.alt === target.alt;
+    const sameTitle = target.title && node.attrs.title === target.title;
+    if (sameSrc || sameAlt || sameTitle) {
+      position = candidatePosition;
+    }
+  });
+
+  return position;
+}
+
+function syncRenderedImage(editor: Editor, target: ImageReplacementTarget, next: { src: string; alt: string; title: string }): void {
+  const images = Array.from(editor.view.dom.querySelectorAll<HTMLImageElement>("img:not(.qr-card-image)"));
+  const image =
+    images.find((candidate) => candidate.getAttribute("src") === target.src && candidate.getAttribute("title") === target.title) ??
+    images.find((candidate) => candidate.getAttribute("src") === target.src);
+
+  if (!image) {
+    return;
+  }
+
+  image.setAttribute("src", next.src);
+  image.setAttribute("alt", next.alt);
+  image.setAttribute("title", next.title);
 }
 
 function currentBreakableNodeName(editor: Editor): string {
