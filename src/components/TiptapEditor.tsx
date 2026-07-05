@@ -68,7 +68,8 @@ const FONT_SIZE_SCOPES = {
   body: new Set(["paragraph", "blockquote", "listItem"])
 } as const;
 
-const EDITOR_HTML_COMMIT_DELAY_MS = 500;
+const EDITOR_HTML_COMMIT_DELAY_MS = 800;
+const EDITOR_HTML_IDLE_TIMEOUT_MS = 1200;
 
 function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
@@ -81,6 +82,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
   const onTypingActivityRef = useRef(onTypingActivity);
   // getHTML()のdebounce用タイマー（画像リサイズ中の連続シリアライズを防止）
   const onUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onUpdateIdleRef = useRef<number | null>(null);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -173,15 +175,31 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
       if (onUpdateTimerRef.current !== null) {
         clearTimeout(onUpdateTimerRef.current);
       }
+      if (onUpdateIdleRef.current !== null) {
+        window.cancelIdleCallback?.(onUpdateIdleRef.current);
+        onUpdateIdleRef.current = null;
+      }
       onUpdateTimerRef.current = setTimeout(() => {
         onUpdateTimerRef.current = null;
-        onChangeRef.current(editor.getHTML());
+        const commitHtml = () => {
+          onUpdateIdleRef.current = null;
+          onChangeRef.current(editor.getHTML());
+        };
+        if (window.requestIdleCallback) {
+          onUpdateIdleRef.current = window.requestIdleCallback(commitHtml, { timeout: EDITOR_HTML_IDLE_TIMEOUT_MS });
+        } else {
+          commitHtml();
+        }
       }, EDITOR_HTML_COMMIT_DELAY_MS);
     },
     onBlur: ({ editor }) => {
       if (onUpdateTimerRef.current !== null) {
         clearTimeout(onUpdateTimerRef.current);
         onUpdateTimerRef.current = null;
+      }
+      if (onUpdateIdleRef.current !== null) {
+        window.cancelIdleCallback?.(onUpdateIdleRef.current);
+        onUpdateIdleRef.current = null;
       }
       onChangeRef.current(editor.getHTML());
     }
@@ -201,6 +219,9 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
     return () => {
       if (onUpdateTimerRef.current !== null) {
         clearTimeout(onUpdateTimerRef.current);
+      }
+      if (onUpdateIdleRef.current !== null) {
+        window.cancelIdleCallback?.(onUpdateIdleRef.current);
       }
     };
   }, []);

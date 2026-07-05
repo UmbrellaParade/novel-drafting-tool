@@ -56,6 +56,11 @@ type TocEntry = OutlineItem & {
   page: number | null;
 };
 
+type PageSpread = {
+  id: string;
+  pages: number[];
+};
+
 type QrDraft = {
   name: string;
   url: string;
@@ -228,6 +233,25 @@ function sameNumberList(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function buildPageSpreads(pageCount: number): PageSpread[] {
+  const safePageCount = Math.max(1, pageCount);
+  if (safePageCount === 1) {
+    return [{ id: "page-1", pages: [0] }];
+  }
+
+  const spreads: PageSpread[] = [{ id: "page-1", pages: [0] }];
+  for (let pageIndex = 1; pageIndex < safePageCount; pageIndex += 2) {
+    const pages = pageIndex + 1 < safePageCount ? [pageIndex, pageIndex + 1] : [pageIndex];
+    spreads.push({ id: pages.map((page) => `page-${page + 1}`).join("-"), pages });
+  }
+  return spreads;
+}
+
+function findSpreadIndexForPage(spreads: PageSpread[], pageIndex: number): number {
+  const foundIndex = spreads.findIndex((spread) => spread.pages.includes(pageIndex));
+  return foundIndex >= 0 ? foundIndex : Math.max(0, spreads.length - 1);
+}
+
 function readCssLengthPx(host: HTMLElement, variableName: string): number {
   const probe = document.createElement("div");
   probe.style.position = "absolute";
@@ -309,11 +333,14 @@ export function EditorShell() {
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
-  const [visiblePageIndex, setVisiblePageIndex] = useState(0);
+  const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
   const [printDomActive, setPrintDomActive] = useState(false);
   const [fastEditing, setFastEditing] = useState(false);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
-  const visiblePageIndexRef = useRef(0);
+  const visibleSpreadIndexRef = useRef(0);
+  const scrollFrameRef = useRef<number | null>(null);
+  const pendingScrollTopRef = useRef(0);
+  const fastEditingRef = useRef(false);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pendingChapterContentRef = useRef<string | null>(null);
@@ -362,8 +389,15 @@ export function EditorShell() {
       if (pageSettingTimerRef.current !== null) {
         window.clearTimeout(pageSettingTimerRef.current);
       }
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    fastEditingRef.current = fastEditing;
+  }, [fastEditing]);
 
   useEffect(() => {
     const activatePrintDom = () => setPrintDomActive(true);
@@ -437,11 +471,17 @@ export function EditorShell() {
   }, [activeChapter, layoutChapterContent, project]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
   const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
-  const clampedVisiblePageIndex = Math.max(0, Math.min(visiblePageIndex, pageFrameCount - 1));
+  const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount), [pageFrameCount]);
+  const clampedVisibleSpreadIndex = Math.max(0, Math.min(visibleSpreadIndex, pageSpreads.length - 1));
+  const visibleSpread = pageSpreads[clampedVisibleSpreadIndex] ?? pageSpreads[0] ?? { id: "page-1", pages: [0] };
+  const spreadStartPageIndex = visibleSpread.pages[0] ?? 0;
+  const spreadPageCount = Math.max(1, visibleSpread.pages.length);
+  const maxSpreadPageCount = pageSpreads.some((spread) => spread.pages.length > 1) ? 2 : 1;
   const pageViewportStyle = {
     "--page-scale": pageFit.scale,
-    "--visible-page-index": clampedVisiblePageIndex,
-    "--visible-page-offset": `calc(-${clampedVisiblePageIndex} * (var(--page-width) + var(--page-gap)))`,
+    "--visible-page-index": spreadStartPageIndex,
+    "--visible-page-offset": `calc(-${spreadStartPageIndex} * (var(--page-width) + var(--page-gap)))`,
+    "--spread-width": spreadPageCount > 1 ? "calc(2 * var(--page-width) + var(--page-gap))" : "var(--page-width)",
     width: pageFit.width ? `${pageFit.width}px` : undefined,
     minHeight: pageFit.height ? `${pageFit.height}px` : undefined
   } as React.CSSProperties;
@@ -459,12 +499,16 @@ export function EditorShell() {
   }, []);
 
   const markTypingActivity = useCallback(() => {
-    setFastEditing(true);
+    if (!fastEditingRef.current) {
+      fastEditingRef.current = true;
+      setFastEditing(true);
+    }
     if (fastEditingTimerRef.current !== null) {
       window.clearTimeout(fastEditingTimerRef.current);
     }
     fastEditingTimerRef.current = window.setTimeout(() => {
       fastEditingTimerRef.current = null;
+      fastEditingRef.current = false;
       setFastEditing(false);
     }, FAST_EDITING_RESET_MS);
   }, []);
@@ -500,6 +544,7 @@ export function EditorShell() {
       window.clearTimeout(fastEditingTimerRef.current);
       fastEditingTimerRef.current = null;
     }
+    fastEditingRef.current = false;
     setFastEditing(false);
     pendingChapterContentRef.current = null;
     updateProject((previous) => ({
@@ -543,32 +588,64 @@ export function EditorShell() {
     [updateProject]
   );
 
-  const handlePageStageScroll = useCallback(
-    (event: React.UIEvent<HTMLDivElement>) => {
-      event.currentTarget.style.setProperty("--page-scroll-top", `${event.currentTarget.scrollTop}px`);
+  const updateVisibleSpreadFromScroll = useCallback(
+    (stage: HTMLDivElement, scrollTop: number) => {
+      stage.style.setProperty("--page-scroll-top", `${scrollTop}px`);
       const pageStep = pageFit.pageStep;
       if (pageStep <= 0) {
         return;
       }
 
-      const nextPageIndex = Math.max(0, Math.min(pageFrameCount - 1, Math.round(event.currentTarget.scrollTop / pageStep)));
-      if (nextPageIndex === visiblePageIndexRef.current) {
+      const nextSpreadIndex = Math.max(0, Math.min(pageSpreads.length - 1, Math.round(scrollTop / pageStep)));
+      if (nextSpreadIndex === visibleSpreadIndexRef.current) {
         return;
       }
 
-      visiblePageIndexRef.current = nextPageIndex;
-      setVisiblePageIndex(nextPageIndex);
+      visibleSpreadIndexRef.current = nextSpreadIndex;
+      setVisibleSpreadIndex(nextSpreadIndex);
     },
-    [pageFit.pageStep, pageFrameCount]
+    [pageFit.pageStep, pageSpreads.length]
   );
 
   useEffect(() => {
-    const nextPageIndex = Math.max(0, Math.min(visiblePageIndexRef.current, pageFrameCount - 1));
-    if (nextPageIndex !== visiblePageIndexRef.current) {
-      visiblePageIndexRef.current = nextPageIndex;
-      setVisiblePageIndex(nextPageIndex);
+    const stage = pageStageRef.current;
+    if (!stage) {
+      return;
     }
-  }, [pageFrameCount]);
+
+    const flushScroll = () => {
+      scrollFrameRef.current = null;
+      updateVisibleSpreadFromScroll(stage, pendingScrollTopRef.current);
+    };
+
+    const handleScroll = () => {
+      pendingScrollTopRef.current = stage.scrollTop;
+      if (scrollFrameRef.current !== null) {
+        return;
+      }
+
+      scrollFrameRef.current = window.requestAnimationFrame(flushScroll);
+    };
+
+    pendingScrollTopRef.current = stage.scrollTop;
+    updateVisibleSpreadFromScroll(stage, stage.scrollTop);
+    stage.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      stage.removeEventListener("scroll", handleScroll);
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [updateVisibleSpreadFromScroll]);
+
+  useEffect(() => {
+    const nextSpreadIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
+    if (nextSpreadIndex !== visibleSpreadIndexRef.current) {
+      visibleSpreadIndexRef.current = nextSpreadIndex;
+      setVisibleSpreadIndex(nextSpreadIndex);
+    }
+  }, [pageSpreads.length]);
 
   useEffect(() => {
     if (!layoutSignature) {
@@ -596,7 +673,7 @@ export function EditorShell() {
       const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];
-      const firstFrameLeft = firstFrameRect.left - clampedVisiblePageIndex * visualPagePitch;
+      const firstFrameLeft = firstFrameRect.left - spreadStartPageIndex * visualPagePitch;
       prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
         if (heading.closest("[data-type='table-of-contents']")) {
           return;
@@ -622,7 +699,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [clampedVisiblePageIndex, estimatedPages, layoutSignature, pageFit.scale, pageFrameCount]);
+  }, [estimatedPages, layoutSignature, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -651,15 +728,17 @@ export function EditorShell() {
           return;
         }
 
+        const maxSpreadWidth = pageWidth * maxSpreadPageCount + pageGap * Math.max(0, maxSpreadPageCount - 1);
+        const visibleSpreadWidth = pageWidth * spreadPageCount + pageGap * Math.max(0, spreadPageCount - 1);
         const availableWidth = Math.max(160, stageRect.width - 20);
         const availableHeight = Math.max(160, stageRect.height - 20);
-        const scale = Math.max(0.32, Math.min(1, availableWidth / pageWidth, availableHeight / pageHeight));
+        const scale = Math.max(0.32, Math.min(1, availableWidth / maxSpreadWidth, availableHeight / pageHeight));
         const scaledPageHeight = pageHeight * scale;
         const scaledPageGap = pageGap * scale;
         const nextFit = {
           scale: Number(scale.toFixed(4)),
-          width: Math.ceil(pageWidth * scale),
-          height: Math.ceil(pageFrameCount * scaledPageHeight + Math.max(0, pageFrameCount - 1) * scaledPageGap),
+          width: Math.ceil(visibleSpreadWidth * scale),
+          height: Math.ceil(pageSpreads.length * scaledPageHeight + Math.max(0, pageSpreads.length - 1) * scaledPageGap),
           pageStep: Math.max(1, scaledPageHeight + scaledPageGap)
         };
         setPageFit((previous) =>
@@ -681,7 +760,7 @@ export function EditorShell() {
       resizeObserver.disconnect();
       window.removeEventListener("resize", updatePageFit);
     };
-  }, [layoutSignature, pageFrameCount]);
+  }, [layoutSignature, maxSpreadPageCount, pageSpreads.length, spreadPageCount]);
 
   useEffect(() => {
     if (!activeEditor || !project || fastEditing) {
@@ -731,9 +810,10 @@ export function EditorShell() {
       }
 
       const targetPageIndex = Math.max(0, Math.min(pageFrameCount - 1, (headingPageNumbers[index] ?? 1) - 1));
-      visiblePageIndexRef.current = targetPageIndex;
-      setVisiblePageIndex(targetPageIndex);
-      stage.scrollTo({ top: targetPageIndex * Math.max(1, pageFit.pageStep), behavior: "smooth" });
+      const targetSpreadIndex = findSpreadIndexForPage(pageSpreads, targetPageIndex);
+      visibleSpreadIndexRef.current = targetSpreadIndex;
+      setVisibleSpreadIndex(targetSpreadIndex);
+      stage.scrollTo({ top: targetSpreadIndex * Math.max(1, pageFit.pageStep), behavior: "smooth" });
     });
   };
 
@@ -1200,25 +1280,28 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className="page-stage" onScroll={handlePageStageScroll}>
+        <div ref={pageStageRef} className="page-stage">
           <div className="page-viewport" style={pageViewportStyle}>
             <div
-              className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
+              className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
               data-estimated-pages={estimatedPages}
               data-rendered-pages={pageFrameCount}
-              data-visible-page={clampedVisiblePageIndex + 1}
+              data-visible-page={spreadStartPageIndex + 1}
+              data-visible-spread={clampedVisibleSpreadIndex + 1}
             >
               <div className="page-frame-track" aria-hidden="true">
-                <section key={clampedVisiblePageIndex} className="page-frame">
-                  <header className="page-frame-header">
-                    {pageSectionTitles[clampedVisiblePageIndex] ? <span>{pageSectionTitles[clampedVisiblePageIndex]}</span> : null}
-                  </header>
-                  {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
-                  {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
-                  <footer className="page-frame-footer">
-                    {project.pageSettings.showPageNumber ? <span>{clampedVisiblePageIndex + 1}</span> : null}
-                  </footer>
-                </section>
+                {visibleSpread.pages.map((pageIndex) => (
+                  <section key={pageIndex} className="page-frame" data-page-number={pageIndex + 1}>
+                    <header className="page-frame-header">
+                      {pageSectionTitles[pageIndex] ? <span>{pageSectionTitles[pageIndex]}</span> : null}
+                    </header>
+                    {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
+                    {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
+                    <footer className="page-frame-footer">
+                      {project.pageSettings.showPageNumber ? <span>{pageIndex + 1}</span> : null}
+                    </footer>
+                  </section>
+                ))}
               </div>
               <div className="paged-editor-layer">
                 <TiptapEditor
@@ -1231,8 +1314,8 @@ export function EditorShell() {
               </div>
             </div>
             <div className="page-scroll-track" aria-hidden="true">
-              {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
-                <div key={pageIndex} className="page-scroll-slot" />
+              {pageSpreads.map((spread) => (
+                <div key={spread.id} className="page-scroll-slot" />
               ))}
             </div>
           </div>

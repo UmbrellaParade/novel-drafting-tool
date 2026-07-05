@@ -349,10 +349,21 @@ export async function exportProjectPdf(project: ManuscriptProject): Promise<void
   }
 
   drawPdfPageChromeOnAllPages(state);
+  const exportedPageCount = pdfDoc.getPageCount();
+  if (isShimaumaPreset(project.pageSettings.preset) && exportedPageCount % 4 !== 0) {
+    const missingPages = 4 - (exportedPageCount % 4);
+    throw new Error(
+      `しまうま出稿用PDFは4ページ単位にする必要があります。現在のPDFは${exportedPageCount}ページです。あと${missingPages}ページ分の白紙や奥付などを追加してから書き出してください。`
+    );
+  }
 
   const bytes = await pdfDoc.save();
   const pdfBytes = new Uint8Array(bytes);
   downloadBlob(new Blob([pdfBytes.buffer], { type: "application/pdf" }), `${sanitizeFileName(project.title)}_book.pdf`);
+}
+
+function isShimaumaPreset(preset: ManuscriptProject["pageSettings"]["preset"]): boolean {
+  return preset === "shimauma-a6" || preset === "shimauma-a5";
 }
 
 async function buildEpubChapter(title: string, html: string, chapterNumber: number, assetState: EpubAssetState): Promise<EpubChapter> {

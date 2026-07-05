@@ -677,7 +677,7 @@ h1 {
   justify-content: center;
   align-items: flex-start;
   padding: 10px;
-  scroll-snap-type: y mandatory;
+  scroll-behavior: auto;
   overscroll-behavior: contain;
   border: 1px solid rgba(54, 45, 35, 0.1);
   border-radius: 8px;
@@ -702,7 +702,7 @@ h1 {
   top: var(--page-scroll-top, 0px);
   left: 0;
   z-index: 2;
-  width: var(--page-width);
+  width: var(--spread-width, var(--page-width));
   height: var(--page-height);
   min-height: var(--page-height);
   margin: 0;
@@ -718,7 +718,8 @@ h1 {
 .page-frame-track {
   display: flex;
   align-items: flex-start;
-  width: var(--page-width);
+  gap: var(--page-gap);
+  width: var(--spread-width, var(--page-width));
 }
 
 .page-frame {
@@ -804,7 +805,6 @@ h1 {
 
 .page-scroll-slot {
   height: calc(var(--page-height) * var(--page-scale, 1));
-  scroll-snap-align: start;
 }
 
 .paper-page {
