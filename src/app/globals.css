@@ -803,13 +803,12 @@ h1 {
 .page-scroll-track {
   position: relative;
   z-index: 1;
-  display: grid;
-  gap: calc(var(--page-gap) * var(--page-scale, 1));
+  display: block;
   pointer-events: none;
 }
 
 .page-scroll-slot {
-  height: calc(var(--page-height) * var(--page-scale, 1));
+  height: var(--page-step, calc((var(--page-height) + var(--page-gap)) * var(--page-scale, 1)));
 }
 
 .page-navigation {

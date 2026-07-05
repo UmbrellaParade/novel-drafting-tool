@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
@@ -47,6 +47,8 @@ const AUTOSAVE_DELAY_MS = 1600;
 const CONTENT_COMMIT_DELAY_MS = 450;
 const LAYOUT_REFRESH_DELAY_MS = 650;
 const FAST_EDITING_RESET_MS = 850;
+const PAGE_SCROLL_SNAP_DELAY_MS = 140;
+const PAGE_SCROLL_ALIGN_TOLERANCE_PX = 1.5;
 
 type OutlineItem = {
   id: string;
@@ -408,6 +410,7 @@ export function EditorShell() {
   const pageTurnFrameRef = useRef<number | null>(null);
   const pageTurnAnimationRef = useRef<Animation | null>(null);
   const pendingScrollTopRef = useRef(0);
+  const scrollSnapTimerRef = useRef<number | null>(null);
   const fastEditingRef = useRef(false);
   const editingScrollLockRef = useRef<{ top: number; left: number } | null>(null);
   const qrPanelRef = useRef<HTMLElement | null>(null);
@@ -466,6 +469,9 @@ export function EditorShell() {
       }
       if (pageTurnFrameRef.current !== null) {
         window.cancelAnimationFrame(pageTurnFrameRef.current);
+      }
+      if (scrollSnapTimerRef.current !== null) {
+        window.clearTimeout(scrollSnapTimerRef.current);
       }
       pageTurnAnimationRef.current?.cancel();
     };
@@ -558,6 +564,7 @@ export function EditorShell() {
   const canGoNextPage = clampedVisibleSpreadIndex < pageSpreads.length - 1;
   const pageViewportStyle = {
     "--page-scale": pageFit.scale,
+    "--page-step": `${pageFit.pageStep || 1}px`,
     "--visible-page-index": spreadStartPageIndex,
     "--visible-page-offset": `calc(-${spreadStartPageIndex} * (var(--page-width) + var(--page-gap)))`,
     "--spread-width": spreadPageCount > 1 ? "calc(2 * var(--page-width) + var(--page-gap))" : "var(--page-width)",
@@ -740,6 +747,25 @@ export function EditorShell() {
     [pageFit.scale]
   );
 
+  const alignStageToSpreadIndex = useCallback(
+    (spreadIndex: number, behavior: ScrollBehavior = "auto") => {
+      const stage = pageStageRef.current;
+      const pageStep = pageFit.pageStep;
+      if (!stage || pageStep <= 0 || pageSpreads.length === 0) {
+        return;
+      }
+
+      const nextIndex = Math.max(0, Math.min(pageSpreads.length - 1, spreadIndex));
+      const nextTop = nextIndex * pageStep;
+      pendingScrollTopRef.current = nextTop;
+      if (Math.abs(stage.scrollTop - nextTop) > PAGE_SCROLL_ALIGN_TOLERANCE_PX) {
+        stage.scrollTo({ top: nextTop, behavior });
+      }
+      stage.style.setProperty("--page-scroll-top", `${nextTop}px`);
+    },
+    [pageFit.pageStep, pageSpreads.length]
+  );
+
   const goToSpreadIndex = useCallback(
     (spreadIndex: number) => {
       if (pageSpreads.length === 0) {
@@ -752,19 +778,13 @@ export function EditorShell() {
         return;
       }
 
-      const stage = pageStageRef.current;
-      const nextTop = nextIndex * Math.max(1, pageFit.pageStep);
       const direction = nextIndex > previousIndex ? "next" : "previous";
       visibleSpreadIndexRef.current = nextIndex;
-      pendingScrollTopRef.current = nextTop;
       setVisibleSpreadIndex(nextIndex);
-      if (stage) {
-        stage.scrollTo({ top: nextTop, behavior: "auto" });
-        stage.style.setProperty("--page-scroll-top", `${nextTop}px`);
-      }
+      alignStageToSpreadIndex(nextIndex);
       animatePageTurn(direction);
     },
-    [animatePageTurn, pageFit.pageStep, pageSpreads.length]
+    [alignStageToSpreadIndex, animatePageTurn, pageSpreads.length]
   );
 
   const updateVisibleSpreadFromScroll = useCallback(
@@ -804,6 +824,15 @@ export function EditorShell() {
       }
 
       scrollFrameRef.current = window.requestAnimationFrame(flushScroll);
+      if (scrollSnapTimerRef.current !== null) {
+        window.clearTimeout(scrollSnapTimerRef.current);
+      }
+      scrollSnapTimerRef.current = window.setTimeout(() => {
+        scrollSnapTimerRef.current = null;
+        if (!fastEditingRef.current) {
+          alignStageToSpreadIndex(visibleSpreadIndexRef.current);
+        }
+      }, PAGE_SCROLL_SNAP_DELAY_MS);
     };
 
     pendingScrollTopRef.current = stage.scrollTop;
@@ -815,8 +844,12 @@ export function EditorShell() {
         window.cancelAnimationFrame(scrollFrameRef.current);
         scrollFrameRef.current = null;
       }
+      if (scrollSnapTimerRef.current !== null) {
+        window.clearTimeout(scrollSnapTimerRef.current);
+        scrollSnapTimerRef.current = null;
+      }
     };
-  }, [updateVisibleSpreadFromScroll]);
+  }, [alignStageToSpreadIndex, updateVisibleSpreadFromScroll]);
 
   useEffect(() => {
     const nextSpreadIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
@@ -825,6 +858,16 @@ export function EditorShell() {
       setVisibleSpreadIndex(nextSpreadIndex);
     }
   }, [pageSpreads.length]);
+
+  useLayoutEffect(() => {
+    if (pageFit.pageStep <= 0 || pageSpreads.length === 0) {
+      return;
+    }
+
+    const nextIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
+    visibleSpreadIndexRef.current = nextIndex;
+    alignStageToSpreadIndex(nextIndex);
+  }, [alignStageToSpreadIndex, pageFit.pageStep, pageSpreads.length]);
 
   useEffect(() => {
     const handlePageKey = (event: KeyboardEvent) => {
@@ -934,11 +977,12 @@ export function EditorShell() {
         const scale = Math.max(0.32, Math.min(1, availableWidth / maxSpreadWidth, availableHeight / pageHeight));
         const scaledPageHeight = pageHeight * scale;
         const scaledPageGap = pageGap * scale;
+        const pageStep = Math.max(1, Number((scaledPageHeight + scaledPageGap).toFixed(4)));
         const nextFit = {
           scale: Number(scale.toFixed(4)),
           width: Math.ceil(visibleSpreadWidth * scale),
-          height: Math.ceil(pageSpreads.length * scaledPageHeight + Math.max(0, pageSpreads.length - 1) * scaledPageGap),
-          pageStep: Math.max(1, scaledPageHeight + scaledPageGap)
+          height: Math.ceil(pageSpreads.length * pageStep),
+          pageStep
         };
         setPageFit((previous) =>
           previous.scale === nextFit.scale && previous.width === nextFit.width && previous.height === nextFit.height && previous.pageStep === nextFit.pageStep
