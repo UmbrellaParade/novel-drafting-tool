@@ -65,9 +65,18 @@ export function isDriveConfigured(): boolean {
   return Boolean(settings.clientId && settings.apiKey);
 }
 
+export function hasBundledGoogleDriveSettings(): boolean {
+  const settings = readGoogleDriveEnvSettings();
+  return Boolean(settings.clientId && settings.apiKey);
+}
+
 export function loadGoogleDriveSettings(): GoogleDriveSettings {
   const envSettings = readGoogleDriveEnvSettings();
   if (typeof window === "undefined") {
+    return envSettings;
+  }
+
+  if (envSettings.clientId && envSettings.apiKey) {
     return envSettings;
   }
 

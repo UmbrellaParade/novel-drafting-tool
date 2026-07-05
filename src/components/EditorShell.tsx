@@ -27,7 +27,16 @@ import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEdit
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
-import { clearGoogleDriveSettings, connectGoogleDrive, isDriveConfigured, loadGoogleDriveSettings, resetGoogleDriveClient, saveGoogleDriveSettings, type GoogleDriveSettings } from "@/lib/googleDrive";
+import {
+  clearGoogleDriveSettings,
+  connectGoogleDrive,
+  hasBundledGoogleDriveSettings,
+  isDriveConfigured,
+  loadGoogleDriveSettings,
+  resetGoogleDriveClient,
+  saveGoogleDriveSettings,
+  type GoogleDriveSettings
+} from "@/lib/googleDrive";
 import { exportProjectDocx, exportProjectEpub, exportProjectPdf } from "@/lib/exporters";
 
 type MobileTab = "draft" | "chapters" | "check";
@@ -332,13 +341,12 @@ function readCssLengthPx(host: HTMLElement, variableName: string): number {
 
 function googleDriveSetupMessage(): string {
   return [
-    "Google Drive連携にはGoogle CloudのOAuth設定が必要です。",
+    "この公開版では、Google Drive連携の運営側設定がまだ入っていません。",
     "",
-    "1. Google Cloud ConsoleでGoogle Drive APIを有効化",
-    "2. OAuth同意画面を作成",
-    "3. OAuthクライアントID（ウェブ）とAPIキーを作成",
-    "4. 承認済みのJavaScript生成元に https://umbrellaparade.github.io を追加",
-    "5. 右サイドバーのGoogle Drive設定にクライアントIDとAPIキーを入力"
+    "利用者がGoogle CloudでAPIキーを取得する必要はありません。",
+    "運営側でOAuthクライアントIDとAPIキーをアプリに組み込むと、利用者はDriveボタンからGoogle認証するだけで保存できます。",
+    "",
+    "管理者向け: NEXT_PUBLIC_GOOGLE_CLIENT_ID と NEXT_PUBLIC_GOOGLE_API_KEY を設定して再ビルドしてください。"
   ].join("\n");
 }
 
@@ -403,12 +411,11 @@ export function EditorShell() {
   const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
   const [printDomActive, setPrintDomActive] = useState(false);
   const [fastEditing, setFastEditing] = useState(false);
+  const bundledDriveSettings = hasBundledGoogleDriveSettings();
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const visibleSpreadIndexRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollLockFrameRef = useRef<number | null>(null);
-  const pageTurnFrameRef = useRef<number | null>(null);
-  const pageTurnAnimationRef = useRef<Animation | null>(null);
   const pendingScrollTopRef = useRef(0);
   const scrollSnapTimerRef = useRef<number | null>(null);
   const fastEditingRef = useRef(false);
@@ -467,13 +474,9 @@ export function EditorShell() {
       if (scrollLockFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollLockFrameRef.current);
       }
-      if (pageTurnFrameRef.current !== null) {
-        window.cancelAnimationFrame(pageTurnFrameRef.current);
-      }
       if (scrollSnapTimerRef.current !== null) {
         window.clearTimeout(scrollSnapTimerRef.current);
       }
-      pageTurnAnimationRef.current?.cancel();
     };
   }, []);
 
@@ -713,40 +716,6 @@ export function EditorShell() {
     [updateProject]
   );
 
-  const animatePageTurn = useCallback(
-    (direction: "next" | "previous") => {
-      const stage = pageStageRef.current;
-      const documentElement = stage?.querySelector<HTMLElement>(".paged-document");
-      if (!documentElement || typeof documentElement.animate !== "function") {
-        return;
-      }
-
-      if (pageTurnFrameRef.current !== null) {
-        window.cancelAnimationFrame(pageTurnFrameRef.current);
-        pageTurnFrameRef.current = null;
-      }
-      pageTurnAnimationRef.current?.cancel();
-
-      const offset = direction === "next" ? 16 : -16;
-      const scale = pageFit.scale || 1;
-      pageTurnFrameRef.current = window.requestAnimationFrame(() => {
-        pageTurnFrameRef.current = null;
-        pageTurnAnimationRef.current = documentElement.animate(
-          [
-            { opacity: 0.78, transform: `translateY(${offset}px) scale(${scale})` },
-            { opacity: 1, transform: `translateY(0) scale(${scale})` }
-          ],
-          {
-            duration: 180,
-            easing: "cubic-bezier(0.2, 0.7, 0.25, 1)",
-            fill: "none"
-          }
-        );
-      });
-    },
-    [pageFit.scale]
-  );
-
   const alignStageToSpreadIndex = useCallback(
     (spreadIndex: number, behavior: ScrollBehavior = "auto") => {
       const stage = pageStageRef.current;
@@ -778,13 +747,11 @@ export function EditorShell() {
         return;
       }
 
-      const direction = nextIndex > previousIndex ? "next" : "previous";
       visibleSpreadIndexRef.current = nextIndex;
       setVisibleSpreadIndex(nextIndex);
       alignStageToSpreadIndex(nextIndex);
-      animatePageTurn(direction);
     },
-    [alignStageToSpreadIndex, animatePageTurn, pageSpreads.length]
+    [alignStageToSpreadIndex, pageSpreads.length]
   );
 
   const updateVisibleSpreadFromScroll = useCallback(
@@ -1617,6 +1584,7 @@ export function EditorShell() {
           <DriveSettingsPanel
             settings={driveSettingsDraft}
             isConfigured={isDriveConfigured()}
+            hasBundledSettings={bundledDriveSettings}
             onChange={setDriveSettingsDraft}
             onSave={saveDriveSettingsFromDraft}
             onClear={clearDriveSettingsFromDraft}
@@ -1896,45 +1864,66 @@ function TableOfContentsPanel({
 function DriveSettingsPanel({
   settings,
   isConfigured,
+  hasBundledSettings,
   onChange,
   onSave,
   onClear
 }: {
   settings: GoogleDriveSettings;
   isConfigured: boolean;
+  hasBundledSettings: boolean;
   onChange: (settings: GoogleDriveSettings) => void;
   onSave: () => void;
   onClear: () => void;
 }) {
+  const statusLabel = hasBundledSettings ? "アプリ内蔵" : isConfigured ? "開発者設定済み" : "未設定";
+
   return (
     <section className="tool-panel drive-settings-panel">
       <div className="panel-title-row">
         <h2>Google Drive設定</h2>
-        <span className={`mini-badge ${isConfigured ? "is-ok" : ""}`}>{isConfigured ? "設定済み" : "未設定"}</span>
+        <span className={`mini-badge ${isConfigured ? "is-ok" : ""}`}>{statusLabel}</span>
       </div>
-      <div className="drive-form">
-        <label className="drive-form-field">
-          <span>OAuthクライアントID</span>
-          <input
-            value={settings.clientId}
-            placeholder="xxxxx.apps.googleusercontent.com"
-            onChange={(event) => onChange({ ...settings, clientId: event.target.value })}
-          />
-        </label>
-        <label className="drive-form-field">
-          <span>APIキー</span>
-          <input value={settings.apiKey} placeholder="AIza..." onChange={(event) => onChange({ ...settings, apiKey: event.target.value })} />
-        </label>
-      </div>
-      <div className="drive-actions">
-        <button type="button" onClick={onSave}>
-          <CloudCog size={16} />
-          設定を保存
-        </button>
-        <button type="button" onClick={onClear}>
-          クリア
-        </button>
-      </div>
+      {hasBundledSettings ? (
+        <>
+          <p className="drive-note">Drive連携はアプリ側で設定済みです。利用者がGoogle CloudでAPIキーを取得する必要はありません。</p>
+          <div className="drive-actions single">
+            <button type="button" onClick={onClear}>
+              保存済み入力を消す
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="drive-note">この欄は運営・開発者向けです。商品版では利用者にAPI取得をお願いせず、アプリ側に設定を内蔵する想定です。</p>
+          <details className="drive-advanced-settings">
+            <summary>開発者向け設定を開く</summary>
+            <div className="drive-form">
+              <label className="drive-form-field">
+                <span>OAuthクライアントID</span>
+                <input
+                  value={settings.clientId}
+                  placeholder="xxxxx.apps.googleusercontent.com"
+                  onChange={(event) => onChange({ ...settings, clientId: event.target.value })}
+                />
+              </label>
+              <label className="drive-form-field">
+                <span>APIキー</span>
+                <input value={settings.apiKey} placeholder="AIza..." onChange={(event) => onChange({ ...settings, apiKey: event.target.value })} />
+              </label>
+            </div>
+            <div className="drive-actions">
+              <button type="button" onClick={onSave}>
+                <CloudCog size={16} />
+                設定を保存
+              </button>
+              <button type="button" onClick={onClear}>
+                クリア
+              </button>
+            </div>
+          </details>
+        </>
+      )}
     </section>
   );
 }

@@ -509,6 +509,37 @@ h1 {
   margin-bottom: 10px;
 }
 
+.drive-note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.drive-advanced-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.drive-advanced-settings summary {
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid #d8cdbc;
+  border-radius: 7px;
+  background: #fbf7ef;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.drive-advanced-settings[open] summary {
+  margin-bottom: 8px;
+  border-color: var(--rain);
+  background: #eaf3f0;
+  color: #1f5c54;
+}
+
 .toc-form {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -576,6 +607,10 @@ h1 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
   margin-bottom: 10px;
+}
+
+.drive-actions.single {
+  grid-template-columns: 1fr;
 }
 
 .toc-actions button,
@@ -716,7 +751,7 @@ h1 {
   overflow-anchor: none;
   transform: scale(var(--page-scale, 1));
   transform-origin: top left;
-  will-change: transform, opacity;
+  will-change: transform;
   box-shadow: 0 18px 45px rgba(36, 33, 29, 0.16);
 }
 
