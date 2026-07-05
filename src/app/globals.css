@@ -1261,9 +1261,8 @@ h1 {
   font-family: var(--manuscript-font-family);
   font-size: var(--manuscript-font-size);
   line-height: var(--line-height);
-  line-break: strict;
+  line-break: normal;
   word-break: normal;
-  word-break: auto-phrase;
   overflow-wrap: normal;
   hyphens: manual;
   outline: none;
@@ -1474,10 +1473,11 @@ h1 {
 }
 
 .manuscript-prose [data-resize-container][data-node="image"] {
-  width: var(--content-width);
+  display: flex;
+  width: fit-content;
   max-width: var(--content-width);
   justify-content: center;
-  margin: 4mm 0;
+  margin: 4mm auto;
   break-before: auto;
   break-inside: avoid-column;
   page-break-before: auto;
@@ -1487,6 +1487,8 @@ h1 {
 
 .manuscript-prose [data-resize-container][data-node="image"] [data-resize-wrapper] {
   max-width: var(--content-width);
+  margin-left: auto;
+  margin-right: auto;
   line-height: 0;
 }
 
@@ -1553,6 +1555,12 @@ h1 {
 .ruby-text rt,
 .manuscript-prose ruby rt {
   font-size: var(--ruby-font-size);
+}
+
+.ruby-text,
+.manuscript-prose ruby {
+  ruby-position: over;
+  white-space: nowrap;
 }
 
 .manuscript-prose .page-break-before,

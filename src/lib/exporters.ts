@@ -546,9 +546,8 @@ function epubCss(project: ManuscriptProject): string {
   font-family: ${bodyFont};
   font-size: ${project.pageSettings.fontSizePt}pt;
   line-height: ${project.pageSettings.lineHeight};
-  line-break: strict;
+  line-break: normal;
   word-break: normal;
-  word-break: auto-phrase;
   overflow-wrap: normal;
   hyphens: manual;
 }
@@ -564,6 +563,7 @@ h1, h2, h3 {
 
 ruby {
   ruby-position: over;
+  white-space: nowrap;
 }
 
 rt {
