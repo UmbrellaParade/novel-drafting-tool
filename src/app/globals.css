@@ -1379,6 +1379,8 @@ h1 {
 .toc-entry-title {
   min-width: 0;
   overflow-wrap: anywhere;
+  padding-left: 4em;
+  text-indent: -4em;
 }
 
 .toc-entry-leader {
