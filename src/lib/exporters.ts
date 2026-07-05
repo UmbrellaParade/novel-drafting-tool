@@ -48,6 +48,7 @@ type PdfTocBlock = {
   subtitle: string;
   style: TocStyleId;
   fontSizePt?: number;
+  titleGapPt?: number;
   items: TocExportEntry[];
 };
 
@@ -600,6 +601,7 @@ img {
 }
 
 .toc-subtitle {
+  display: none;
   margin: 0.4em 0 1.2em;
   text-align: center;
   color: #6b6258;
@@ -612,7 +614,7 @@ img {
 
 .toc-list {
   list-style: none;
-  margin: 0;
+  margin: var(--toc-title-gap, 1.2em) 0 0;
   padding: 0;
 }
 
@@ -955,10 +957,9 @@ function drawTocBlock(state: PdfRenderState, block: PdfTocBlock): void {
   const theme = tocPdfTheme(state, block.style);
   const baseSize = block.fontSizePt && Number.isFinite(block.fontSizePt) && block.fontSizePt > 0 ? block.fontSizePt : projectFontSize(state);
   const titleSize = baseSize * 1.55;
-  const subtitleSize = baseSize * 0.86;
   const entrySize = baseSize;
   const title = normalizePdfText(block.title) || "目次";
-  const subtitle = normalizePdfText(block.subtitle);
+  const titleGap = typeof block.titleGapPt === "number" && Number.isFinite(block.titleGapPt) && block.titleGapPt >= 0 ? block.titleGapPt : baseSize * 2;
   const topPadding = mmToPt(4);
   const bottomPadding = mmToPt(4);
   const entryLineHeight = entrySize * 1.65;
@@ -980,24 +981,7 @@ function drawTocBlock(state: PdfRenderState, block: PdfTocBlock): void {
     size: titleSize,
     color: theme.ink
   });
-  state.y -= titleSize * 1.55;
-
-  if (subtitle) {
-    const subtitleLines = wrapText(subtitle, state.uiFont, subtitleSize, state.contentWidth);
-    for (const line of subtitleLines) {
-      ensureVerticalSpace(state, subtitleSize * 1.35);
-      const lineWidth = state.uiFont.widthOfTextAtSize(line, subtitleSize);
-      state.page.drawText(line, {
-        x: state.contentX + (state.contentWidth - lineWidth) / 2,
-        y: state.y - subtitleSize,
-        font: state.uiFont,
-        size: subtitleSize,
-        color: theme.muted
-      });
-      state.y -= subtitleSize * 1.35;
-    }
-    state.y -= mmToPt(2);
-  }
+  state.y -= titleSize + titleGap;
 
   for (const item of block.items) {
     const itemTitle = normalizePdfText(item.title);
@@ -1346,9 +1330,10 @@ function parsePdfBlocks(html: string): PdfBlock[] {
       blocks.push({
         kind: "toc",
         title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
-        subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
+        subtitle: "",
         style: parseTocStyle(element.dataset.style),
         fontSizePt: parseHtmlDimension(element.dataset.fontSizePt ?? null),
+        titleGapPt: parseHtmlDimension(element.dataset.titleGapPt ?? null),
         items: parseTocEntries(element)
       });
       return;
@@ -1460,11 +1445,7 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
 
     if (element.matches("section[data-type='table-of-contents']")) {
       const title = element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次";
-      const subtitle = element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "";
       blocks.push({ kind: "heading", text: title });
-      if (subtitle) {
-        blocks.push({ kind: "paragraph", text: subtitle });
-      }
       parseTocEntries(element).forEach((item) => {
         blocks.push({ kind: "paragraph", text: `${item.title} .... ${item.page ?? ""}`.trim() });
       });

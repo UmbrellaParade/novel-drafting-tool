@@ -347,9 +347,10 @@ function tocItemsJson(entries: TocEntry[]): string {
 function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
   return {
     title: settings.title.trim() || "目次",
-    subtitle: settings.subtitle,
+    subtitle: "",
     style: settings.style,
     fontSizePt: settings.fontSizePt ?? null,
+    titleGapPt: settings.titleGapPt ?? null,
     items: tocItemsJson(entries)
   };
 }
@@ -372,6 +373,7 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           node.attrs.subtitle === nextAttrs.subtitle &&
           node.attrs.style === nextAttrs.style &&
           node.attrs.fontSizePt === nextAttrs.fontSizePt &&
+          node.attrs.titleGapPt === nextAttrs.titleGapPt &&
           node.attrs.items === nextAttrs.items;
         if (!isSame) {
           tr.setNodeMarkup(position, undefined, nextAttrs, node.marks);
@@ -403,6 +405,8 @@ export function EditorShell() {
   const visibleSpreadIndexRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollLockFrameRef = useRef<number | null>(null);
+  const pageTurnFrameRef = useRef<number | null>(null);
+  const pageTurnAnimationRef = useRef<Animation | null>(null);
   const pendingScrollTopRef = useRef(0);
   const fastEditingRef = useRef(false);
   const editingScrollLockRef = useRef<{ top: number; left: number } | null>(null);
@@ -460,6 +464,10 @@ export function EditorShell() {
       if (scrollLockFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollLockFrameRef.current);
       }
+      if (pageTurnFrameRef.current !== null) {
+        window.cancelAnimationFrame(pageTurnFrameRef.current);
+      }
+      pageTurnAnimationRef.current?.cancel();
     };
   }, []);
 
@@ -698,24 +706,65 @@ export function EditorShell() {
     [updateProject]
   );
 
+  const animatePageTurn = useCallback(
+    (direction: "next" | "previous") => {
+      const stage = pageStageRef.current;
+      const documentElement = stage?.querySelector<HTMLElement>(".paged-document");
+      if (!documentElement || typeof documentElement.animate !== "function") {
+        return;
+      }
+
+      if (pageTurnFrameRef.current !== null) {
+        window.cancelAnimationFrame(pageTurnFrameRef.current);
+        pageTurnFrameRef.current = null;
+      }
+      pageTurnAnimationRef.current?.cancel();
+
+      const offset = direction === "next" ? 16 : -16;
+      const scale = pageFit.scale || 1;
+      pageTurnFrameRef.current = window.requestAnimationFrame(() => {
+        pageTurnFrameRef.current = null;
+        pageTurnAnimationRef.current = documentElement.animate(
+          [
+            { opacity: 0.78, transform: `translateY(${offset}px) scale(${scale})` },
+            { opacity: 1, transform: `translateY(0) scale(${scale})` }
+          ],
+          {
+            duration: 180,
+            easing: "cubic-bezier(0.2, 0.7, 0.25, 1)",
+            fill: "none"
+          }
+        );
+      });
+    },
+    [pageFit.scale]
+  );
+
   const goToSpreadIndex = useCallback(
-    (spreadIndex: number, behavior: ScrollBehavior = "smooth") => {
+    (spreadIndex: number) => {
       if (pageSpreads.length === 0) {
         return;
       }
 
       const nextIndex = Math.max(0, Math.min(pageSpreads.length - 1, spreadIndex));
+      const previousIndex = visibleSpreadIndexRef.current;
+      if (nextIndex === previousIndex) {
+        return;
+      }
+
       const stage = pageStageRef.current;
       const nextTop = nextIndex * Math.max(1, pageFit.pageStep);
+      const direction = nextIndex > previousIndex ? "next" : "previous";
       visibleSpreadIndexRef.current = nextIndex;
       pendingScrollTopRef.current = nextTop;
       setVisibleSpreadIndex(nextIndex);
       if (stage) {
-        stage.scrollTo({ top: nextTop, behavior });
+        stage.scrollTo({ top: nextTop, behavior: "auto" });
         stage.style.setProperty("--page-scroll-top", `${nextTop}px`);
       }
+      animatePageTurn(direction);
     },
-    [pageFit.pageStep, pageSpreads.length]
+    [animatePageTurn, pageFit.pageStep, pageSpreads.length]
   );
 
   const updateVisibleSpreadFromScroll = useCallback(
@@ -1706,9 +1755,14 @@ function TableOfContentsPanel({
   onRefresh: () => void;
 }) {
   const tocFontSizePt = settings.fontSizePt ?? 9;
+  const tocTitleGapPt = settings.titleGapPt ?? 18;
   const updateTocFontSize = (nextSize: number) => {
     const clampedSize = Math.max(6, Math.min(16, Number(nextSize.toFixed(1))));
     onSettingChange("fontSizePt", clampedSize);
+  };
+  const updateTocTitleGap = (nextGap: number) => {
+    const clampedGap = Math.max(0, Math.min(48, Number(nextGap.toFixed(1))));
+    onSettingChange("titleGapPt", clampedGap);
   };
 
   return (
@@ -1718,13 +1772,9 @@ function TableOfContentsPanel({
         <span className="mini-badge">H1 {entries.length}件</span>
       </div>
       <div className="toc-form">
-        <label className="toc-form-field">
+        <label className="toc-form-field wide">
           <span>目次タイトル</span>
           <input value={settings.title} onChange={(event) => onSettingChange("title", event.target.value)} />
-        </label>
-        <label className="toc-form-field">
-          <span>副題</span>
-          <input placeholder="例: 雨の章だより" value={settings.subtitle} onChange={(event) => onSettingChange("subtitle", event.target.value)} />
         </label>
         <label className="toc-form-field wide">
           <span>外観</span>
@@ -1749,6 +1799,25 @@ function TableOfContentsPanel({
               onChange={(event) => updateTocFontSize(Number.parseFloat(event.target.value))}
             />
             <button type="button" onClick={() => updateTocFontSize(tocFontSizePt + 0.5)} aria-label="目次の文字を大きくする">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+        <div className="toc-form-field wide">
+          <span>タイトル下の余白：{tocTitleGapPt}pt</span>
+          <div className="toc-size-stepper">
+            <button type="button" onClick={() => updateTocTitleGap(tocTitleGapPt - 1)} aria-label="タイトル下の余白を狭くする">
+              <Minus size={14} />
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="48"
+              step="1"
+              value={tocTitleGapPt}
+              onChange={(event) => updateTocTitleGap(Number.parseFloat(event.target.value))}
+            />
+            <button type="button" onClick={() => updateTocTitleGap(tocTitleGapPt + 1)} aria-label="タイトル下の余白を広くする">
               <Plus size={14} />
             </button>
           </div>

@@ -48,6 +48,8 @@ export type TocSettings = {
   style: TocStyleId;
   /** 目次本文のフォントサイズ（pt）。省略時は原稿フォントサイズに準じる */
   fontSizePt?: number;
+  /** 目次タイトルと項目一覧の間隔（pt）。 */
+  titleGapPt?: number;
 };
 
 export type ManuscriptProject = {

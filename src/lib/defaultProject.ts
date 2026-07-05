@@ -104,7 +104,8 @@ const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnig
 export const DEFAULT_TOC_SETTINGS: TocSettings = {
   title: "目次",
   subtitle: "",
-  style: "classic"
+  style: "classic",
+  titleGapPt: 18
 };
 
 const sampleContent = `
@@ -170,12 +171,16 @@ export function normalizeProject(project: ManuscriptProject): ManuscriptProject 
 
 export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettings {
   const fontSizePt = typeof settings?.fontSizePt === "number" && Number.isFinite(settings.fontSizePt) && settings.fontSizePt > 0 ? settings.fontSizePt : undefined;
+  const titleGapPt = typeof settings?.titleGapPt === "number" && Number.isFinite(settings.titleGapPt) && settings.titleGapPt >= 0
+    ? Math.max(0, Math.min(48, Number(settings.titleGapPt.toFixed(1))))
+    : DEFAULT_TOC_SETTINGS.titleGapPt;
 
   return {
     title: settings?.title?.trim() || DEFAULT_TOC_SETTINGS.title,
-    subtitle: settings?.subtitle ?? DEFAULT_TOC_SETTINGS.subtitle,
+    subtitle: "",
     style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style,
-    ...(fontSizePt ? { fontSizePt } : {})
+    ...(fontSizePt ? { fontSizePt } : {}),
+    titleGapPt
   };
 }
 

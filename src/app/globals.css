@@ -715,6 +715,7 @@ h1 {
   overflow-anchor: none;
   transform: scale(var(--page-scale, 1));
   transform-origin: top left;
+  will-change: transform, opacity;
   box-shadow: 0 18px 45px rgba(36, 33, 29, 0.16);
 }
 
@@ -1214,6 +1215,7 @@ h1 {
 }
 
 .toc-subtitle {
+  display: none;
   margin: 2mm 0 5mm;
   color: #6b6258;
   font-family: var(--font-sans), sans-serif;
@@ -1229,7 +1231,7 @@ h1 {
 .toc-list {
   display: grid;
   gap: 2.2mm;
-  margin: 0;
+  margin: var(--toc-title-gap, 18pt) 0 0;
   padding: 0;
   list-style: none;
 }

@@ -185,6 +185,17 @@ export const TableOfContentsNode = Node.create({
           return { "data-font-size-pt": String(attributes.fontSizePt) };
         }
       },
+      titleGapPt: {
+        default: null,
+        parseHTML: (element) => {
+          const v = (element as HTMLElement).dataset.titleGapPt;
+          return v ? Number.parseFloat(v) : null;
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.titleGapPt && attributes.titleGapPt !== 0) return {};
+          return { "data-title-gap-pt": String(attributes.titleGapPt) };
+        }
+      },
       items: {
         default: "[]",
         parseHTML: (element) => (element as HTMLElement).dataset.items ?? "[]",
@@ -207,6 +218,7 @@ export const TableOfContentsNode = Node.create({
             subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
             style: tocStyle(element.dataset.style),
             fontSizePt: fontSizePtRaw ? Number.parseFloat(fontSizePtRaw) : null,
+            titleGapPt: element.dataset.titleGapPt ? Number.parseFloat(element.dataset.titleGapPt) : null,
             items: JSON.stringify(tocItemsFromElement(element))
           };
         }
@@ -217,25 +229,31 @@ export const TableOfContentsNode = Node.create({
   renderHTML({ node, HTMLAttributes }) {
     const style = tocStyle(node.attrs.style);
     const items = readTocItems(node.attrs.items);
-    const subtitle = typeof node.attrs.subtitle === "string" ? node.attrs.subtitle : "";
     const fontSizePt = typeof node.attrs.fontSizePt === "number" && node.attrs.fontSizePt > 0
       ? node.attrs.fontSizePt
       : null;
-    const blockStyle = fontSizePt ? `font-size: ${fontSizePt}pt` : undefined;
+    const titleGapPt = typeof node.attrs.titleGapPt === "number" && node.attrs.titleGapPt >= 0
+      ? node.attrs.titleGapPt
+      : null;
+    const styleRules = [
+      fontSizePt ? `font-size: ${fontSizePt}pt` : "",
+      titleGapPt !== null ? `--toc-title-gap: ${titleGapPt}pt` : ""
+    ].filter(Boolean);
+    const blockStyle = styleRules.length ? styleRules.join("; ") : undefined;
 
     return [
       "section",
       mergeAttributes(HTMLAttributes, {
         "data-type": "table-of-contents",
         "data-title": node.attrs.title,
-        "data-subtitle": subtitle,
+        "data-subtitle": "",
         "data-style": style,
         ...(fontSizePt ? { "data-font-size-pt": String(fontSizePt) } : {}),
+        ...(titleGapPt !== null ? { "data-title-gap-pt": String(titleGapPt) } : {}),
         ...(blockStyle ? { style: blockStyle } : {}),
         class: `manuscript-toc manuscript-toc-${style}`
       }),
       ["div", { class: "toc-title" }, node.attrs.title || "目次"],
-      ["p", { class: subtitle ? "toc-subtitle" : "toc-subtitle toc-subtitle-empty" }, subtitle],
       [
         "ol",
         { class: "toc-list" },
