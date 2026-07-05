@@ -380,6 +380,10 @@ function pageSpreadLabel(spread: PageSpread): string {
   return `${(spread.pages[0] ?? 0) + 1}-${(spread.pages[spread.pages.length - 1] ?? 0) + 1}`;
 }
 
+function isShimaumaPresetId(preset: ManuscriptProject["pageSettings"]["preset"]): boolean {
+  return preset === "shimauma-a6" || preset === "shimauma-a5";
+}
+
 function roundUpToMultiple(value: number, multiple: number): number {
   if (multiple <= 1) {
     return value;
@@ -1437,7 +1441,7 @@ export function EditorShell() {
       project: latestProject,
       result,
       previewPageCount: pageFrameCount,
-      isShimauma: latestProject.pageSettings.preset === "shimauma-a6" || latestProject.pageSettings.preset === "shimauma-a5"
+      isShimauma: isShimaumaPresetId(latestProject.pageSettings.preset)
     });
   };
 
@@ -1479,7 +1483,12 @@ export function EditorShell() {
     try {
       setStatusText("PDFプレビューを作成中");
       const latestProject = projectWithLatestContent(project);
-      const result = await buildProjectPdf(latestProject);
+      const isShimauma = isShimaumaPresetId(latestProject.pageSettings.preset);
+      const targetPageCount = isShimauma ? roundUpToMultiple(pageFrameCount, 4) : pageFrameCount;
+      const result = await buildProjectPdf(latestProject, {
+        padToPageCount: targetPageCount,
+        padToMultipleOf: isShimauma ? 4 : undefined
+      });
       openPdfPreview(latestProject, result);
       flushPendingChapterContent();
       setStatusText("PDFプレビューを確認してください");
@@ -1916,10 +1925,11 @@ function PdfPreviewDialog({
 }) {
   const pdfPageCount = preview.result.pageCount;
   const previewPageCount = preview.previewPageCount;
-  const mismatch = pdfPageCount !== previewPageCount;
+  const expectedPageCount = preview.isShimauma ? roundUpToMultiple(previewPageCount, 4) : previewPageCount;
+  const mismatch = pdfPageCount !== expectedPageCount;
   const missingPages = preview.isShimauma && preview.result.missingPagesForShimauma > 0 ? preview.result.missingPagesForShimauma : 0;
-  const canDownload = missingPages === 0;
-  const targetPageCount = preview.isShimauma ? roundUpToMultiple(Math.max(pdfPageCount, previewPageCount), 4) : Math.max(pdfPageCount, previewPageCount);
+  const canDownload = missingPages === 0 && !mismatch;
+  const targetPageCount = preview.isShimauma ? roundUpToMultiple(Math.max(pdfPageCount, expectedPageCount), 4) : Math.max(pdfPageCount, expectedPageCount);
   const pagesToAdd = Math.max(0, targetPageCount - pdfPageCount);
 
   return (
@@ -1937,11 +1947,12 @@ function PdfPreviewDialog({
         <div className="pdf-preview-summary">
           <span>原稿プレビュー: {previewPageCount}ページ</span>
           <span>PDF: {pdfPageCount}ページ</span>
+          {expectedPageCount !== previewPageCount ? <span>出力目標: {expectedPageCount}ページ</span> : null}
           {preview.result.paddedPages > 0 ? <span>白紙追加: {preview.result.paddedPages}ページ</span> : null}
         </div>
         {mismatch ? (
           <p className="pdf-preview-warning">
-            原稿画面とPDFのページ数が違います。PDFは別レイアウトで再生成されるため、画像や行間の差で1ページずれることがあります。
+            原稿画面とPDFのページ数が違います。PDF側の本文が原稿プレビューより多く流れている場合は、画像・行間・文字サイズの調整が必要です。
           </p>
         ) : null}
         {missingPages > 0 ? (
