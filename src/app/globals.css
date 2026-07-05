@@ -1147,6 +1147,11 @@ h1 {
   font-family: var(--manuscript-font-family);
   font-size: var(--manuscript-font-size);
   line-height: var(--line-height);
+  line-break: strict;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  hyphens: manual;
   outline: none;
   overflow-anchor: none;
 }

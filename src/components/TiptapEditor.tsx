@@ -146,6 +146,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         autocorrect: "off",
         class: "manuscript-prose",
         "data-gramm": "false",
+        lang: "ja",
         spellcheck: "false"
       },
       handleKeyDown: (_view, event) => {

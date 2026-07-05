@@ -546,6 +546,11 @@ function epubCss(project: ManuscriptProject): string {
   font-family: ${bodyFont};
   font-size: ${project.pageSettings.fontSizePt}pt;
   line-height: ${project.pageSettings.lineHeight};
+  line-break: strict;
+  word-break: normal;
+  word-break: auto-phrase;
+  overflow-wrap: normal;
+  hyphens: manual;
 }
 
 p {

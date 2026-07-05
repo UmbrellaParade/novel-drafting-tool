@@ -1601,7 +1601,7 @@ function PrintDocument({
   const pagePitchMm = contentWidthMm + page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
 
   return (
-    <div className="print-document" aria-hidden="true">
+    <div className="print-document" aria-hidden="true" lang="ja">
       {Array.from({ length: pageCount }, (_, pageIndex) => (
         <section key={pageIndex} className="print-page">
           <header className="print-page-header">
