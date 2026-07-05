@@ -68,8 +68,8 @@ const FONT_SIZE_SCOPES = {
   body: new Set(["paragraph", "blockquote", "listItem"])
 } as const;
 
-const EDITOR_HTML_COMMIT_DELAY_MS = 800;
-const EDITOR_HTML_IDLE_TIMEOUT_MS = 1200;
+const EDITOR_HTML_COMMIT_DELAY_MS = 1200;
+const EDITOR_HTML_IDLE_TIMEOUT_MS = 1800;
 
 function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
@@ -127,7 +127,12 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
     immediatelyRender: false,
     editorProps: {
       attributes: {
-        class: "manuscript-prose"
+        autocapitalize: "off",
+        autocomplete: "off",
+        autocorrect: "off",
+        class: "manuscript-prose",
+        "data-gramm": "false",
+        spellcheck: "false"
       },
       handleKeyDown: (_view, event) => {
         const isEditingKey =
@@ -409,26 +414,30 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         imageReplaceTargetRef.current = null;
         const position = target ? resolveImagePosition(editor, target) : null;
         const imageNode = position !== null ? editor.state.doc.nodeAt(position) : null;
-        const replaced = Boolean(
-          position !== null &&
-            imageNode &&
-            imageNode.type.name === "image" &&
-            editor
-              .chain()
-              .focus()
-              .insertContentAt(
-                { from: position, to: position + imageNode.nodeSize },
-                {
-                  type: "image",
-                  attrs: {
-                    ...imageNode.attrs,
-                    src,
-                    alt: file.name,
-                    title: file.name
-                  }
-                }
-              )
-              .run()
+        const replaced = withStablePageStageScroll(
+          editor,
+          () =>
+            Boolean(
+              position !== null &&
+                imageNode &&
+                imageNode.type.name === "image" &&
+                editor
+                  .chain()
+                  .focus()
+                  .insertContentAt(
+                    { from: position, to: position + imageNode.nodeSize },
+                    {
+                      type: "image",
+                      attrs: {
+                        ...imageNode.attrs,
+                        src,
+                        alt: file.name,
+                        title: file.name
+                      }
+                    }
+                  )
+                  .run()
+            )
         );
 
         if (!replaced) {
@@ -439,16 +448,18 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         return;
       }
 
-      editor
-        .chain()
-        .focus()
-        .setImage({
-          src,
-          alt: file.name,
-          title: file.name,
-          width: Math.round(readPageWidthPx(editor) * 0.75)
-        })
-        .run();
+      withStablePageStageScroll(editor, () => {
+        editor
+          .chain()
+          .focus()
+          .setImage({
+            src,
+            alt: file.name,
+            title: file.name,
+            width: Math.round(readPageWidthPx(editor) * 0.75)
+          })
+          .run();
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -473,19 +484,21 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const applied = editor
-      .chain()
-      .focus()
-      .command(({ state, tr }) => {
-        const node = state.doc.nodeAt(position);
-        if (!node || node.type.name !== "image") {
-          return false;
-        }
+    const applied = withStablePageStageScroll(editor, () =>
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          const node = state.doc.nodeAt(position);
+          if (!node || node.type.name !== "image") {
+            return false;
+          }
 
-        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth, height: null }, node.marks);
-        return true;
-      })
-      .run();
+          tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth, height: null }, node.marks);
+          return true;
+        })
+        .run()
+    );
     if (applied) {
       setToolbarState((previous) => (previous.hasImageSelection ? { ...previous, selectedImageWidth: nextWidth } : previous));
     }
@@ -550,19 +563,21 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const applied = editor
-      .chain()
-      .focus()
-      .command(({ state, tr }) => {
-        const node = state.doc.nodeAt(position);
-        if (!node || node.type.name !== "qrCard") {
-          return false;
-        }
+    const applied = withStablePageStageScroll(editor, () =>
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          const node = state.doc.nodeAt(position);
+          if (!node || node.type.name !== "qrCard") {
+            return false;
+          }
 
-        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth }, node.marks);
-        return true;
-      })
-      .run();
+          tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth }, node.marks);
+          return true;
+        })
+        .run()
+    );
     if (applied) {
       setToolbarState((previous) => (previous.hasQrCardSelection ? { ...previous, selectedQrCardWidth: nextWidth } : previous));
     }
@@ -585,14 +600,16 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     if (toolbarState.hasImageSelection && position !== null) {
       const node = editor.state.doc.nodeAt(position);
       if (node?.type.name === "image") {
-        editor
-          .chain()
-          .focus()
-          .command(({ tr }) => {
-            tr.delete(position, position + node.nodeSize);
-            return true;
-          })
-          .run();
+        withStablePageStageScroll(editor, () => {
+          editor
+            .chain()
+            .focus()
+            .command(({ tr }) => {
+              tr.delete(position, position + node.nodeSize);
+              return true;
+            })
+            .run();
+        });
         return;
       }
     }
@@ -601,14 +618,16 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     if (toolbarState.hasQrCardSelection && qrCardPosition !== null) {
       const node = editor.state.doc.nodeAt(qrCardPosition);
       if (node?.type.name === "qrCard") {
-        editor
-          .chain()
-          .focus()
-          .command(({ tr }) => {
-            tr.delete(qrCardPosition, qrCardPosition + node.nodeSize);
-            return true;
-          })
-          .run();
+        withStablePageStageScroll(editor, () => {
+          editor
+            .chain()
+            .focus()
+            .command(({ tr }) => {
+              tr.delete(qrCardPosition, qrCardPosition + node.nodeSize);
+              return true;
+            })
+            .run();
+        });
         return;
       }
     }
@@ -900,19 +919,57 @@ function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
   );
 }
 
+function restorePageStageScroll(editor: Editor, scrollTop: number, scrollLeft: number): void {
+  const stage = editor.view.dom.closest<HTMLElement>(".page-stage");
+  if (!stage) {
+    return;
+  }
+
+  const restore = () => {
+    const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+    const nextScrollTop = Math.max(0, Math.min(scrollTop, maxScrollTop));
+    if (Math.abs(stage.scrollTop - nextScrollTop) > 1) {
+      stage.scrollTop = nextScrollTop;
+    }
+    if (Math.abs(stage.scrollLeft - scrollLeft) > 1) {
+      stage.scrollLeft = scrollLeft;
+    }
+    stage.style.setProperty("--page-scroll-top", `${stage.scrollTop}px`);
+  };
+
+  restore();
+  window.requestAnimationFrame(restore);
+  window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+  window.setTimeout(restore, 80);
+  window.setTimeout(restore, 240);
+}
+
+function withStablePageStageScroll<T>(editor: Editor, action: () => T): T {
+  const stage = editor.view.dom.closest<HTMLElement>(".page-stage");
+  const scrollTop = stage?.scrollTop ?? 0;
+  const scrollLeft = stage?.scrollLeft ?? 0;
+  const result = action();
+  if (stage) {
+    restorePageStageScroll(editor, scrollTop, scrollLeft);
+  }
+  return result;
+}
+
 async function insertClipboardImageFiles(editor: Editor, files: File[]): Promise<void> {
   for (const file of files) {
     const src = await fileToDataUrl(file);
-    editor
-      .chain()
-      .focus()
-      .setImage({
-        src,
-        alt: file.name,
-        title: file.name,
-        width: Math.round(readPageWidthPx(editor) * 0.75)
-      })
-      .run();
+    withStablePageStageScroll(editor, () => {
+      editor
+        .chain()
+        .focus()
+        .setImage({
+          src,
+          alt: file.name,
+          title: file.name,
+          width: Math.round(readPageWidthPx(editor) * 0.75)
+        })
+        .run();
+    });
   }
 }
 
@@ -933,7 +990,9 @@ async function insertPastedHtmlWithImages(editor: Editor, html: string): Promise
     })
   );
 
-  editor.chain().focus().insertContent(template.innerHTML).run();
+  withStablePageStageScroll(editor, () => {
+    editor.chain().focus().insertContent(template.innerHTML).run();
+  });
 }
 
 function fileToDataUrl(file: File): Promise<string> {

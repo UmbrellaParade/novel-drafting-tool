@@ -1280,7 +1280,7 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className="page-stage">
+        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`}>
           <div className="page-viewport" style={pageViewportStyle}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}

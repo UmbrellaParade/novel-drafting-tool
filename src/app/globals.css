@@ -673,6 +673,7 @@ h1 {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overflow-anchor: none;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -695,6 +696,7 @@ h1 {
   min-height: 1px;
   margin: 0 auto;
   overflow: visible;
+  overflow-anchor: none;
 }
 
 .paged-document {
@@ -710,6 +712,7 @@ h1 {
   overflow: clip;
   clip-path: inset(0);
   contain: layout paint style;
+  overflow-anchor: none;
   transform: scale(var(--page-scale, 1));
   transform-origin: top left;
   box-shadow: 0 18px 45px rgba(36, 33, 29, 0.16);
@@ -1056,16 +1059,15 @@ h1 {
   font-size: var(--manuscript-font-size);
   line-height: var(--line-height);
   outline: none;
+  overflow-anchor: none;
 }
 
 .page-stage.is-fast-editing .manuscript-prose {
-  width: var(--content-width);
-  height: auto;
-  min-height: var(--content-height);
-  columns: auto;
-  column-width: auto;
-  column-gap: normal;
-  overflow: visible;
+  text-rendering: optimizeSpeed;
+}
+
+.page-stage.is-fast-editing .paged-editor-layer {
+  will-change: auto;
 }
 
 .manuscript-prose p {
