@@ -10,6 +10,11 @@ const nextConfig = (phase) => {
     output: "export",
     basePath: isGitHubPagesBuild ? `/${repoName}` : "",
     assetPrefix: isGitHubPagesBuild ? `/${repoName}/` : "",
+    generateBuildId: async () => {
+      const source = process.env.GITHUB_SHA ?? Date.now().toString(36);
+      const safeSource = source.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24);
+      return `build-${safeSource || "local"}`;
+    },
     images: {
       unoptimized: true
     }
