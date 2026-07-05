@@ -15,6 +15,19 @@ function fontSizeAttributes(fontSize: string | null | undefined): Record<string,
   };
 }
 
+function qrCardWidthAttributes(width: unknown): Record<string, string> {
+  const parsed = typeof width === "number" ? width : typeof width === "string" ? Number.parseFloat(width) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return {};
+  }
+
+  const rounded = Math.round(parsed);
+  return {
+    "data-width": String(rounded),
+    style: `--qr-card-width: ${rounded}px; width: ${rounded}px`
+  };
+}
+
 export const FontSizeMark = Mark.create({
   name: "fontSize",
 
@@ -164,7 +177,12 @@ export const QrCardNode = Node.create({
       description: { default: "" },
       src: { default: "" },
       template: { default: "umbrella" },
-      label: { default: "記録室リンク" }
+      label: { default: "記録室リンク" },
+      width: {
+        default: null,
+        parseHTML: (element) => (element as HTMLElement).dataset.width ?? (element as HTMLElement).style.width ?? null,
+        renderHTML: (attributes) => qrCardWidthAttributes(attributes.width)
+      }
     };
   },
 
@@ -181,7 +199,8 @@ export const QrCardNode = Node.create({
             description: element.dataset.description ?? element.querySelector(".qr-card-description")?.textContent ?? "",
             src: element.dataset.src ?? element.querySelector("img")?.getAttribute("src") ?? "",
             template: element.dataset.template ?? "umbrella",
-            label: element.dataset.label ?? "記録室リンク"
+            label: element.dataset.label ?? "記録室リンク",
+            width: element.dataset.width ?? element.style.width ?? null
           };
         }
       }
@@ -211,8 +230,7 @@ export const QrCardNode = Node.create({
           "figcaption",
           { class: "qr-card-caption" },
           ["strong", { class: "qr-card-title" }, node.attrs.title],
-          ["span", { class: "qr-card-description" }, node.attrs.description],
-          ["small", { class: "qr-card-url" }, node.attrs.url]
+          ["span", { class: "qr-card-description" }, node.attrs.description]
         ]
       ]
     ];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { Editor } from "@tiptap/react";
 import QRCode from "qrcode";
 import {
@@ -39,6 +39,8 @@ const PAGE_GAP_MM = 14;
 const MAX_PAGE_FRAMES = 160;
 const DOCUMENT_CHAPTER_TITLE = "本文";
 const AUTOSAVE_DELAY_MS = 1600;
+const CONTENT_COMMIT_DELAY_MS = 450;
+const LAYOUT_REFRESH_DELAY_MS = 650;
 
 type OutlineItem = {
   id: string;
@@ -53,6 +55,17 @@ type QrDraft = {
   category: string;
   template: QrCardTemplateId;
 };
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(handle);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
 
 const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: string; qrDark: string }> = {
   umbrella: {
@@ -205,9 +218,12 @@ export function EditorShell() {
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
   const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
+  const [printDomActive, setPrintDomActive] = useState(false);
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingChapterContentRef = useRef<string | null>(null);
+  const contentCommitTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -230,6 +246,26 @@ export function EditorShell() {
 
     return () => {
       isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (contentCommitTimerRef.current !== null) {
+        window.clearTimeout(contentCommitTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const activatePrintDom = () => setPrintDomActive(true);
+    const deactivatePrintDom = () => setPrintDomActive(false);
+
+    window.addEventListener("beforeprint", activatePrintDom);
+    window.addEventListener("afterprint", deactivatePrintDom);
+    return () => {
+      window.removeEventListener("beforeprint", activatePrintDom);
+      window.removeEventListener("afterprint", deactivatePrintDom);
     };
   }, []);
 
@@ -259,12 +295,22 @@ export function EditorShell() {
     return project.chapters[0] ?? null;
   }, [project]);
   const activeChapterContent = activeChapter?.content ?? "";
-  const deferredChapterContent = useDeferredValue(activeChapterContent);
-  const outlineItems = useMemo(() => extractOutlineItems(deferredChapterContent), [deferredChapterContent]);
-  const printChapter = useMemo(() => (activeChapter ? { ...activeChapter, content: deferredChapterContent } : null), [activeChapter, deferredChapterContent]);
+  const layoutChapterContent = useDebouncedValue(activeChapterContent, LAYOUT_REFRESH_DELAY_MS);
+  const layoutProject = useMemo(() => {
+    if (!project || !activeChapter) {
+      return null;
+    }
 
-  const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
-  const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
+    return {
+      ...project,
+      chapters: project.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: layoutChapterContent } : chapter))
+    };
+  }, [activeChapter, layoutChapterContent, project]);
+  const outlineItems = useMemo(() => extractOutlineItems(layoutChapterContent), [layoutChapterContent]);
+  const printChapter = useMemo(() => (activeChapter ? { ...activeChapter, content: layoutChapterContent } : null), [activeChapter, layoutChapterContent]);
+
+  const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject) : []), [layoutProject]);
+  const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject) : 1), [layoutProject]);
   const layoutSignature = useMemo(() => {
     if (!project || !activeChapter) {
       return "";
@@ -272,10 +318,10 @@ export function EditorShell() {
 
     return JSON.stringify({
       activeChapterId: activeChapter.id,
-      content: deferredChapterContent,
+      content: layoutChapterContent,
       pageSettings: project.pageSettings
     });
-  }, [activeChapter, deferredChapterContent, project]);
+  }, [activeChapter, layoutChapterContent, project]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
   const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
 
@@ -291,23 +337,69 @@ export function EditorShell() {
     });
   }, []);
 
+  const projectWithLatestContent = useCallback(
+    (source: ManuscriptProject) => {
+      const pendingContent = pendingChapterContentRef.current;
+      if (pendingContent === null) {
+        return source;
+      }
+
+      return {
+        ...source,
+        chapters: source.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: pendingContent } : chapter))
+      };
+    },
+    []
+  );
+
+  const flushPendingChapterContent = useCallback(() => {
+    const pendingContent = pendingChapterContentRef.current;
+    if (pendingContent === null) {
+      return;
+    }
+
+    if (contentCommitTimerRef.current !== null) {
+      window.clearTimeout(contentCommitTimerRef.current);
+      contentCommitTimerRef.current = null;
+    }
+    pendingChapterContentRef.current = null;
+    updateProject((previous) => ({
+      ...previous,
+      chapters: previous.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: pendingContent } : chapter))
+    }));
+  }, [updateProject]);
+
   const updateActiveChapterContent = useCallback(
     (content: string) => {
-      updateProject((previous) => {
-        const documentId = previous.chapters[0]?.id ?? crypto.randomUUID();
-        return {
-          ...previous,
-          chapters: [
-            {
-              ...(previous.chapters[0] ?? { id: documentId, title: DOCUMENT_CHAPTER_TITLE }),
-              id: documentId,
-              title: DOCUMENT_CHAPTER_TITLE,
-              content
-            }
-          ],
-          activeChapterId: documentId
-        };
-      });
+      pendingChapterContentRef.current = content;
+      if (contentCommitTimerRef.current !== null) {
+        window.clearTimeout(contentCommitTimerRef.current);
+      }
+
+      contentCommitTimerRef.current = window.setTimeout(() => {
+        const pendingContent = pendingChapterContentRef.current;
+        contentCommitTimerRef.current = null;
+        pendingChapterContentRef.current = null;
+        if (pendingContent === null) {
+          return;
+        }
+
+        updateProject((previous) => {
+          const documentId = previous.chapters[0]?.id ?? crypto.randomUUID();
+          return {
+            ...previous,
+            chapters: [
+              {
+                ...(previous.chapters[0] ?? { id: documentId, title: DOCUMENT_CHAPTER_TITLE }),
+                id: documentId,
+                title: DOCUMENT_CHAPTER_TITLE,
+                content: pendingContent
+              }
+            ],
+            activeChapterId: documentId
+          };
+        });
+      }, CONTENT_COMMIT_DELAY_MS);
     },
     [updateProject]
   );
@@ -333,7 +425,7 @@ export function EditorShell() {
   }, []);
 
   useEffect(() => {
-    if (!project || !activeChapter || !layoutSignature) {
+    if (!layoutSignature) {
       return;
     }
 
@@ -375,7 +467,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [activeChapter, estimatedPages, layoutSignature, pageFrameCount, project]);
+  }, [estimatedPages, layoutSignature, pageFrameCount]);
 
   if (!project || !activeChapter) {
     return (
@@ -435,13 +527,17 @@ export function EditorShell() {
   };
 
   const exportJson = () => {
-    exportProjectJson(project);
+    const latestProject = projectWithLatestContent(project);
+    exportProjectJson(latestProject);
+    flushPendingChapterContent();
     setStatusText("JSONを書き出し");
   };
 
   const manualSave = async () => {
     try {
-      await saveProjectToBrowser(project);
+      const latestProject = projectWithLatestContent(project);
+      await saveProjectToBrowser(latestProject);
+      flushPendingChapterContent();
       setStatusText(`ブラウザ保存 ${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
     } catch (error) {
       setStatusText("ブラウザ保存に失敗");
@@ -452,6 +548,11 @@ export function EditorShell() {
   const importJson = async (file: File) => {
     try {
       const imported = await readJsonFile(file);
+      if (contentCommitTimerRef.current !== null) {
+        window.clearTimeout(contentCommitTimerRef.current);
+        contentCommitTimerRef.current = null;
+      }
+      pendingChapterContentRef.current = null;
       setProject(normalizeDocumentProject({ ...imported, updatedAt: new Date().toISOString() }));
       setStatusText("JSONを読み込み");
     } catch (error) {
@@ -466,9 +567,11 @@ export function EditorShell() {
         return;
       }
 
+      const latestProject = projectWithLatestContent(project);
       const client = driveClient ?? (await connectGoogleDrive());
       setDriveClient(client);
-      const result = await client.saveProject(project);
+      const result = await client.saveProject(latestProject);
+      flushPendingChapterContent();
       updateProject((previous) => ({
         ...previous,
         drive: {
@@ -485,7 +588,9 @@ export function EditorShell() {
   const exportPdf = async () => {
     try {
       setStatusText("本用PDFを作成中");
-      await exportProjectPdf(project);
+      const latestProject = projectWithLatestContent(project);
+      await exportProjectPdf(latestProject);
+      flushPendingChapterContent();
       setStatusText("本用PDFを書き出し");
     } catch (error) {
       setStatusText("PDF書き出しに失敗");
@@ -496,7 +601,9 @@ export function EditorShell() {
 
   const exportDocx = async () => {
     try {
-      await exportProjectDocx(project);
+      const latestProject = projectWithLatestContent(project);
+      await exportProjectDocx(latestProject);
+      flushPendingChapterContent();
       setStatusText("DOCXを書き出し");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "DOCXを書き出せませんでした。");
@@ -505,7 +612,9 @@ export function EditorShell() {
 
   const exportEpub = async () => {
     try {
-      await exportProjectEpub(project);
+      const latestProject = projectWithLatestContent(project);
+      await exportProjectEpub(latestProject);
+      flushPendingChapterContent();
       setStatusText("EPUBを書き出し");
     } catch (error) {
       window.console.error(error);
@@ -680,6 +789,11 @@ export function EditorShell() {
     if (!window.confirm("新規原稿を作成しますか？現在のブラウザ保存は上書きされます。")) {
       return;
     }
+    if (contentCommitTimerRef.current !== null) {
+      window.clearTimeout(contentCommitTimerRef.current);
+      contentCommitTimerRef.current = null;
+    }
+    pendingChapterContentRef.current = null;
     setProject(normalizeDocumentProject(createDefaultProject()));
     setStatusText("新規原稿");
   };
@@ -694,6 +808,9 @@ export function EditorShell() {
             <p className="eyebrow">Umbrella Parade</p>
             <h1>原稿制作ツール</h1>
           </div>
+        </div>
+        <div className="topbar-editor-tools">
+          <TiptapToolbar editor={activeEditor} onOpenQrLibrary={openQrLibrary} />
         </div>
         <div className="topbar-actions">
           <span className="save-state">{statusText}</span>
@@ -765,12 +882,11 @@ export function EditorShell() {
           <div className="chapter-heading-row">
             <div className="document-title-label">
               <FileText size={16} />
-              <span>{project.title}</span>
-            </div>
-            <span className="chapter-meta">{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
+            <span>{project.title}</span>
           </div>
-          <TiptapToolbar editor={activeEditor} onOpenQrLibrary={openQrLibrary} />
-          <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
+          <span className="chapter-meta">{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
+        </div>
+        <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
             <div
               className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""}`}
               data-estimated-pages={estimatedPages}
@@ -810,7 +926,7 @@ export function EditorShell() {
           <CheckPanel project={project} checks={checks} />
         </aside>
       </div>
-      {printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
+      {printDomActive && printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
     </main>
   );
 }

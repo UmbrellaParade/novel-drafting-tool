@@ -33,6 +33,7 @@ type PdfQrBlock = {
   src: string;
   label: string;
   template: QrCardTemplateId;
+  width?: number;
 };
 
 type PdfBlock = PdfTextBlock | PdfImageBlock | PdfQrBlock | { kind: "pageBreak" };
@@ -557,7 +558,8 @@ img {
 
 .qr-card {
   display: block;
-  max-width: 74mm;
+  width: min(100%, 74mm);
+  max-width: 100%;
   margin: 1.2em auto;
   padding: 4mm;
   border: 1px solid #37312c;
@@ -581,9 +583,12 @@ img {
 }
 
 .qr-card-title,
-.qr-card-description,
-.qr-card-url {
+.qr-card-description {
   display: block;
+}
+
+.qr-card-url {
+  display: none;
 }`;
 }
 
@@ -872,7 +877,8 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
       color: { dark: theme.qrDark, light: "#ffffff" }
     }));
   const image = await embedImage(state.pdfDoc, src);
-  const cardWidth = Math.min(state.contentWidth, mmToPt(74));
+  const requestedCardWidth = block.width ? block.width * 0.75 : mmToPt(74);
+  const cardWidth = Math.min(state.contentWidth, requestedCardWidth);
   const cardPadding = mmToPt(4);
   const qrSize = mmToPt(23);
   const labelSize = 7;
@@ -882,8 +888,7 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
   const captionWidth = cardWidth - cardPadding * 2 - qrSize - mmToPt(4);
   const titleLines = wrapText(block.title, state.uiFont, bodyTextSize, captionWidth).slice(0, 2);
   const descriptionLines = wrapText(block.description, state.uiFont, urlSize, captionWidth).slice(0, 2);
-  const urlLines = wrapText(block.url, state.uiFont, urlSize, captionWidth).slice(0, 2);
-  const textHeight = (titleLines.length * bodyTextSize * 1.35) + ((descriptionLines.length + urlLines.length) * urlSize * 1.35);
+  const textHeight = titleLines.length * bodyTextSize * 1.35 + descriptionLines.length * urlSize * 1.35;
   const bodyHeight = Math.max(qrSize, textHeight);
   const cardHeight = cardPadding * 2 + labelSize * 1.35 + mmToPt(2) + bodyHeight;
 
@@ -928,11 +933,6 @@ async function drawQrBlock(state: PdfRenderState, block: PdfQrBlock): Promise<vo
     state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: urlSize, color: theme.muted });
     textY -= urlSize * 1.35;
   }
-  for (const line of urlLines) {
-    state.page.drawText(line, { x: captionX, y: textY, font: state.uiFont, size: urlSize, color: theme.muted });
-    textY -= urlSize * 1.35;
-  }
-
   state.y -= cardHeight + mmToPt(state.project.pageSettings.paragraphSpacingMm + 1);
 }
 
@@ -1079,7 +1079,8 @@ function parsePdfBlocks(html: string): PdfBlock[] {
         description: element.dataset.description ?? element.querySelector(".qr-card-description")?.textContent ?? "",
         src: element.dataset.src ?? element.querySelector("img")?.getAttribute("src") ?? "",
         label: element.dataset.label ?? "Umbrella Parade 記録室",
-        template: parseQrTemplate(element.dataset.template)
+        template: parseQrTemplate(element.dataset.template),
+        width: parseHtmlDimension(element.dataset.width ?? element.style.width)
       });
       return;
     }
@@ -1155,8 +1156,8 @@ function parseHtmlBlocks(html: string): Array<{ kind: "paragraph" | "heading" | 
 
     if (element.matches("figure[data-type='qr-card']")) {
       const title = element.dataset.title ?? element.querySelector(".qr-card-title")?.textContent ?? "QRリンク";
-      const url = element.dataset.url ?? element.querySelector(".qr-card-url")?.textContent ?? "";
-      blocks.push({ kind: "paragraph", text: `${title}: ${url}` });
+      const description = element.dataset.description ?? element.querySelector(".qr-card-description")?.textContent ?? "";
+      blocks.push({ kind: "paragraph", text: description ? `${title}: ${description}` : title });
       return;
     }
 

@@ -59,6 +59,8 @@ type ToolbarState = {
   canRedo: boolean;
   hasImageSelection: boolean;
   selectedImageWidth: number | null;
+  hasQrCardSelection: boolean;
+  selectedQrCardWidth: number | null;
 };
 
 type ImageReplacementTarget = {
@@ -69,6 +71,7 @@ type ImageReplacementTarget = {
 };
 
 const IMAGE_SIZE_RATIOS = [0.5, 0.75, 1] as const;
+const QR_CARD_SIZE_RATIOS = [0.5, 0.75, 1] as const;
 const FONT_SIZE_SCOPES = {
   all: new Set(["paragraph", "heading", "blockquote", "listItem"]),
   headings: new Set(["heading"]),
@@ -170,12 +173,15 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageSelectionTargetRef = useRef<ImageReplacementTarget | null>(null);
   const imageReplaceTargetRef = useRef<ImageReplacementTarget | null>(null);
+  const qrCardSelectionPositionRef = useRef<number | null>(null);
   const rubyReadingInputRef = useRef<HTMLInputElement | null>(null);
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
     canUndo: false,
     canRedo: false,
     hasImageSelection: false,
-    selectedImageWidth: null
+    selectedImageWidth: null,
+    hasQrCardSelection: false,
+    selectedQrCardWidth: null
   });
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
@@ -188,7 +194,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         canUndo: false,
         canRedo: false,
         hasImageSelection: false,
-        selectedImageWidth: null
+        selectedImageWidth: null,
+        hasQrCardSelection: false,
+        selectedQrCardWidth: null
       });
       return;
     }
@@ -196,12 +204,17 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     const refreshToolbarState = () => {
       const imageAttributes = editor.getAttributes("image");
       const hasImageSelection = editor.isActive("image") && Boolean(imageAttributes.src);
+      const qrCardAttributes = editor.getAttributes("qrCard");
+      const hasQrCardSelection = editor.isActive("qrCard");
       imageSelectionTargetRef.current = hasImageSelection ? readSelectedImageTarget(editor) : null;
+      qrCardSelectionPositionRef.current = hasQrCardSelection ? selectedNodePosition(editor, "qrCard") : null;
       setToolbarState({
         canUndo: editor.can().undo(),
         canRedo: editor.can().redo(),
         hasImageSelection,
-        selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null
+        selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null,
+        hasQrCardSelection,
+        selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null
       });
     };
 
@@ -482,6 +495,77 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       .run();
   };
 
+  const setQrCardWidth = (width: number) => {
+    if (!editor || !toolbarState.hasQrCardSelection) {
+      return;
+    }
+
+    const position = selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current;
+    if (position === null) {
+      return;
+    }
+
+    editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        const node = state.doc.nodeAt(position);
+        if (!node || node.type.name !== "qrCard") {
+          return false;
+        }
+
+        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: Math.round(width) }, node.marks);
+        return true;
+      })
+      .run();
+  };
+
+  const setQrCardWidthRatio = (ratio: (typeof QR_CARD_SIZE_RATIOS)[number]) => {
+    if (!editor) {
+      return;
+    }
+    setQrCardWidth(readTextWidthPx(editor) * ratio);
+  };
+
+  const setQrCardToTextWidth = () => {
+    if (!editor) {
+      return;
+    }
+    setQrCardWidth(readTextWidthPx(editor));
+  };
+
+  const setQrCardToPageWidth = () => {
+    if (!editor) {
+      return;
+    }
+    setQrCardWidth(readPageWidthPx(editor));
+  };
+
+  const resetQrCardSize = () => {
+    if (!editor || !toolbarState.hasQrCardSelection) {
+      return;
+    }
+
+    const position = selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current;
+    if (position === null) {
+      return;
+    }
+
+    editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        const node = state.doc.nodeAt(position);
+        if (!node || node.type.name !== "qrCard") {
+          return false;
+        }
+
+        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: null }, node.marks);
+        return true;
+      })
+      .run();
+  };
+
   const deleteSelectedContent = () => {
     if (!editor) {
       return;
@@ -497,6 +581,22 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           .focus()
           .command(({ tr }) => {
             tr.delete(position, position + node.nodeSize);
+            return true;
+          })
+          .run();
+        return;
+      }
+    }
+
+    const qrCardPosition = selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current;
+    if (toolbarState.hasQrCardSelection && qrCardPosition !== null) {
+      const node = editor.state.doc.nodeAt(qrCardPosition);
+      if (node?.type.name === "qrCard") {
+        editor
+          .chain()
+          .focus()
+          .command(({ tr }) => {
+            tr.delete(qrCardPosition, qrCardPosition + node.nodeSize);
             return true;
           })
           .run();
@@ -548,6 +648,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const pageWidth = editor ? readPageWidthPx(editor) : 420;
   const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
+  const textWidth = editor ? readTextWidthPx(editor) : 360;
+  const qrCardWidth = toolbarState.selectedQrCardWidth ?? Math.round(textWidth * 0.75);
+  const maxQrCardWidth = Math.max(180, Math.round(pageWidth));
 
   return (
     <>
@@ -691,6 +794,47 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
               }}
             />
           </label>
+          <button className="danger" type="button" onMouseDown={preserveEditorSelection} onClick={deleteSelectedContent} title="削除" aria-label="削除">
+            <Trash2 size={16} />
+          </button>
+        </div>
+      ) : null}
+      {toolbarState.hasQrCardSelection ? (
+        <div className="image-size-controls" aria-label="QRカードサイズ">
+          <span className="image-size-chip">QRカード</span>
+          {QR_CARD_SIZE_RATIOS.map((ratio) => (
+            <button key={ratio} type="button" onMouseDown={preserveEditorSelection} onClick={() => setQrCardWidthRatio(ratio)}>
+              {Math.round(ratio * 100)}%
+            </button>
+          ))}
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={setQrCardToTextWidth}>
+            本文幅
+          </button>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={setQrCardToPageWidth}>
+            紙面幅
+          </button>
+          <input
+            className="image-size-range"
+            type="range"
+            min={120}
+            max={maxQrCardWidth}
+            value={Math.max(120, Math.min(maxQrCardWidth, qrCardWidth))}
+            onChange={(event) => setQrCardWidth(Number(event.target.value))}
+            aria-label="QRカード幅"
+          />
+          <input
+            className="image-size-number"
+            type="number"
+            min={120}
+            max={maxQrCardWidth}
+            value={Math.round(qrCardWidth)}
+            onChange={(event) => setQrCardWidth(Number(event.target.value))}
+            aria-label="QRカード幅px"
+          />
+          <span className="image-size-unit">px</span>
+          <button type="button" onMouseDown={preserveEditorSelection} onClick={resetQrCardSize}>
+            自動
+          </button>
           <button className="danger" type="button" onMouseDown={preserveEditorSelection} onClick={deleteSelectedContent} title="削除" aria-label="削除">
             <Trash2 size={16} />
           </button>
@@ -902,6 +1046,11 @@ function selectedImagePosition(editor: Editor): number | null {
   });
 
   return closestPosition;
+}
+
+function selectedNodePosition(editor: Editor, nodeName: string): number | null {
+  const { selection } = editor.state;
+  return selection instanceof NodeSelection && selection.node.type.name === nodeName ? selection.from : null;
 }
 
 function readSelectedImageTarget(editor: Editor): ImageReplacementTarget | null {
