@@ -149,8 +149,7 @@ h1 {
 .topbar-editor-tools .editor-toolbar,
 .topbar-editor-tools .image-size-controls,
 .topbar-editor-tools .text-size-controls,
-.topbar-editor-tools .ruby-controls,
-.topbar-editor-tools .label-image-controls {
+.topbar-editor-tools .ruby-controls {
   flex-wrap: nowrap;
   flex: 0 0 auto;
   overflow-x: auto;
@@ -1185,66 +1184,6 @@ h1 {
   color: #1f5c54;
 }
 
-.label-image-controls {
-  position: relative;
-  z-index: 4;
-  display: grid;
-  grid-template-columns: minmax(170px, 1.4fr) minmax(118px, 0.85fr) minmax(118px, 0.85fr) 84px 84px auto;
-  align-items: end;
-  gap: 7px;
-  padding: 7px;
-  border: 1px solid #d8cdbc;
-  border-radius: 8px;
-  background: #fffdf8;
-  box-shadow: 0 8px 20px rgba(36, 33, 29, 0.08);
-}
-
-.label-image-field {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.label-image-field span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.label-image-field input,
-.label-image-field select {
-  width: 100%;
-  min-width: 0;
-  min-height: 30px;
-  padding: 4px 7px;
-  border: 1px solid #d8cdbc;
-  border-radius: 6px;
-  background: #fffefa;
-  color: var(--ink);
-}
-
-.label-image-controls button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid #d8cdbc;
-  border-radius: 6px;
-  background: #fbf7ef;
-  color: var(--ink);
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.label-image-controls button:hover {
-  border-color: var(--rain);
-  background: #eaf3f0;
-  color: #1f5c54;
-}
-
 .image-size-chip,
 .image-size-unit {
   color: var(--muted);
@@ -1533,17 +1472,17 @@ h1 {
 }
 
 .manuscript-prose [data-resize-container][data-node="image"] {
-  width: var(--page-width);
-  max-width: var(--page-width);
+  width: var(--content-width);
+  max-width: var(--content-width);
   justify-content: center;
-  margin: 4mm 0 4mm calc(-1 * var(--margin-left));
+  margin: 4mm 0;
   break-before: avoid-column;
   break-inside: avoid-column;
   page-break-inside: avoid;
 }
 
 .manuscript-prose [data-resize-container][data-node="image"] [data-resize-wrapper] {
-  max-width: var(--page-width);
+  max-width: var(--content-width);
   line-height: 0;
 }
 
@@ -2207,7 +2146,6 @@ h1 {
   .qr-form,
   .qr-link-editor,
   .ruby-controls,
-  .label-image-controls,
   .number-grid {
     grid-template-columns: 1fr;
   }

@@ -22,7 +22,6 @@ import {
   Scan,
   ScissorsLineDashed,
   Trash2,
-  Type,
   Undo2,
   X,
 } from "lucide-react";
@@ -64,9 +63,6 @@ type ImageReplacementTarget = {
   title: string;
 };
 
-type LabelImageFontId = "sample-serif" | "noto-serif" | "noto-sans" | "yu-mincho" | "yu-gothic";
-type LabelImageStyleId = "ornament" | "rain" | "simple";
-
 export type PasteLayoutHints = {
   fontSizePt?: number;
   lineHeight?: number;
@@ -81,38 +77,7 @@ const FONT_SIZE_SCOPES = {
 
 const EDITOR_HTML_COMMIT_DELAY_MS = 1200;
 const EDITOR_HTML_IDLE_TIMEOUT_MS = 1800;
-const LABEL_IMAGE_FONTS: Record<LabelImageFontId, { label: string; css: string; weight: number }> = {
-  "sample-serif": {
-    label: "見本風・太明朝",
-    css: "\"Yu Mincho\", \"Hiragino Mincho ProN\", \"Noto Serif JP\", serif",
-    weight: 700
-  },
-  "noto-serif": {
-    label: "Noto Serif JP",
-    css: "\"Noto Serif JP\", \"Yu Mincho\", serif",
-    weight: 700
-  },
-  "noto-sans": {
-    label: "Noto Sans JP",
-    css: "\"Noto Sans JP\", \"Yu Gothic\", sans-serif",
-    weight: 700
-  },
-  "yu-mincho": {
-    label: "游明朝",
-    css: "\"Yu Mincho\", \"Noto Serif JP\", serif",
-    weight: 700
-  },
-  "yu-gothic": {
-    label: "游ゴシック",
-    css: "\"Yu Gothic\", \"Noto Sans JP\", sans-serif",
-    weight: 700
-  }
-};
-const LABEL_IMAGE_STYLES: Record<LabelImageStyleId, { label: string }> = {
-  ornament: { label: "上下飾り罫" },
-  rain: { label: "雨粒罫" },
-  simple: { label: "細罫のみ" }
-};
+const IMAGE_FIT_PADDING_PX = 8;
 
 function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
@@ -318,20 +283,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
   const [textSizePt, setTextSizePt] = useState(9);
   const [qrPresetWidth, setQrPresetWidth] = useState(320);
-  const [labelPanelOpen, setLabelPanelOpen] = useState(false);
-  const [labelDraft, setLabelDraft] = useState<{
-    text: string;
-    font: LabelImageFontId;
-    style: LabelImageStyleId;
-    fontSize: number;
-    width: number;
-  }>({
-    text: "ラザロ・ストール",
-    font: "sample-serif",
-    style: "ornament",
-    fontSize: 48,
-    width: 340
-  });
+  const [imageWidthDraft, setImageWidthDraft] = useState("");
+  const imageWidthInputFocusedRef = useRef(false);
   const disabled = !editor;
 
   useEffect(() => {
@@ -396,6 +349,14 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       editor.off("blur", scheduleRefreshToolbarState);
     };
   }, [editor]);
+
+  useEffect(() => {
+    if (imageWidthInputFocusedRef.current) {
+      return;
+    }
+
+    setImageWidthDraft(toolbarState.hasImageSelection && toolbarState.selectedImageWidth ? String(toolbarState.selectedImageWidth) : "");
+  }, [toolbarState.hasImageSelection, toolbarState.selectedImageWidth]);
 
   const openRubyPanel = () => {
     if (!editor) {
@@ -591,18 +552,20 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     imageReplaceTargetRef.current = imageSelectionTargetRef.current ?? readSelectedImageTarget(editor);
   };
 
-  const setImageWidth = (width: number) => {
+  const setImageWidth = (width: number, options: { respectCurrentPage?: boolean } = {}): number | null => {
     if (!editor || !toolbarState.hasImageSelection) {
-      return;
+      return null;
     }
 
-    const nextWidth = Math.round(width);
     const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
     const position = target ? resolveImagePosition(editor, target) : selectedImagePosition(editor);
     if (position === null) {
-      return;
+      return null;
     }
 
+    const image = target ? selectedRenderedImageByTarget(editor, target) : renderedImageAtPosition(editor, position) ?? selectedRenderedImage(editor);
+    const maxWidth = options.respectCurrentPage === false ? readMaximumImageWidth(editor, image) : readMaximumImageWidthForCurrentPage(editor, image);
+    const nextWidth = Math.max(48, Math.min(maxWidth, Math.round(width)));
     const applied = withStablePageStageScroll(editor, () =>
       editor
         .chain()
@@ -623,7 +586,11 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       syncRenderedImageWidth(editor, target, nextWidth);
       window.requestAnimationFrame(() => syncRenderedImageWidth(editor, target, nextWidth));
       setToolbarState((previous) => (previous.hasImageSelection ? { ...previous, selectedImageWidth: nextWidth } : previous));
+      setImageWidthDraft(String(nextWidth));
+      return nextWidth;
     }
+
+    return null;
   };
 
   const fitImageToCurrentPage = () => {
@@ -636,49 +603,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const rect = image.getBoundingClientRect();
-    const textWidth = readTextWidthPx(editor);
-    const textHeight = readTextHeightPx(editor);
-    const aspectRatio = image.naturalWidth > 0 && image.naturalHeight > 0 ? image.naturalWidth / image.naturalHeight : Math.max(0.1, rect.width / Math.max(1, rect.height));
-    const verticalPadding = readCssLengthPx(editor, "--paragraph-spacing") * 2 + 12;
-    const availableHeight = Math.max(80, textHeight - verticalPadding);
-    const maxByHeight = availableHeight * aspectRatio;
-    const maxByWidth = textWidth;
-    setImageWidth(Math.max(48, Math.min(maxByWidth, maxByHeight)));
-  };
-
-  const insertLabelImage = async () => {
-    if (!editor) {
-      return;
-    }
-
-    const text = labelDraft.text.trim();
-    if (!text) {
-      window.alert("入れる文字を入力してください。");
-      return;
-    }
-
-    const maxWidth = Math.max(180, Math.round(readTextWidthPx(editor)));
-    const displayWidth = Math.max(140, Math.min(maxWidth, Math.round(labelDraft.width)));
-    const src = await createDecoratedLabelImage({
-      text,
-      font: labelDraft.font,
-      style: labelDraft.style,
-      fontSize: labelDraft.fontSize
-    });
-
-    withStablePageStageScroll(editor, () => {
-      editor
-        .chain()
-        .focus()
-        .setImage({
-          src,
-          alt: text,
-          title: text,
-          width: displayWidth
-        })
-        .run();
-    });
+    setImageWidth(readMaximumImageWidthForCurrentPage(editor, image));
   };
 
   const matchPreviousImageSize = () => {
@@ -687,21 +612,28 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     }
 
     const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
-    const selected = target ? selectedRenderedImageByTarget(editor, target) : selectedRenderedImage(editor);
-    if (!selected) {
-      return;
-    }
-
-    const images = renderedImages(editor);
-    const selectedIndex = images.indexOf(selected);
-    const previousImage = selectedIndex > 0 ? images[selectedIndex - 1] : null;
-    const width = previousImage ? readRenderedImageWidth(previousImage) : null;
+    const position = target ? resolveImagePosition(editor, target) : selectedImagePosition(editor);
+    const width = position === null ? null : previousImageWidth(editor, position);
     if (!width) {
       window.alert("前にある画像が見つかりません。");
       return;
     }
 
-    setImageWidth(width);
+    setImageWidth(width, { respectCurrentPage: false });
+  };
+
+  const commitImageWidthDraft = () => {
+    imageWidthInputFocusedRef.current = false;
+    const parsed = Number(imageWidthDraft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setImageWidthDraft(String(Math.round(imageWidth)));
+      return;
+    }
+
+    const appliedWidth = setImageWidth(parsed);
+    if (!appliedWidth) {
+      setImageWidthDraft(String(Math.round(imageWidth)));
+    }
   };
 
   const setQrCardWidth = (width: number) => {
@@ -900,9 +832,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const qrCardHeight = toolbarState.selectedQrCardHeight ?? Math.min(220, Math.round(textHeight * 0.34));
   const maxQrCardHeight = Math.max(120, Math.round(textHeight));
   const normalizedQrPresetWidth = Math.max(120, Math.min(maxQrCardWidth, Math.round(qrPresetWidth)));
-  const maxLabelWidth = Math.max(180, Math.round(textWidth));
-  const normalizedLabelWidth = Math.max(140, Math.min(maxLabelWidth, Math.round(Number.isFinite(labelDraft.width) ? labelDraft.width : maxLabelWidth)));
-  const normalizedLabelFontSize = Math.max(24, Math.min(84, Math.round(Number.isFinite(labelDraft.fontSize) ? labelDraft.fontSize : 48)));
 
   return (
     <>
@@ -936,9 +865,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <ToolButton label="画像" disabled={disabled} onClick={() => imageInputRef.current?.click()}>
           <ImagePlus size={18} />
         </ToolButton>
-        <ToolButton label="飾り文字画像" active={labelPanelOpen} disabled={disabled} onClick={() => setLabelPanelOpen((open) => !open)}>
-          <Type size={18} />
-        </ToolButton>
         <ToolButton label="QRリンク" disabled={!onOpenQrLibrary} onClick={() => onOpenQrLibrary?.()}>
           <QrCode size={18} />
         </ToolButton>
@@ -966,54 +892,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           </button>
         </div>
       ) : null}
-      {labelPanelOpen ? (
-        <div className="label-image-controls" aria-label="飾り文字画像">
-          <label className="label-image-field wide">
-            <span>入れる文字</span>
-            <input value={labelDraft.text} onChange={(event) => setLabelDraft((draft) => ({ ...draft, text: event.target.value }))} />
-          </label>
-          <label className="label-image-field">
-            <span>フォント</span>
-            <select value={labelDraft.font} onChange={(event) => setLabelDraft((draft) => ({ ...draft, font: event.target.value as LabelImageFontId }))}>
-              {(Object.entries(LABEL_IMAGE_FONTS) as Array<[LabelImageFontId, (typeof LABEL_IMAGE_FONTS)[LabelImageFontId]]>).map(([fontId, font]) => (
-                <option key={fontId} value={fontId}>{font.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="label-image-field">
-            <span>装飾</span>
-            <select value={labelDraft.style} onChange={(event) => setLabelDraft((draft) => ({ ...draft, style: event.target.value as LabelImageStyleId }))}>
-              {(Object.entries(LABEL_IMAGE_STYLES) as Array<[LabelImageStyleId, (typeof LABEL_IMAGE_STYLES)[LabelImageStyleId]]>).map(([styleId, style]) => (
-                <option key={styleId} value={styleId}>{style.label}</option>
-              ))}
-            </select>
-          </label>
-          <label className="label-image-field">
-            <span>幅px</span>
-            <input
-              type="number"
-              min={140}
-              max={maxLabelWidth}
-              value={normalizedLabelWidth}
-              onChange={(event) => setLabelDraft((draft) => ({ ...draft, width: Number(event.target.value) }))}
-            />
-          </label>
-          <label className="label-image-field">
-            <span>文字px</span>
-            <input
-              type="number"
-              min={24}
-              max={84}
-              value={normalizedLabelFontSize}
-              onChange={(event) => setLabelDraft((draft) => ({ ...draft, fontSize: Number(event.target.value) }))}
-            />
-          </label>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={() => void insertLabelImage()}>
-            <ImagePlus size={16} />
-            本文へ挿入
-          </button>
-        </div>
-      ) : null}
       {toolbarState.hasImageSelection ? (
         <div className="image-size-controls" aria-label="画像サイズ">
           <span className="image-size-chip">画像</span>
@@ -1030,8 +908,19 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             type="number"
             min={48}
             max={maxImageWidth}
-            value={Math.round(imageWidth)}
-            onChange={(event) => setImageWidth(Number(event.target.value))}
+            value={imageWidthDraft}
+            onFocus={() => {
+              imageWidthInputFocusedRef.current = true;
+            }}
+            onChange={(event) => setImageWidthDraft(event.target.value)}
+            onBlur={commitImageWidthDraft}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitImageWidthDraft();
+                event.currentTarget.blur();
+              }
+            }}
             aria-label="画像幅px"
           />
           <span className="image-size-unit">px</span>
@@ -1402,211 +1291,6 @@ async function toEmbeddableImageSrc(src: string): Promise<string> {
   }
 }
 
-async function createDecoratedLabelImage({
-  text,
-  font,
-  style,
-  fontSize
-}: {
-  text: string;
-  font: LabelImageFontId;
-  style: LabelImageStyleId;
-  fontSize: number;
-}): Promise<string> {
-  const canvasWidth = 900;
-  const canvasHeight = 260;
-  const pixelRatio = Math.max(2, Math.min(3, window.devicePixelRatio || 2));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(canvasWidth * pixelRatio);
-  canvas.height = Math.round(canvasHeight * pixelRatio);
-
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("飾り文字画像を作成できませんでした。");
-  }
-
-  const fontInfo = LABEL_IMAGE_FONTS[font] ?? LABEL_IMAGE_FONTS["sample-serif"];
-  const requestedFontSize = Math.max(24, Math.min(84, Math.round(fontSize)));
-  try {
-    await document.fonts?.load(`${fontInfo.weight} ${requestedFontSize}px ${fontInfo.css}`);
-  } catch {
-    // Browser font loading can fail for local fonts. Canvas will fall back through the font stack.
-  }
-
-  context.scale(pixelRatio, pixelRatio);
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, canvasWidth, canvasHeight);
-  drawLabelDecoration(context, canvasWidth, canvasHeight, style);
-
-  const lines = splitLabelText(text);
-  const fittedFontSize = fitLabelFontSize(context, lines, fontInfo, requestedFontSize, canvasWidth - 190, canvasHeight - 116);
-  const lineHeight = fittedFontSize * 1.18;
-  const textBlockHeight = lineHeight * lines.length;
-  const firstBaseline = canvasHeight / 2 - textBlockHeight / 2 + lineHeight / 2 + 2;
-
-  context.font = `${fontInfo.weight} ${fittedFontSize}px ${fontInfo.css}`;
-  context.fillStyle = "#111111";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  for (const [index, line] of lines.entries()) {
-    context.fillText(line, canvasWidth / 2, firstBaseline + index * lineHeight);
-  }
-
-  return canvas.toDataURL("image/png");
-}
-
-function splitLabelText(text: string): string[] {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return lines.length > 0 ? lines.slice(0, 3) : [" "];
-}
-
-function fitLabelFontSize(
-  context: CanvasRenderingContext2D,
-  lines: string[],
-  fontInfo: { css: string; weight: number },
-  fontSize: number,
-  maxWidth: number,
-  maxHeight: number
-): number {
-  for (let size = fontSize; size >= 18; size -= 1) {
-    context.font = `${fontInfo.weight} ${size}px ${fontInfo.css}`;
-    const widest = Math.max(...lines.map((line) => context.measureText(line).width));
-    const totalHeight = lines.length * size * 1.18;
-    if (widest <= maxWidth && totalHeight <= maxHeight) {
-      return size;
-    }
-  }
-  return 18;
-}
-
-function drawLabelDecoration(context: CanvasRenderingContext2D, width: number, height: number, style: LabelImageStyleId): void {
-  const topY = 72;
-  const bottomY = height - 72;
-  context.save();
-  context.strokeStyle = "#111111";
-  context.fillStyle = "#111111";
-  context.lineCap = "round";
-  context.lineJoin = "round";
-
-  if (style === "rain") {
-    drawRainLine(context, 90, width - 90, topY);
-    drawRainLine(context, 90, width - 90, bottomY);
-    drawCornerSpray(context, 54, 44, 1);
-    drawCornerSpray(context, width - 54, 44, -1);
-    drawCornerSpray(context, 54, height - 44, 1, true);
-    drawCornerSpray(context, width - 54, height - 44, -1, true);
-    context.restore();
-    return;
-  }
-
-  context.lineWidth = style === "simple" ? 3 : 3.5;
-  drawSplitLine(context, width, topY, 120);
-  drawSplitLine(context, width, bottomY, 120);
-
-  if (style === "ornament") {
-    drawCenterOrnament(context, width / 2, topY, false);
-    drawCenterOrnament(context, width / 2, bottomY, true);
-    drawCornerFiligree(context, 64, 50, 1, false);
-    drawCornerFiligree(context, width - 64, 50, -1, false);
-    drawCornerFiligree(context, 64, height - 50, 1, true);
-    drawCornerFiligree(context, width - 64, height - 50, -1, true);
-  }
-
-  context.restore();
-}
-
-function drawSplitLine(context: CanvasRenderingContext2D, width: number, y: number, centerGap: number): void {
-  context.beginPath();
-  context.moveTo(82, y);
-  context.lineTo(width / 2 - centerGap, y);
-  context.moveTo(width / 2 + centerGap, y);
-  context.lineTo(width - 82, y);
-  context.stroke();
-}
-
-function drawCenterOrnament(context: CanvasRenderingContext2D, x: number, y: number, flipped: boolean): void {
-  const direction = flipped ? -1 : 1;
-  context.save();
-  context.translate(x, y);
-  context.scale(1, direction);
-  context.lineWidth = 2.4;
-  context.beginPath();
-  context.moveTo(-62, 0);
-  context.quadraticCurveTo(-42, -11, -22, 0);
-  context.quadraticCurveTo(-10, 8, 0, 0);
-  context.quadraticCurveTo(10, 8, 22, 0);
-  context.quadraticCurveTo(42, -11, 62, 0);
-  context.stroke();
-
-  context.beginPath();
-  context.moveTo(-28, 0);
-  context.bezierCurveTo(-18, -18, -6, -20, 0, -7);
-  context.bezierCurveTo(6, -20, 18, -18, 28, 0);
-  context.stroke();
-
-  context.beginPath();
-  context.arc(0, -15, 4, 0, Math.PI * 2);
-  context.fill();
-  context.beginPath();
-  context.arc(-42, -4, 2.8, 0, Math.PI * 2);
-  context.arc(42, -4, 2.8, 0, Math.PI * 2);
-  context.fill();
-  context.restore();
-}
-
-function drawCornerFiligree(context: CanvasRenderingContext2D, x: number, y: number, direction: 1 | -1, flipped: boolean): void {
-  context.save();
-  context.translate(x, y);
-  context.scale(direction, flipped ? -1 : 1);
-  context.lineWidth = 1.6;
-  context.globalAlpha = 0.75;
-  context.beginPath();
-  context.moveTo(0, 0);
-  context.bezierCurveTo(24, 1, 34, 11, 31, 23);
-  context.bezierCurveTo(27, 36, 10, 29, 19, 18);
-  context.moveTo(0, 0);
-  context.bezierCurveTo(16, -2, 25, -12, 19, -23);
-  context.stroke();
-  context.restore();
-}
-
-function drawRainLine(context: CanvasRenderingContext2D, startX: number, endX: number, y: number): void {
-  context.save();
-  context.lineWidth = 2.2;
-  context.beginPath();
-  context.moveTo(startX, y);
-  context.lineTo(endX, y);
-  context.stroke();
-  context.globalAlpha = 0.8;
-  for (let x = startX + 18; x < endX; x += 28) {
-    context.beginPath();
-    context.moveTo(x, y - 15);
-    context.quadraticCurveTo(x + 8, y - 2, x, y + 12);
-    context.quadraticCurveTo(x - 8, y - 2, x, y - 15);
-    context.fill();
-  }
-  context.restore();
-}
-
-function drawCornerSpray(context: CanvasRenderingContext2D, x: number, y: number, direction: 1 | -1, flipped = false): void {
-  context.save();
-  context.translate(x, y);
-  context.scale(direction, flipped ? -1 : 1);
-  context.globalAlpha = 0.55;
-  context.lineWidth = 1.5;
-  for (let index = 0; index < 6; index += 1) {
-    const offset = index * 9;
-    context.beginPath();
-    context.moveTo(offset, 0);
-    context.lineTo(offset - 12, -18 - index * 2);
-    context.stroke();
-  }
-  context.restore();
-}
-
 function readPageWidthPx(editor: Editor): number {
   const frame = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-frame");
   const width = frame?.offsetWidth ?? 0;
@@ -1623,6 +1307,102 @@ function readTextHeightPx(editor: Editor): number {
   const guide = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-safe-guide");
   const height = guide?.offsetHeight ?? 0;
   return Number.isFinite(height) && height > 0 ? height : readCssLengthPx(editor, "--content-height");
+}
+
+function readMaximumImageWidth(editor: Editor, image: HTMLImageElement | null): number {
+  const textWidth = readTextWidthPx(editor);
+  const textHeight = readTextHeightPx(editor);
+  const aspectRatio = readImageAspectRatio(image);
+  return Math.max(48, Math.min(textWidth, (textHeight - IMAGE_FIT_PADDING_PX * 2) * aspectRatio));
+}
+
+function readMaximumImageWidthForCurrentPage(editor: Editor, image: HTMLImageElement | null): number {
+  if (!image) {
+    return readMaximumImageWidth(editor, image);
+  }
+
+  const aspectRatio = readImageAspectRatio(image);
+  const availableHeight = readAvailableImageHeightForCurrentPage(editor, image);
+  return Math.max(48, Math.min(readTextWidthPx(editor), availableHeight * aspectRatio));
+}
+
+function readImageAspectRatio(image: HTMLImageElement | null): number {
+  if (!image) {
+    return 1;
+  }
+
+  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+    return Math.max(0.05, image.naturalWidth / image.naturalHeight);
+  }
+
+  const rect = image.getBoundingClientRect();
+  return Math.max(0.05, rect.width / Math.max(1, rect.height));
+}
+
+function readAvailableImageHeightForCurrentPage(editor: Editor, image: HTMLImageElement): number {
+  const fallbackHeight = Math.max(64, readTextHeightPx(editor) - IMAGE_FIT_PADDING_PX * 2);
+  const block = image.closest<HTMLElement>("[data-resize-container][data-node='image']") ?? image.closest<HTMLElement>("[data-resize-wrapper]") ?? image;
+  const blockRect = block.getBoundingClientRect();
+  const safeGuide = pageSafeGuideForRect(editor, blockRect);
+  if (!safeGuide) {
+    return fallbackHeight;
+  }
+
+  const safeRect = safeGuide.getBoundingClientRect();
+  const contentAfterBottom = readFollowingContentBottomInPage(editor, block, blockRect, safeRect);
+  if (contentAfterBottom !== null) {
+    const currentBlockHeight = Math.max(1, blockRect.height);
+    return Math.max(64, currentBlockHeight + safeRect.bottom - contentAfterBottom - IMAGE_FIT_PADDING_PX);
+  }
+
+  return Math.max(64, safeRect.bottom - blockRect.top - IMAGE_FIT_PADDING_PX);
+}
+
+function pageSafeGuideForRect(editor: Editor, targetRect: DOMRect): HTMLElement | null {
+  const guides = Array.from(editor.view.dom.closest(".page-stage")?.querySelectorAll<HTMLElement>(".page-safe-guide") ?? []);
+  if (guides.length === 0) {
+    return null;
+  }
+
+  const targetCenterX = targetRect.left + targetRect.width / 2;
+  return guides.reduce<{ guide: HTMLElement | null; distance: number }>(
+    (best, guide) => {
+      const rect = guide.getBoundingClientRect();
+      const overlaps = targetCenterX >= rect.left - 2 && targetCenterX <= rect.right + 2;
+      const distance = overlaps ? 0 : Math.min(Math.abs(targetCenterX - rect.left), Math.abs(targetCenterX - rect.right));
+      return distance < best.distance ? { guide, distance } : best;
+    },
+    { guide: null, distance: Number.POSITIVE_INFINITY }
+  ).guide;
+}
+
+function readFollowingContentBottomInPage(editor: Editor, block: HTMLElement, blockRect: DOMRect, safeRect: DOMRect): number | null {
+  const candidates = Array.from(
+    editor.view.dom.querySelectorAll<HTMLElement>(
+      "p,h1,h2,h3,blockquote,ul,ol,figure[data-type='qr-card'],section[data-type='table-of-contents'],[data-resize-container][data-node='image']"
+    )
+  );
+  let bottom: number | null = null;
+
+  for (const candidate of candidates) {
+    if (candidate === block || block.contains(candidate) || candidate.contains(block)) {
+      continue;
+    }
+
+    const rect = candidate.getBoundingClientRect();
+    const inSamePage =
+      rect.right > safeRect.left + 2 &&
+      rect.left < safeRect.right - 2 &&
+      rect.bottom > safeRect.top &&
+      rect.top < safeRect.bottom + 2;
+    if (!inSamePage || rect.top < blockRect.bottom - 1) {
+      continue;
+    }
+
+    bottom = Math.max(bottom ?? rect.bottom, rect.bottom);
+  }
+
+  return bottom;
 }
 
 function readCssLengthPx(editor: Editor, variableName: string): number {
@@ -1643,6 +1423,19 @@ function renderedImages(editor: Editor): HTMLImageElement[] {
   return Array.from(editor.view.dom.querySelectorAll<HTMLImageElement>("img:not(.qr-card-image)"));
 }
 
+function renderedImageAtPosition(editor: Editor, position: number): HTMLImageElement | null {
+  const nodeDom = editor.view.nodeDOM(position);
+  if (nodeDom instanceof HTMLImageElement && !nodeDom.classList.contains("qr-card-image")) {
+    return nodeDom;
+  }
+  if (nodeDom instanceof HTMLElement) {
+    return nodeDom.matches("img:not(.qr-card-image)")
+      ? (nodeDom as HTMLImageElement)
+      : nodeDom.querySelector<HTMLImageElement>("img:not(.qr-card-image)");
+  }
+  return null;
+}
+
 function selectedRenderedImage(editor: Editor): HTMLImageElement | null {
   const target = readSelectedImageTarget(editor);
   const images = renderedImages(editor);
@@ -1651,6 +1444,7 @@ function selectedRenderedImage(editor: Editor): HTMLImageElement | null {
   }
 
   return (
+    (target.position !== null ? renderedImageAtPosition(editor, target.position) : null) ??
     images.find((image) => image.getAttribute("src") === target.src && image.getAttribute("title") === target.title) ??
     images.find((image) => image.getAttribute("src") === target.src) ??
     images.find((image) => image.closest(".ProseMirror-selectednode")) ??
@@ -1763,6 +1557,7 @@ function syncRenderedImageWidth(editor: Editor, target: ImageReplacementTarget |
 function selectedRenderedImageByTarget(editor: Editor, target: ImageReplacementTarget): HTMLImageElement | null {
   const images = renderedImages(editor);
   return (
+    (target.position !== null ? renderedImageAtPosition(editor, target.position) : null) ??
     images.find((candidate) => candidate.getAttribute("src") === target.src && candidate.getAttribute("title") === target.title) ??
     images.find((candidate) => candidate.getAttribute("src") === target.src) ??
     images.find((candidate) => candidate.closest(".ProseMirror-selectednode")) ??
@@ -1781,6 +1576,20 @@ function readRenderedImageWidth(image: HTMLImageElement): number | null {
     parseImageDimension(image.getAttribute("data-width")) ??
     measuredWidth;
   return Number.isFinite(width) && width > 0 ? width : null;
+}
+
+function previousImageWidth(editor: Editor, selectedPosition: number): number | null {
+  let previousWidth: number | null = null;
+  editor.state.doc.descendants((node, position) => {
+    if (position >= selectedPosition || node.type.name !== "image") {
+      return;
+    }
+
+    const renderedImage = renderedImageAtPosition(editor, position);
+    previousWidth = parseImageDimension(node.attrs.width) ?? (renderedImage ? readRenderedImageWidth(renderedImage) : null);
+  });
+
+  return previousWidth;
 }
 
 function currentBreakableNodeName(editor: Editor): string {
