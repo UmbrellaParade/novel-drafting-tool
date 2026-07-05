@@ -1280,6 +1280,8 @@ h1 {
 
 .manuscript-prose p {
   margin: 0 0 var(--paragraph-spacing);
+  orphans: 3;
+  widows: 3;
 }
 
 .manuscript-prose h1,
@@ -1484,6 +1486,13 @@ h1 {
 
 .manuscript-prose [data-resize-container][data-node="image"] img:not(.qr-card-image) {
   margin: 0;
+}
+
+.manuscript-prose [data-resize-container][data-node="image"] + p,
+.manuscript-prose img:not(.qr-card-image) + p {
+  break-inside: avoid-column;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
 }
 
 .manuscript-prose [data-resize-container][data-node="image"].ProseMirror-selectednode [data-resize-wrapper],
