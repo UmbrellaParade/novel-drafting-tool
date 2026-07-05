@@ -243,7 +243,6 @@ export function EditorShell() {
   }, [project]);
   const activeChapterContent = activeChapter?.content ?? "";
   const outlineItems = useMemo(() => extractOutlineItems(activeChapterContent), [activeChapterContent]);
-  const activeSectionTitle = outlineItems[0]?.title ?? project?.title ?? DOCUMENT_CHAPTER_TITLE;
 
   const checks = useMemo(() => (project ? runManuscriptChecks(project) : []), [project]);
   const estimatedPages = useMemo(() => (project ? estimatePageCount(project) : 1), [project]);
@@ -336,7 +335,7 @@ export function EditorShell() {
       const actualPages = Math.ceil((prose.scrollWidth + 1) / pagePitch);
       const nextCount = Math.max(estimatedPages, actualPages);
       const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
-      const nextTitles = Array.from({ length: titleCount }, () => activeSectionTitle);
+      const nextTitles = Array.from({ length: titleCount }, () => "");
       const firstFrameLeft = firstFrame.getBoundingClientRect().left;
       prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
         const title = heading.textContent?.trim();
@@ -357,7 +356,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [activeChapter, activeSectionTitle, estimatedPages, layoutSignature, pageFrameCount, project]);
+  }, [activeChapter, estimatedPages, layoutSignature, pageFrameCount, project]);
 
   if (!project || !activeChapter) {
     return (
@@ -762,13 +761,11 @@ export function EditorShell() {
                 {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
                   <section key={pageIndex} className="page-frame">
                     <header className="page-frame-header">
-                      <span>{project.title}</span>
-                      <span>{pageSectionTitles[pageIndex] ?? activeSectionTitle}</span>
+                      {pageSectionTitles[pageIndex] ? <span>{pageSectionTitles[pageIndex]}</span> : null}
                     </header>
                     {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
                     {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
                     <footer className="page-frame-footer">
-                      <span>{project.author}</span>
                       {project.pageSettings.showPageNumber ? <span>{pageIndex + 1}</span> : null}
                     </footer>
                   </section>
@@ -794,7 +791,7 @@ export function EditorShell() {
           <CheckPanel project={project} checks={checks} />
         </aside>
       </div>
-      <PrintDocument project={project} chapter={activeChapter} sectionTitles={pageSectionTitles.length ? pageSectionTitles : [activeSectionTitle]} pageCount={pageFrameCount} />
+      <PrintDocument project={project} chapter={activeChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} />
     </main>
   );
 }
@@ -819,8 +816,7 @@ function PrintDocument({
       {Array.from({ length: pageCount }, (_, pageIndex) => (
         <section key={pageIndex} className="print-page">
           <header className="print-page-header">
-            <span>{project.title}</span>
-            <span>{sectionTitles[pageIndex] ?? sectionTitles[sectionTitles.length - 1] ?? project.title}</span>
+            {sectionTitles[pageIndex] ? <span>{sectionTitles[pageIndex]}</span> : null}
           </header>
           {page.showBleedGuide ? <div className="print-bleed-guide" /> : null}
           {page.showSafeArea ? <div className="print-safe-guide" /> : null}
@@ -832,7 +828,6 @@ function PrintDocument({
             />
           </div>
           <footer className="print-page-footer">
-            <span>{project.author}</span>
             {page.showPageNumber ? <span>{pageIndex + 1}</span> : null}
           </footer>
         </section>
@@ -1222,7 +1217,7 @@ function printStyle(project: ManuscriptProject) {
         right: ${page.marginRightMm}mm;
         z-index: 3;
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-end;
         gap: 4mm;
         overflow: hidden;
         color: #7a7168;

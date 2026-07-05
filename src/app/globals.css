@@ -542,7 +542,7 @@ h1 {
   right: var(--margin-right);
   z-index: 1;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 4mm;
   overflow: hidden;
   color: #7a7168;
