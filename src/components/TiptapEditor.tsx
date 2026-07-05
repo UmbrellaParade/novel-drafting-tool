@@ -364,6 +364,49 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
+    const imageTarget = toolbarState.hasImageSelection ? readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current : null;
+    const imagePosition = imageTarget ? resolveImagePosition(editor, imageTarget) : null;
+    if (imagePosition !== null) {
+      const imageNode = editor.state.doc.nodeAt(imagePosition);
+      if (imageNode?.type.name === "image") {
+        withStablePageStageScroll(editor, () => {
+          editor
+            .chain()
+            .focus()
+            .command(({ tr }) => {
+              tr.setNodeMarkup(imagePosition, undefined, {
+                ...imageNode.attrs,
+                pageBreakBefore: !imageNode.attrs.pageBreakBefore
+              }, imageNode.marks);
+              return true;
+            })
+            .run();
+        });
+        return;
+      }
+    }
+
+    const qrCardPosition = toolbarState.hasQrCardSelection ? selectedNodePosition(editor, "qrCard") ?? qrCardSelectionPositionRef.current : null;
+    if (qrCardPosition !== null) {
+      const qrCardNode = editor.state.doc.nodeAt(qrCardPosition);
+      if (qrCardNode?.type.name === "qrCard") {
+        withStablePageStageScroll(editor, () => {
+          editor
+            .chain()
+            .focus()
+            .command(({ tr }) => {
+              tr.setNodeMarkup(qrCardPosition, undefined, {
+                ...qrCardNode.attrs,
+                pageBreakBefore: !qrCardNode.attrs.pageBreakBefore
+              }, qrCardNode.marks);
+              return true;
+            })
+            .run();
+        });
+        return;
+      }
+    }
+
     const { selection } = editor.state;
     if (selection instanceof NodeSelection) {
       const shouldEnable = !selection.node.attrs.pageBreakBefore;

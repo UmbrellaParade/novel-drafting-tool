@@ -105,6 +105,7 @@ const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: 
 
 const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式サイト", template: "umbrella" };
 const EMPTY_DRIVE_SETTINGS: GoogleDriveSettings = { clientId: "", apiKey: "" };
+const QR_DRAFT_STORAGE_KEY = "novel-drafting-tool:last-qr-draft";
 
 const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string }> = {
   classic: {
@@ -127,6 +128,50 @@ const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string
 
 function getQrCardTemplateId(value: QrCardTemplateId | undefined): QrCardTemplateId {
   return value && QR_CARD_TEMPLATES[value] ? value : "umbrella";
+}
+
+function reusableQrDraft(draft: QrDraft): QrDraft {
+  return {
+    ...EMPTY_QR_DRAFT,
+    description: draft.description,
+    category: draft.category,
+    template: getQrCardTemplateId(draft.template)
+  };
+}
+
+function readStoredQrDraft(): QrDraft {
+  if (typeof window === "undefined") {
+    return EMPTY_QR_DRAFT;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(QR_DRAFT_STORAGE_KEY);
+    if (!raw) {
+      return EMPTY_QR_DRAFT;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<QrDraft>;
+    return {
+      ...EMPTY_QR_DRAFT,
+      description: typeof parsed.description === "string" ? parsed.description : EMPTY_QR_DRAFT.description,
+      category: typeof parsed.category === "string" && parsed.category.trim() ? parsed.category : EMPTY_QR_DRAFT.category,
+      template: getQrCardTemplateId(parsed.template)
+    };
+  } catch {
+    return EMPTY_QR_DRAFT;
+  }
+}
+
+function storeReusableQrDraft(draft: QrDraft): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(QR_DRAFT_STORAGE_KEY, JSON.stringify(reusableQrDraft(draft)));
+  } catch {
+    // 保存できない環境では一時入力だけ使う。
+  }
 }
 
 function escapeHtml(value: string): string {
@@ -1682,10 +1727,17 @@ function QrLibraryPanel({
   onTemplateChange: (id: string, template: QrCardTemplateId) => void;
   onDelete: (id: string) => void;
 }) {
-  const [newQr, setNewQr] = useState<QrDraft>(EMPTY_QR_DRAFT);
+  const [newQr, setNewQr] = useState<QrDraft>(() => readStoredQrDraft());
   const [editingQr, setEditingQr] = useState<{ id: string; draft: QrDraft } | null>(null);
+
+  useEffect(() => {
+    storeReusableQrDraft(newQr);
+  }, [newQr]);
+
   const handleAdd = (mode: "save" | "insert") => {
-    onAdd(newQr, mode);
+    if (onAdd(newQr, mode)) {
+      setNewQr(reusableQrDraft(newQr));
+    }
   };
   const startEdit = (link: QrLink) => {
     setEditingQr({
@@ -1737,7 +1789,7 @@ function QrLibraryPanel({
         </label>
         <label className="qr-form-field wide">
           <span>説明文</span>
-          <input placeholder="例: 最新情報はこちら" value={newQr.description} onChange={(event) => setNewQr({ ...newQr, description: event.target.value })} />
+          <textarea rows={3} placeholder="例: 最新情報はこちら" value={newQr.description} onChange={(event) => setNewQr({ ...newQr, description: event.target.value })} />
         </label>
       </div>
       <div className="qr-form-actions">
@@ -1797,7 +1849,7 @@ function QrLibraryPanel({
                   </label>
                   <label className="wide">
                     <span>説明文</span>
-                    <input value={editingQr.draft.description} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, description: event.target.value } })} />
+                    <textarea rows={3} value={editingQr.draft.description} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, description: event.target.value } })} />
                   </label>
                   <div className="qr-link-editor-actions">
                     <button type="button" onClick={() => void saveEdit()}>保存</button>
