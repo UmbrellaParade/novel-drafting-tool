@@ -57,7 +57,7 @@ const DOCUMENT_CHAPTER_TITLE = "本文";
 const AUTOSAVE_DELAY_MS = 1600;
 const CONTENT_COMMIT_DELAY_MS = 450;
 const LAYOUT_REFRESH_DELAY_MS = 650;
-const FAST_EDITING_RESET_MS = 850;
+const FAST_EDITING_RESET_MS = 3000;
 const PAGE_SCROLL_ALIGN_TOLERANCE_PX = 1.5;
 const PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS = 450;
 const PAGE_USER_SCROLL_WINDOW_MS = 900;
@@ -815,6 +815,9 @@ export function EditorShell() {
       const nextIndex = Math.max(0, Math.min(pageSpreads.length - 1, spreadIndex));
       const nextTop = nextIndex * pageStep;
       pendingScrollTopRef.current = nextTop;
+      if (fastEditingRef.current) {
+        editingScrollLockRef.current = { top: nextTop, left: stage.scrollLeft };
+      }
       markProgrammaticPageScroll();
       if (Math.abs(stage.scrollTop - nextTop) > PAGE_SCROLL_ALIGN_TOLERANCE_PX) {
         if (behavior === "auto") {
@@ -884,6 +887,9 @@ export function EditorShell() {
 
     const handleScroll = () => {
       pendingScrollTopRef.current = stage.scrollTop;
+      if (fastEditingRef.current) {
+        editingScrollLockRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
+      }
       if (scrollFrameRef.current !== null) {
         return;
       }
@@ -937,10 +943,15 @@ export function EditorShell() {
       return;
     }
 
+    if (fastEditingRef.current) {
+      restoreEditingScrollLock();
+      return;
+    }
+
     const nextIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
     visibleSpreadIndexRef.current = nextIndex;
     alignStageToSpreadIndex(nextIndex);
-  }, [alignStageToSpreadIndex, pageFit.pageStep, pageSpreads.length]);
+  }, [alignStageToSpreadIndex, fastEditing, pageFit.pageStep, pageSpreads.length, restoreEditingScrollLock]);
 
   useEffect(() => {
     const handlePageKey = (event: KeyboardEvent) => {
@@ -1066,7 +1077,11 @@ export function EditorShell() {
     };
 
     const resizeObserver = new ResizeObserver(updatePageFit);
+    const frame = stage.querySelector<HTMLElement>(".page-frame");
     resizeObserver.observe(stage);
+    if (frame) {
+      resizeObserver.observe(frame);
+    }
     updatePageFit();
     window.addEventListener("resize", updatePageFit);
     return () => {
@@ -1076,7 +1091,7 @@ export function EditorShell() {
       resizeObserver.disconnect();
       window.removeEventListener("resize", updatePageFit);
     };
-  }, [layoutSignature, maxSpreadPageCount, pageSpreads.length, spreadPageCount]);
+  }, [maxSpreadPageCount, pageSpreads.length, spreadPageCount]);
 
   useEffect(() => {
     if (!activeEditor || !tocSettingsForSync || fastEditing) {
