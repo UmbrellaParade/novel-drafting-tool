@@ -111,20 +111,20 @@ const QR_DRAFT_STORAGE_KEY = "novel-drafting-tool:last-qr-draft";
 
 const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string }> = {
   classic: {
-    label: "クラシック",
-    description: "白地に細い罫線"
+    label: "細二重罫",
+    description: "白黒印刷向けの端正な二重枠"
   },
   rain: {
-    label: "雨の手紙",
-    description: "青緑の淡い装飾"
+    label: "雨粒の余白",
+    description: "細かな点と罫線で雨の気配"
   },
   antique: {
-    label: "古書",
-    description: "古紙風の装飾"
+    label: "記録室の角飾り",
+    description: "四隅の飾り罫と古書風フレーム"
   },
   midnight: {
-    label: "夜祭",
-    description: "濃色に金色の罫線"
+    label: "傘のアーチ",
+    description: "天幕のようなアーチ罫"
   }
 };
 
@@ -2096,15 +2096,46 @@ function NumberField({
   step?: number;
   onChange: (value: number) => void;
 }) {
+  const [draftValue, setDraftValue] = useState(() => String(value));
+  const isFocusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setDraftValue(String(value));
+    }
+  }, [value]);
+
+  const handleChange = (nextValue: string) => {
+    setDraftValue(nextValue);
+    if (!nextValue.trim()) {
+      return;
+    }
+
+    const parsed = Number(nextValue);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      onChange(parsed);
+    }
+  };
+
+  const handleBlur = () => {
+    isFocusedRef.current = false;
+    const parsed = Number(draftValue);
+    setDraftValue(Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : String(value));
+  };
+
   return (
     <label className="number-field">
       <span>{label}</span>
       <input
         type="number"
-        value={value}
+        value={draftValue}
         min={0}
         step={step}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onFocus={() => {
+          isFocusedRef.current = true;
+        }}
+        onChange={(event) => handleChange(event.target.value)}
+        onBlur={handleBlur}
       />
     </label>
   );

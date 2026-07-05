@@ -1194,15 +1194,23 @@ h1 {
 
 .manuscript-toc {
   display: block;
+  position: relative;
   width: min(100%, var(--content-width));
   margin: 5mm auto 6mm;
   padding: 6mm 7mm;
-  border: 1px solid #3b352f;
+  border: 0.35mm solid #111111;
   background: #ffffff;
-  color: #24211d;
+  color: #111111;
   font-family: var(--manuscript-font-family);
   break-inside: auto;
   page-break-inside: auto;
+}
+
+.manuscript-toc::before,
+.manuscript-toc::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
 }
 
 .manuscript-toc.ProseMirror-selectednode,
@@ -1212,11 +1220,21 @@ h1 {
 }
 
 .toc-title {
+  position: relative;
   margin: 0;
   font-size: 1.45em;
   font-weight: 700;
   line-height: 1.25;
   text-align: center;
+  color: #111111;
+}
+
+.toc-title::after {
+  content: "";
+  display: block;
+  width: 18mm;
+  margin: 3mm auto 0;
+  border-top: 0.35mm solid currentColor;
 }
 
 .toc-subtitle {
@@ -1259,50 +1277,69 @@ h1 {
   flex: 1 1 10mm;
   min-width: 8mm;
   border-bottom: 1px dotted currentColor;
-  opacity: 0.42;
+  opacity: 0.7;
   transform: translateY(-0.22em);
 }
 
 .toc-entry-page {
   min-width: 2.5em;
-  color: #3a8278;
+  color: currentColor;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
-.manuscript-toc-rain {
-  border-color: #2f716a;
-  background:
-    linear-gradient(180deg, rgba(235, 247, 244, 0.9), #ffffff 44%),
-    repeating-linear-gradient(0deg, transparent 0, transparent 7mm, rgba(47, 113, 106, 0.11) 7.1mm);
+.manuscript-toc-classic {
+  border: 0.35mm solid #111111;
+  box-shadow:
+    inset 0 0 0 1.2mm #ffffff,
+    inset 0 0 0 1.55mm #111111;
 }
 
-.manuscript-toc-rain .toc-title,
-.manuscript-toc-rain .toc-entry-page {
-  color: #1f5c54;
+.manuscript-toc-rain {
+  border: 0.35mm solid #111111;
+  background:
+    radial-gradient(circle, rgba(0, 0, 0, 0.18) 0 0.35mm, transparent 0.42mm) 1.6mm 1.6mm / 5mm 5mm,
+    #ffffff;
+}
+
+.manuscript-toc-rain::before {
+  inset: 2.2mm;
+  border-top: 0.35mm dotted #111111;
+  border-bottom: 0.35mm dotted #111111;
+}
+
+.manuscript-toc-rain .toc-title::after {
+  width: 26mm;
+  border-top-style: dotted;
 }
 
 .manuscript-toc-antique {
-  border: 1.5px double #5b422d;
+  border: 0.65mm double #111111;
   background:
-    linear-gradient(90deg, rgba(91, 66, 45, 0.08), transparent 14%, transparent 86%, rgba(91, 66, 45, 0.08)),
-    #fff8e8;
-  color: #35281c;
-}
-
-.manuscript-toc-antique .toc-entry-page {
-  color: #6f4e28;
+    linear-gradient(#111111 0 0) left 3mm top 3mm / 11mm 0.35mm no-repeat,
+    linear-gradient(#111111 0 0) left 3mm top 3mm / 0.35mm 11mm no-repeat,
+    linear-gradient(#111111 0 0) right 3mm top 3mm / 11mm 0.35mm no-repeat,
+    linear-gradient(#111111 0 0) right 3mm top 3mm / 0.35mm 11mm no-repeat,
+    linear-gradient(#111111 0 0) left 3mm bottom 3mm / 11mm 0.35mm no-repeat,
+    linear-gradient(#111111 0 0) left 3mm bottom 3mm / 0.35mm 11mm no-repeat,
+    linear-gradient(#111111 0 0) right 3mm bottom 3mm / 11mm 0.35mm no-repeat,
+    linear-gradient(#111111 0 0) right 3mm bottom 3mm / 0.35mm 11mm no-repeat,
+    #ffffff;
 }
 
 .manuscript-toc-midnight {
-  border-color: #d6b56b;
-  background: linear-gradient(135deg, #151c2d, #27334b);
-  color: #fff7e5;
+  border: 0.35mm solid #111111;
+  background:
+    radial-gradient(ellipse at 50% -8mm, transparent 0 16mm, rgba(0, 0, 0, 0.2) 16.2mm, transparent 16.6mm) top center / 100% 22mm no-repeat,
+    linear-gradient(#111111 0 0) left 0 top 8mm / 100% 0.25mm no-repeat,
+    #ffffff;
 }
 
-.manuscript-toc-midnight .toc-subtitle,
-.manuscript-toc-midnight .toc-entry-page {
-  color: #e8cf8b;
+.manuscript-toc-midnight::before {
+  inset: 2.4mm;
+  border: 0.35mm solid #111111;
+  border-top-left-radius: 18mm 8mm;
+  border-top-right-radius: 18mm 8mm;
 }
 
 .manuscript-prose ul,

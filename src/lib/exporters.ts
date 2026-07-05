@@ -592,10 +592,12 @@ img {
 
 .manuscript-toc {
   display: block;
+  position: relative;
   margin: 1.4em auto;
   padding: 1.4em;
-  border: 1px solid #37312c;
+  border: 1.4px solid #111111;
   background: #ffffff;
+  color: #111111;
 }
 
 .toc-title {
@@ -603,6 +605,14 @@ img {
   text-align: center;
   font-size: 1.45em;
   font-weight: bold;
+}
+
+.toc-title::after {
+  content: "";
+  display: block;
+  width: 5em;
+  margin: 0.7em auto 0;
+  border-top: 1.2px solid currentColor;
 }
 
 .toc-subtitle {
@@ -643,34 +653,47 @@ img {
 .toc-entry-leader {
   width: 100%;
   border-bottom: 1px dotted currentColor;
-  opacity: 0.42;
+  opacity: 0.7;
 }
 
 .toc-entry-page {
   min-width: 2.5em;
-  color: #1f5c54;
+  color: currentColor;
   text-align: right;
 }
 
+.manuscript-toc-classic {
+  border: 1.4px solid #111111;
+  box-shadow: inset 0 0 0 4px #ffffff, inset 0 0 0 5px #111111;
+}
+
 .manuscript-toc-rain {
-  border-color: #2f716a;
-  background: #eef8f5;
+  border: 1.4px solid #111111;
+  background:
+    radial-gradient(circle, rgba(0, 0, 0, 0.18) 0 1px, transparent 1.4px) 6px 6px / 18px 18px,
+    #ffffff;
 }
 
 .manuscript-toc-antique {
-  border: 1.5px double #5b422d;
-  background: #fff8e8;
+  border: 3px double #111111;
+  background:
+    linear-gradient(#111111 0 0) left 10px top 10px / 40px 1px no-repeat,
+    linear-gradient(#111111 0 0) left 10px top 10px / 1px 40px no-repeat,
+    linear-gradient(#111111 0 0) right 10px top 10px / 40px 1px no-repeat,
+    linear-gradient(#111111 0 0) right 10px top 10px / 1px 40px no-repeat,
+    linear-gradient(#111111 0 0) left 10px bottom 10px / 40px 1px no-repeat,
+    linear-gradient(#111111 0 0) left 10px bottom 10px / 1px 40px no-repeat,
+    linear-gradient(#111111 0 0) right 10px bottom 10px / 40px 1px no-repeat,
+    linear-gradient(#111111 0 0) right 10px bottom 10px / 1px 40px no-repeat,
+    #ffffff;
 }
 
 .manuscript-toc-midnight {
-  border-color: #d6b56b;
-  background: #151c2d;
-  color: #fff7e5;
-}
-
-.manuscript-toc-midnight .toc-subtitle,
-.manuscript-toc-midnight .toc-entry-page {
-  color: #e8cf8b;
+  border: 1.4px solid #111111;
+  background:
+    radial-gradient(ellipse at 50% -24px, transparent 0 54px, rgba(0, 0, 0, 0.2) 55px, transparent 56px) top center / 100% 72px no-repeat,
+    linear-gradient(#111111 0 0) left 0 top 30px / 100% 1px no-repeat,
+    #ffffff;
 }
 
 .qr-card {
@@ -1179,15 +1202,15 @@ function qrPdfTheme(state: PdfRenderState, template: QrCardTemplateId): { backgr
 
 function tocPdfTheme(state: PdfRenderState, style: TocStyleId): { border: RGB; ink: RGB; muted: RGB; accent: RGB; borderWidth: number } {
   if (style === "rain") {
-    return { border: state.colors.rain, ink: state.colors.ink, muted: state.colors.rain, accent: state.colors.rain, borderWidth: 0.9 };
+    return { border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.ink, borderWidth: 0.9 };
   }
   if (style === "antique") {
-    return { border: state.colors.antiqueInk, ink: state.colors.antiqueInk, muted: state.colors.muted, accent: state.colors.antiqueInk, borderWidth: 1.1 };
+    return { border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.ink, borderWidth: 1.1 };
   }
   if (style === "midnight") {
-    return { border: state.colors.gold, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.gold, borderWidth: 1 };
+    return { border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.ink, borderWidth: 1 };
   }
-  return { border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.rain, borderWidth: 0.8 };
+  return { border: state.colors.ink, ink: state.colors.ink, muted: state.colors.muted, accent: state.colors.ink, borderWidth: 0.8 };
 }
 
 function ensureVerticalSpace(state: PdfRenderState, neededHeight: number): void {
