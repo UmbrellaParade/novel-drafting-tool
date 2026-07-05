@@ -53,7 +53,7 @@ NEXT_PUBLIC_GOOGLE_API_KEY=...
 
 GitHub Pages版でDrive連携を有効にする場合は、公開用ビルドを作る環境にも同じ2つの値が必要です。APIキーやOAuthクライアントIDを公開ページへ埋め込む形になるため、Google Cloud Console側でHTTPリファラーとJavaScript生成元をこのサイトに限定してください。
 
-スコープは `https://www.googleapis.com/auth/drive.file` を使います。未設定の場合でも、ブラウザ保存とJSON書き出しは利用できます。
+スコープは `https://www.googleapis.com/auth/drive.file` と `https://www.googleapis.com/auth/drive.metadata.readonly` を使います。`drive.file` は原稿JSONの保存、`drive.metadata.readonly` は保存先フォルダ一覧の取得に使います。未設定の場合でも、ブラウザ保存とJSON書き出しは利用できます。
 
 ## 公開先
 
