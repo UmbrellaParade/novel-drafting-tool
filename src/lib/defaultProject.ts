@@ -34,16 +34,16 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     }
   },
   "shimauma-a6": {
-    label: "しまうまA6",
+    label: "しまうまA6（塗り足し）",
     settings: {
       preset: "shimauma-a6",
       fontFamily: "noto-serif-jp",
-      pageWidthMm: 105,
-      pageHeightMm: 148,
-      marginTopMm: 10,
-      marginBottomMm: 12,
-      marginLeftMm: 9,
-      marginRightMm: 9,
+      pageWidthMm: 111,
+      pageHeightMm: 154,
+      marginTopMm: 13,
+      marginBottomMm: 15,
+      marginLeftMm: 12,
+      marginRightMm: 12,
       fontSizePt: 8.8,
       rubySizePt: 4.6,
       lineHeight: 1.72,
@@ -55,16 +55,16 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     }
   },
   "shimauma-a5": {
-    label: "しまうまA5",
+    label: "しまうまA5（塗り足し）",
     settings: {
       preset: "shimauma-a5",
       fontFamily: "noto-serif-jp",
-      pageWidthMm: 148,
-      pageHeightMm: 210,
-      marginTopMm: 13,
-      marginBottomMm: 15,
-      marginLeftMm: 12,
-      marginRightMm: 12,
+      pageWidthMm: 154,
+      pageHeightMm: 216,
+      marginTopMm: 16,
+      marginBottomMm: 18,
+      marginLeftMm: 15,
+      marginRightMm: 15,
       fontSizePt: 10,
       rubySizePt: 5.2,
       lineHeight: 1.76,
@@ -210,13 +210,46 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
 export function normalizePageSettings(settings: PageSettings): PageSettings {
   const presetDefaults = PAGE_PRESETS[settings.preset]?.settings ?? PAGE_PRESETS["shimauma-a6"].settings;
   const fontFamily = Object.hasOwn(MANUSCRIPT_FONTS, settings.fontFamily) ? settings.fontFamily : presetDefaults.fontFamily;
-
-  return {
+  const normalized = {
     ...presetDefaults,
     ...settings,
     fontFamily,
     imageMaxHeightMm: settings.imageMaxHeightMm ?? presetDefaults.imageMaxHeightMm
   };
+
+  return migrateShimaumaBleedSettings(normalized);
+}
+
+function migrateShimaumaBleedSettings(settings: PageSettings): PageSettings {
+  if (settings.preset === "shimauma-a6" && settings.pageWidthMm === 105 && settings.pageHeightMm === 148) {
+    return {
+      ...settings,
+      pageWidthMm: 111,
+      pageHeightMm: 154,
+      marginTopMm: settings.marginTopMm + 3,
+      marginBottomMm: settings.marginBottomMm + 3,
+      marginLeftMm: settings.marginLeftMm + 3,
+      marginRightMm: settings.marginRightMm + 3,
+      showBleedGuide: true,
+      showSafeArea: true
+    };
+  }
+
+  if (settings.preset === "shimauma-a5" && settings.pageWidthMm === 148 && settings.pageHeightMm === 210) {
+    return {
+      ...settings,
+      pageWidthMm: 154,
+      pageHeightMm: 216,
+      marginTopMm: settings.marginTopMm + 3,
+      marginBottomMm: settings.marginBottomMm + 3,
+      marginLeftMm: settings.marginLeftMm + 3,
+      marginRightMm: settings.marginRightMm + 3,
+      showBleedGuide: true,
+      showSafeArea: true
+    };
+  }
+
+  return settings;
 }
 
 export function stripHtml(html: string): string {
