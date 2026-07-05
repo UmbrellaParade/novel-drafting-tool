@@ -607,14 +607,6 @@ img {
   font-weight: bold;
 }
 
-.toc-title::after {
-  content: "";
-  display: block;
-  width: 5em;
-  margin: 0.7em auto 0;
-  border-top: 1.2px solid currentColor;
-}
-
 .toc-subtitle {
   display: none;
   margin: 0.4em 0 1.2em;

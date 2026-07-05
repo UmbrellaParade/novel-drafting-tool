@@ -634,6 +634,18 @@ h1 {
   accent-color: var(--rain);
 }
 
+.toc-size-stepper input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 4px 7px;
+  border: 1px solid #d8cdbc;
+  border-radius: 6px;
+  background: #fffefa;
+  color: var(--ink);
+  text-align: center;
+}
+
 .toc-size-stepper button {
   display: inline-flex;
   align-items: center;
@@ -1376,14 +1388,6 @@ h1 {
   color: #111111;
 }
 
-.toc-title::after {
-  content: "";
-  display: block;
-  width: 18mm;
-  margin: 3mm auto 0;
-  border-top: 0.35mm solid currentColor;
-}
-
 .toc-subtitle {
   display: none;
   margin: 2mm 0 5mm;
@@ -1453,11 +1457,6 @@ h1 {
   inset: 2.2mm;
   border-top: 0.35mm dotted #111111;
   border-bottom: 0.35mm dotted #111111;
-}
-
-.manuscript-toc-rain .toc-title::after {
-  width: 26mm;
-  border-top-style: dotted;
 }
 
 .manuscript-toc-antique {

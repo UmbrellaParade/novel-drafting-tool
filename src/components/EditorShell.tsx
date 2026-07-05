@@ -391,6 +391,9 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           changed = true;
         }
       });
+      if (changed) {
+        tr.setMeta("skipTypingActivity", true);
+      }
       return changed;
     })
     .run();
@@ -523,18 +526,30 @@ export function EditorShell() {
     }
     return project.chapters[0] ?? null;
   }, [project]);
+  const layoutPageSettings = project?.pageSettings ?? null;
+  const layoutChapters = project?.chapters ?? null;
+  const tocSettingsForSync = project?.tocSettings ?? null;
   const activeChapterContent = activeChapter?.content ?? "";
   const layoutChapterContent = useDebouncedValue(activeChapterContent, LAYOUT_REFRESH_DELAY_MS);
-  const layoutProject = useMemo(() => {
-    if (!project || !activeChapter) {
+  const layoutProject = useMemo<ManuscriptProject | null>(() => {
+    if (!layoutPageSettings || !layoutChapters || !activeChapter) {
       return null;
     }
 
     return {
-      ...project,
-      chapters: project.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: layoutChapterContent } : chapter))
+      schemaVersion: 1,
+      id: "layout-preview",
+      title: "",
+      subtitle: "",
+      author: "",
+      pageSettings: layoutPageSettings,
+      chapters: layoutChapters.map((chapter, index) => (index === 0 ? { ...chapter, content: layoutChapterContent } : chapter)),
+      activeChapterId: activeChapter.id,
+      qrLinks: [],
+      tocSettings: { title: "目次", subtitle: "", style: "classic" },
+      updatedAt: ""
     };
-  }, [activeChapter, layoutChapterContent, project]);
+  }, [activeChapter, layoutChapterContent, layoutChapters, layoutPageSettings]);
   const outlineItems = useMemo(() => extractOutlineItems(layoutChapterContent), [layoutChapterContent]);
   const tocEntries = useMemo<TocEntry[]>(
     () => outlineItems.map((item) => ({ ...item, page: headingPageNumbers[item.index] ?? null })),
@@ -546,16 +561,16 @@ export function EditorShell() {
   const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject) : 1), [layoutProject]);
   const characterCount = useMemo(() => (layoutProject ? countManuscriptCharacters(layoutProject) : 0), [layoutProject]);
   const layoutSignature = useMemo(() => {
-    if (!project || !activeChapter) {
+    if (!layoutPageSettings || !activeChapter) {
       return "";
     }
 
     return JSON.stringify({
       activeChapterId: activeChapter.id,
       content: layoutChapterContent,
-      pageSettings: project.pageSettings
+      pageSettings: layoutPageSettings
     });
-  }, [activeChapter, layoutChapterContent, project]);
+  }, [activeChapter, layoutChapterContent, layoutPageSettings]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
   const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
   const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount), [pageFrameCount]);
@@ -975,12 +990,12 @@ export function EditorShell() {
   }, [layoutSignature, maxSpreadPageCount, pageSpreads.length, spreadPageCount]);
 
   useEffect(() => {
-    if (!activeEditor || !project || fastEditing) {
+    if (!activeEditor || !tocSettingsForSync || fastEditing) {
       return;
     }
 
-    syncTableOfContentsNodes(activeEditor, project.tocSettings, tocEntries);
-  }, [activeEditor, fastEditing, project, tocEntries]);
+    syncTableOfContentsNodes(activeEditor, tocSettingsForSync, tocEntries);
+  }, [activeEditor, fastEditing, tocEntries, tocSettingsForSync]);
 
   if (!project || !activeChapter) {
     return (
@@ -1069,6 +1084,15 @@ export function EditorShell() {
   };
 
   const updateTocSetting = (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => {
+    if (!project) {
+      return;
+    }
+
+    const nextSettings = {
+      ...project.tocSettings,
+      [key]: value
+    };
+
     updateProject((previous) => ({
       ...previous,
       tocSettings: {
@@ -1076,6 +1100,12 @@ export function EditorShell() {
         [key]: value
       }
     }));
+    if (activeEditor) {
+      const changed = syncTableOfContentsNodes(activeEditor, nextSettings, tocEntries);
+      if (changed) {
+        setStatusText("目次設定を反映しました");
+      }
+    }
   };
 
   const insertTableOfContents = () => {
@@ -1881,12 +1911,13 @@ function TableOfContentsPanel({
               <Minus size={14} />
             </button>
             <input
-              type="range"
-              min="6"
-              max="16"
-              step="0.5"
+              type="number"
+              min={6}
+              max={16}
+              step={0.5}
               value={tocFontSizePt}
-              onChange={(event) => updateTocFontSize(Number.parseFloat(event.target.value))}
+              onChange={(event) => updateTocFontSize(Number(event.target.value))}
+              aria-label="目次の文字サイズpt"
             />
             <button type="button" onClick={() => updateTocFontSize(tocFontSizePt + 0.5)} aria-label="目次の文字を大きくする">
               <Plus size={14} />
@@ -1900,12 +1931,13 @@ function TableOfContentsPanel({
               <Minus size={14} />
             </button>
             <input
-              type="range"
-              min="0"
-              max="48"
-              step="1"
+              type="number"
+              min={0}
+              max={48}
+              step={1}
               value={tocTitleGapPt}
-              onChange={(event) => updateTocTitleGap(Number.parseFloat(event.target.value))}
+              onChange={(event) => updateTocTitleGap(Number(event.target.value))}
+              aria-label="タイトル下の余白pt"
             />
             <button type="button" onClick={() => updateTocTitleGap(tocTitleGapPt + 1)} aria-label="タイトル下の余白を広くする">
               <Plus size={14} />

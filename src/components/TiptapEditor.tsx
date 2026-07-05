@@ -16,7 +16,6 @@ import {
   Copy,
   Heading1,
   ImagePlus,
-  Pilcrow,
   QrCode,
   Redo2,
   RefreshCw,
@@ -229,9 +228,9 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         return false;
       }
     },
-    onUpdate: ({ editor }) => {
+    onUpdate: ({ editor, transaction }) => {
       // キー入力直後のupdateでは同じ通知を二重に走らせない。
-      if (Date.now() - lastDirectTypingActivityRef.current > 120) {
+      if (!transaction.getMeta("skipTypingActivity") && Date.now() - lastDirectTypingActivityRef.current > 120) {
         onTypingActivityRef.current?.();
       }
 
@@ -620,6 +619,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         .run()
     );
     if (applied) {
+      imageSelectionTargetRef.current = target ?? readSelectedImageTarget(editor);
       syncRenderedImageWidth(editor, target, nextWidth);
       window.requestAnimationFrame(() => syncRenderedImageWidth(editor, target, nextWidth));
       setToolbarState((previous) => (previous.hasImageSelection ? { ...previous, selectedImageWidth: nextWidth } : previous));
@@ -686,7 +686,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const selected = selectedRenderedImage(editor);
+    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
+    const selected = target ? selectedRenderedImageByTarget(editor, target) : selectedRenderedImage(editor);
     if (!selected) {
       return;
     }
@@ -694,7 +695,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     const images = renderedImages(editor);
     const selectedIndex = images.indexOf(selected);
     const previousImage = selectedIndex > 0 ? images[selectedIndex - 1] : null;
-    const width = previousImage ? parseImageDimension(previousImage.style.width || previousImage.getAttribute("width")) ?? Math.round(previousImage.getBoundingClientRect().width) : null;
+    const width = previousImage ? readRenderedImageWidth(previousImage) : null;
     if (!width) {
       window.alert("前にある画像が見つかりません。");
       return;
@@ -913,8 +914,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <Redo2 size={18} />
         </ToolButton>
         <span className="toolbar-divider" />
-        <ToolButton label="段落" active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
-          <Pilcrow size={18} />
+        <ToolButton label="本文" active={editor?.isActive("paragraph")} disabled={disabled} onClick={() => editor?.chain().focus().setParagraph().run()}>
+          <span className="ruby-tool-label">本文</span>
         </ToolButton>
         <ToolButton label="見出し1" active={editor?.isActive("heading", { level: 1 })} disabled={disabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}>
           <Heading1 size={18} />
@@ -1024,15 +1025,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             <Copy size={15} />
             前画像と同じ
           </button>
-          <input
-            className="image-size-range"
-            type="range"
-            min={48}
-            max={maxImageWidth}
-            value={Math.max(48, Math.min(maxImageWidth, imageWidth))}
-            onChange={(event) => setImageWidth(Number(event.target.value))}
-            aria-label="画像幅"
-          />
           <input
             className="image-size-number"
             type="number"
@@ -1764,6 +1756,7 @@ function syncRenderedImageWidth(editor: Editor, target: ImageReplacementTarget |
   const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
   if (wrapper) {
     wrapper.style.width = nextWidth;
+    wrapper.style.maxWidth = nextWidth;
   }
 }
 
@@ -1775,6 +1768,19 @@ function selectedRenderedImageByTarget(editor: Editor, target: ImageReplacementT
     images.find((candidate) => candidate.closest(".ProseMirror-selectednode")) ??
     null
   );
+}
+
+function readRenderedImageWidth(image: HTMLImageElement): number | null {
+  const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
+  const measuredWidth = wrapper ? Math.round(wrapper.getBoundingClientRect().width) : Math.round(image.getBoundingClientRect().width);
+  const width =
+    parseImageDimension(wrapper?.style.width) ??
+    parseImageDimension(wrapper?.getAttribute("width")) ??
+    parseImageDimension(image.style.width) ??
+    parseImageDimension(image.getAttribute("width")) ??
+    parseImageDimension(image.getAttribute("data-width")) ??
+    measuredWidth;
+  return Number.isFinite(width) && width > 0 ? width : null;
 }
 
 function currentBreakableNodeName(editor: Editor): string {
