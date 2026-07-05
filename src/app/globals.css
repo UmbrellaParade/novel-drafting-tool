@@ -532,6 +532,37 @@ h1 {
   font-size: 12px;
 }
 
+.toc-size-stepper {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 6px;
+}
+
+.toc-size-stepper input[type="range"] {
+  width: 100%;
+  accent-color: var(--rain);
+}
+
+.toc-size-stepper button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #cfc3b4;
+  border-radius: 6px;
+  background: #fffdf8;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.toc-size-stepper button:hover {
+  border-color: var(--rain);
+  background: #eaf3f0;
+  color: #1f5c54;
+}
+
 .toc-actions,
 .drive-actions {
   display: grid;
@@ -686,6 +717,9 @@ h1 {
   flex: 0 0 var(--page-width);
   width: var(--page-width);
   height: var(--page-height);
+  contain: layout paint style;
+  content-visibility: auto;
+  contain-intrinsic-size: var(--page-width) var(--page-height);
   border: 1px solid #cdbfadd;
   background: #ffffff;
   box-shadow: 0 18px 45px rgba(36, 33, 29, 0.16);

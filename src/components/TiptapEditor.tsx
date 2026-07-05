@@ -69,6 +69,8 @@ const FONT_SIZE_SCOPES = {
   body: new Set(["paragraph", "blockquote", "listItem"])
 } as const;
 
+const EDITOR_HTML_COMMIT_DELAY_MS = 500;
+
 function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
 }
@@ -175,7 +177,14 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
       onUpdateTimerRef.current = setTimeout(() => {
         onUpdateTimerRef.current = null;
         onChangeRef.current(editor.getHTML());
-      }, 80);
+      }, EDITOR_HTML_COMMIT_DELAY_MS);
+    },
+    onBlur: ({ editor }) => {
+      if (onUpdateTimerRef.current !== null) {
+        clearTimeout(onUpdateTimerRef.current);
+        onUpdateTimerRef.current = null;
+      }
+      onChangeRef.current(editor.getHTML());
     }
   });
 
@@ -264,10 +273,15 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         refreshToolbarState();
       });
     };
+    const scheduleSelectedMediaRefresh = () => {
+      if (imageSelectionTargetRef.current || qrCardSelectionPositionRef.current !== null) {
+        scheduleRefreshToolbarState();
+      }
+    };
 
     refreshToolbarState();
     editor.on("selectionUpdate", scheduleRefreshToolbarState);
-    editor.on("update", scheduleRefreshToolbarState);
+    editor.on("update", scheduleSelectedMediaRefresh);
     editor.on("focus", scheduleRefreshToolbarState);
     editor.on("blur", scheduleRefreshToolbarState);
 
@@ -276,7 +290,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         window.cancelAnimationFrame(frameHandle);
       }
       editor.off("selectionUpdate", scheduleRefreshToolbarState);
-      editor.off("update", scheduleRefreshToolbarState);
+      editor.off("update", scheduleSelectedMediaRefresh);
       editor.off("focus", scheduleRefreshToolbarState);
       editor.off("blur", scheduleRefreshToolbarState);
     };
@@ -432,13 +446,14 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
+    const nextWidth = Math.round(width);
     const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
     const position = target ? resolveImagePosition(editor, target) : selectedImagePosition(editor);
     if (position === null) {
       return;
     }
 
-    editor
+    const applied = editor
       .chain()
       .focus()
       .command(({ state, tr }) => {
@@ -447,10 +462,13 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           return false;
         }
 
-        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: Math.round(width), height: null }, node.marks);
+        tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth, height: null }, node.marks);
         return true;
       })
       .run();
+    if (applied) {
+      setToolbarState((previous) => (previous.hasImageSelection ? { ...previous, selectedImageWidth: nextWidth } : previous));
+    }
   };
 
   const fitImageToCurrentPage = () => {
@@ -512,7 +530,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    editor
+    const applied = editor
       .chain()
       .focus()
       .command(({ state, tr }) => {
@@ -525,6 +543,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         return true;
       })
       .run();
+    if (applied) {
+      setToolbarState((previous) => (previous.hasQrCardSelection ? { ...previous, selectedQrCardWidth: nextWidth } : previous));
+    }
   };
 
   const setQrCardToTextWidth = () => {

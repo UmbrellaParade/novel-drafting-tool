@@ -12,6 +12,7 @@ import {
   FileText,
   FolderOpen,
   ListTree,
+  Minus,
   Pencil,
   Plus,
   Printer,
@@ -407,6 +408,7 @@ export function EditorShell() {
 
   const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject) : []), [layoutProject]);
   const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject) : 1), [layoutProject]);
+  const characterCount = useMemo(() => (layoutProject ? countManuscriptCharacters(layoutProject) : 0), [layoutProject]);
   const layoutSignature = useMemo(() => {
     if (!project || !activeChapter) {
       return "";
@@ -449,9 +451,11 @@ export function EditorShell() {
     }, FAST_EDITING_RESET_MS);
   }, []);
 
+  const readLatestEditorContent = useCallback(() => pendingChapterContentRef.current ?? activeEditor?.getHTML() ?? null, [activeEditor]);
+
   const projectWithLatestContent = useCallback(
     (source: ManuscriptProject) => {
-      const pendingContent = pendingChapterContentRef.current;
+      const pendingContent = readLatestEditorContent();
       if (pendingContent === null) {
         return source;
       }
@@ -461,12 +465,12 @@ export function EditorShell() {
         chapters: source.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: pendingContent } : chapter))
       };
     },
-    []
+    [readLatestEditorContent]
   );
 
   const flushPendingChapterContent = useCallback(() => {
-    const pendingContent = pendingChapterContentRef.current;
-    if (pendingContent === null) {
+    const pendingContent = readLatestEditorContent();
+    if (pendingContent === null || (pendingChapterContentRef.current === null && project?.chapters[0]?.content === pendingContent)) {
       return;
     }
 
@@ -484,7 +488,7 @@ export function EditorShell() {
       ...previous,
       chapters: previous.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: pendingContent } : chapter))
     }));
-  }, [updateProject]);
+  }, [project, readLatestEditorContent, updateProject]);
 
   const updateActiveChapterContent = useCallback(
     (content: string) => {
@@ -1159,7 +1163,7 @@ export function EditorShell() {
               <FileText size={16} />
             <span>{project.title}</span>
           </div>
-          <span className="chapter-meta">{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
+          <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
         </div>
         <div ref={pageStageRef} className="page-stage" onWheel={handlePageStageWheel}>
           <div className="page-viewport" style={pageViewportStyle}>
@@ -1213,7 +1217,7 @@ export function EditorShell() {
             onSave={saveDriveSettingsFromDraft}
             onClear={clearDriveSettingsFromDraft}
           />
-          <CheckPanel project={project} checks={checks} />
+          <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} />
         </aside>
       </div>
       {printDomActive && printChapter ? <PrintDocument project={project} chapter={printChapter} sectionTitles={pageSectionTitles} pageCount={pageFrameCount} /> : null}
@@ -1383,6 +1387,12 @@ function TableOfContentsPanel({
   onInsert: () => void;
   onRefresh: () => void;
 }) {
+  const tocFontSizePt = settings.fontSizePt ?? 9;
+  const updateTocFontSize = (nextSize: number) => {
+    const clampedSize = Math.max(6, Math.min(16, Number(nextSize.toFixed(1))));
+    onSettingChange("fontSizePt", clampedSize);
+  };
+
   return (
     <section className="tool-panel toc-panel">
       <div className="panel-title-row">
@@ -1406,18 +1416,25 @@ function TableOfContentsPanel({
             ))}
           </select>
         </label>
-        <label className="toc-form-field wide">
-          <span>目次の文字サイズ：{settings.fontSizePt ?? 9}pt</span>
-          <input
-            type="range"
-            min="6"
-            max="16"
-            step="0.5"
-            value={settings.fontSizePt ?? 9}
-            onChange={(event) => onSettingChange("fontSizePt", Number.parseFloat(event.target.value))}
-            style={{ width: "100%" }}
-          />
-        </label>
+        <div className="toc-form-field wide">
+          <span>目次の文字サイズ：{tocFontSizePt}pt</span>
+          <div className="toc-size-stepper">
+            <button type="button" onClick={() => updateTocFontSize(tocFontSizePt - 0.5)} aria-label="目次の文字を小さくする">
+              <Minus size={14} />
+            </button>
+            <input
+              type="range"
+              min="6"
+              max="16"
+              step="0.5"
+              value={tocFontSizePt}
+              onChange={(event) => updateTocFontSize(Number.parseFloat(event.target.value))}
+            />
+            <button type="button" onClick={() => updateTocFontSize(tocFontSizePt + 0.5)} aria-label="目次の文字を大きくする">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
       </div>
       <div className="toc-actions">
         <button type="button" disabled={!entries.length} onClick={onInsert}>
@@ -1491,7 +1508,15 @@ function DriveSettingsPanel({
   );
 }
 
-function CheckPanel({ project, checks }: { project: ManuscriptProject; checks: ReturnType<typeof runManuscriptChecks> }) {
+function CheckPanel({
+  checks,
+  characterCount,
+  estimatedPages
+}: {
+  checks: ReturnType<typeof runManuscriptChecks>;
+  characterCount: number;
+  estimatedPages: number;
+}) {
   const visibleChecks = checks.filter((check) => check.id !== "characters");
 
   return (
@@ -1500,8 +1525,8 @@ function CheckPanel({ project, checks }: { project: ManuscriptProject; checks: R
         <h2>確認</h2>
       </div>
       <div className="check-summary-row">
-        <span>{countManuscriptCharacters(project).toLocaleString("ja-JP")}字</span>
-        <span>推定{estimatePageCount(project)}p</span>
+        <span>{characterCount.toLocaleString("ja-JP")}字</span>
+        <span>推定{estimatedPages}p</span>
       </div>
       <div className="check-list">
         {visibleChecks.map((check) => (
