@@ -228,6 +228,19 @@ function sameNumberList(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function readCssLengthPx(host: HTMLElement, variableName: string): number {
+  const probe = document.createElement("div");
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.width = `var(${variableName})`;
+  probe.style.height = "0";
+  host.appendChild(probe);
+  const width = probe.offsetWidth || probe.getBoundingClientRect().width;
+  probe.remove();
+  return Number.isFinite(width) && width > 0 ? width : 0;
+}
+
 function googleDriveSetupMessage(): string {
   return [
     "Google Drive連携にはGoogle CloudのOAuth設定が必要です。",
@@ -566,15 +579,15 @@ export function EditorShell() {
       const stage = pageStageRef.current;
       const prose = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
       const firstFrame = stage?.querySelector<HTMLElement>(".page-frame");
-      const secondFrame = stage?.querySelectorAll<HTMLElement>(".page-frame")[1];
       if (!prose || !firstFrame) {
         return;
       }
 
-      const pagePitch = secondFrame ? secondFrame.offsetLeft - firstFrame.offsetLeft : firstFrame.offsetWidth;
+      const pageGap = stage ? readCssLengthPx(stage, "--page-gap") : 0;
+      const pagePitch = firstFrame.offsetWidth + pageGap;
       const firstFrameRect = firstFrame.getBoundingClientRect();
-      const visualPagePitch = secondFrame ? secondFrame.getBoundingClientRect().left - firstFrameRect.left : firstFrameRect.width;
-      if (pagePitch <= 0) {
+      const visualPagePitch = pagePitch * pageFit.scale;
+      if (pagePitch <= 0 || visualPagePitch <= 0) {
         return;
       }
 
@@ -583,7 +596,7 @@ export function EditorShell() {
       const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];
-      const firstFrameLeft = firstFrameRect.left;
+      const firstFrameLeft = firstFrameRect.left - clampedVisiblePageIndex * visualPagePitch;
       prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
         if (heading.closest("[data-type='table-of-contents']")) {
           return;
@@ -609,7 +622,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [estimatedPages, layoutSignature, pageFrameCount]);
+  }, [clampedVisiblePageIndex, estimatedPages, layoutSignature, pageFit.scale, pageFrameCount]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -625,17 +638,15 @@ export function EditorShell() {
 
       frameHandle = window.requestAnimationFrame(() => {
         frameHandle = null;
-        const documentElement = stage.querySelector<HTMLElement>(".paged-document");
         const frame = stage.querySelector<HTMLElement>(".page-frame");
-        const secondFrame = stage.querySelectorAll<HTMLElement>(".page-frame")[1];
-        if (!documentElement || !frame) {
+        if (!frame) {
           return;
         }
 
         const stageRect = stage.getBoundingClientRect();
         const pageWidth = frame.offsetWidth;
         const pageHeight = frame.offsetHeight;
-        const pageGap = secondFrame ? Math.max(0, secondFrame.offsetLeft - frame.offsetLeft - pageWidth) : 0;
+        const pageGap = readCssLengthPx(stage, "--page-gap");
         if (pageWidth <= 0 || pageHeight <= 0) {
           return;
         }
@@ -1198,18 +1209,16 @@ export function EditorShell() {
               data-visible-page={clampedVisiblePageIndex + 1}
             >
               <div className="page-frame-track" aria-hidden="true">
-                {Array.from({ length: pageFrameCount }, (_, pageIndex) => (
-                  <section key={pageIndex} className="page-frame">
-                    <header className="page-frame-header">
-                      {pageSectionTitles[pageIndex] ? <span>{pageSectionTitles[pageIndex]}</span> : null}
-                    </header>
-                    {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
-                    {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
-                    <footer className="page-frame-footer">
-                      {project.pageSettings.showPageNumber ? <span>{pageIndex + 1}</span> : null}
-                    </footer>
-                  </section>
-                ))}
+                <section key={clampedVisiblePageIndex} className="page-frame">
+                  <header className="page-frame-header">
+                    {pageSectionTitles[clampedVisiblePageIndex] ? <span>{pageSectionTitles[clampedVisiblePageIndex]}</span> : null}
+                  </header>
+                  {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
+                  {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
+                  <footer className="page-frame-footer">
+                    {project.pageSettings.showPageNumber ? <span>{clampedVisiblePageIndex + 1}</span> : null}
+                  </footer>
+                </section>
               </div>
               <div className="paged-editor-layer">
                 <TiptapEditor

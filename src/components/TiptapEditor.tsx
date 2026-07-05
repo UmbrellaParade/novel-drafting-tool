@@ -620,12 +620,46 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       .focus()
       .command(({ state, tr }) => {
         let changed = false;
+        const fontSizeMark = state.schema.marks.fontSize;
         state.doc.descendants((node, position) => {
           if (!targets.has(node.type.name)) {
             return;
           }
 
+          if (fontSizeMark) {
+            tr.removeMark(position, position + node.nodeSize, fontSizeMark);
+          }
           tr.setNodeMarkup(position, undefined, { ...node.attrs, fontSize }, node.marks);
+          changed = true;
+        });
+        return changed;
+      })
+      .run();
+  };
+
+  const clearTextSizes = () => {
+    if (!editor) {
+      return;
+    }
+
+    const targets = FONT_SIZE_SCOPES.all;
+    editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        let changed = false;
+        const fontSizeMark = state.schema.marks.fontSize;
+        if (fontSizeMark) {
+          tr.removeMark(0, state.doc.content.size, fontSizeMark);
+          changed = true;
+        }
+
+        state.doc.descendants((node, position) => {
+          if (!targets.has(node.type.name) || !node.attrs.fontSize) {
+            return;
+          }
+
+          tr.setNodeMarkup(position, undefined, { ...node.attrs, fontSize: null }, node.marks);
           changed = true;
         });
         return changed;
@@ -812,6 +846,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("all")}>全部</button>
         <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>見出し</button>
         <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>本文</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearTextSizes}>解除</button>
       </div>
       <input
         ref={imageInputRef}
