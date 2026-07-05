@@ -32,6 +32,7 @@ type TiptapEditorProps = {
   content: string;
   onChange: (content: string) => void;
   onTypingActivity?: () => void;
+  onPasteLayoutHints?: (hints: PasteLayoutHints) => void;
   onReady?: (editor: Editor | null) => void;
 };
 
@@ -63,6 +64,12 @@ type ImageReplacementTarget = {
   title: string;
 };
 
+export type PasteLayoutHints = {
+  fontSizePt?: number;
+  lineHeight?: number;
+  paragraphSpacingMm?: number;
+};
+
 const FONT_SIZE_SCOPES = {
   all: new Set(["paragraph", "heading", "blockquote", "listItem"]),
   headings: new Set(["heading"]),
@@ -76,11 +83,12 @@ function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
 }
 
-export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayoutHints, onReady }: TiptapEditorProps) {
   const editorRef = useRef<Editor | null>(null);
   // onChangeをrefで保持することで、useEditor内クロージャが古い参照を持たないようにする
   const onChangeRef = useRef(onChange);
   const onTypingActivityRef = useRef(onTypingActivity);
+  const onPasteLayoutHintsRef = useRef(onPasteLayoutHints);
   // getHTML()のdebounce用タイマー（画像リサイズ中の連続シリアライズを防止）
   const onUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onUpdateIdleRef = useRef<number | null>(null);
@@ -92,6 +100,10 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
   useEffect(() => {
     onTypingActivityRef.current = onTypingActivity;
   }, [onTypingActivity]);
+
+  useEffect(() => {
+    onPasteLayoutHintsRef.current = onPasteLayoutHints;
+  }, [onPasteLayoutHints]);
 
   const editor = useEditor({
     extensions: [
@@ -147,6 +159,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
         }
         return false;
       },
+      handleScrollToSelection: () => true,
       handlePaste: (_view, event) => {
         onTypingActivity?.();
         const clipboard = event.clipboardData;
@@ -163,6 +176,10 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onReady }: T
         }
 
         const html = clipboard.getData("text/html");
+        const layoutHints = html ? readGoogleDocsLayoutHints(html) : null;
+        if (layoutHints) {
+          onPasteLayoutHintsRef.current?.(layoutHints);
+        }
         if (html && /<img\b/i.test(html)) {
           event.preventDefault();
           void insertPastedHtmlWithImages(pastedEditor, html);
@@ -1099,6 +1116,126 @@ async function insertPastedHtmlWithImages(editor: Editor, html: string): Promise
   withStablePageStageScroll(editor, () => {
     editor.chain().focus().insertContent(template.innerHTML).run();
   });
+}
+
+function readGoogleDocsLayoutHints(html: string): PasteLayoutHints | null {
+  if (!/docs-internal-guid|google-docs|kix-/i.test(html)) {
+    return null;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const fontSizes: number[] = [];
+  const lineHeights: number[] = [];
+  const paragraphSpacings: number[] = [];
+  const styledElements = Array.from(template.content.querySelectorAll<HTMLElement>("[style]"));
+
+  for (const element of styledElements) {
+    const fontSizePt = parseCssSizeToPt(element.style.fontSize);
+    if (fontSizePt !== null && fontSizePt >= 4 && fontSizePt <= 72) {
+      fontSizes.push(fontSizePt);
+    }
+
+    const lineHeight = parseCssLineHeight(element.style.lineHeight, fontSizePt);
+    if (lineHeight !== null && lineHeight >= 0.8 && lineHeight <= 3.5) {
+      lineHeights.push(lineHeight);
+    }
+  }
+
+  for (const paragraph of Array.from(template.content.querySelectorAll<HTMLElement>("p,div"))) {
+    const marginBottomPt = parseCssSizeToPt(paragraph.style.marginBottom);
+    if (marginBottomPt !== null && marginBottomPt >= 0 && marginBottomPt <= 72) {
+      paragraphSpacings.push(ptToMm(marginBottomPt));
+    }
+  }
+
+  const hints: PasteLayoutHints = {};
+  const fontSizePt = median(fontSizes);
+  const lineHeight = median(lineHeights);
+  const paragraphSpacingMm = median(paragraphSpacings);
+
+  if (fontSizePt !== null) {
+    hints.fontSizePt = roundTo(fontSizePt, 1);
+  }
+  if (lineHeight !== null) {
+    hints.lineHeight = roundTo(lineHeight, 2);
+  }
+  if (paragraphSpacingMm !== null) {
+    hints.paragraphSpacingMm = roundTo(paragraphSpacingMm, 1);
+  }
+
+  return Object.keys(hints).length > 0 ? hints : null;
+}
+
+function parseCssLineHeight(value: string, fontSizePt: number | null): number | null {
+  if (!value || value === "normal") {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  if (value.trim().endsWith("%")) {
+    return parsed / 100;
+  }
+
+  if (/^[\d.]+$/.test(value.trim())) {
+    return parsed;
+  }
+
+  const lineHeightPt = parseCssSizeToPt(value);
+  return lineHeightPt !== null && fontSizePt !== null && fontSizePt > 0 ? lineHeightPt / fontSizePt : null;
+}
+
+function parseCssSizeToPt(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  if (trimmed.endsWith("px")) {
+    return parsed * 0.75;
+  }
+  if (trimmed.endsWith("mm")) {
+    return parsed / 0.352778;
+  }
+  if (trimmed.endsWith("cm")) {
+    return (parsed * 10) / 0.352778;
+  }
+  if (trimmed.endsWith("in")) {
+    return parsed * 72;
+  }
+  if (trimmed.endsWith("pt") || /^[\d.]+$/.test(trimmed)) {
+    return parsed;
+  }
+
+  return null;
+}
+
+function ptToMm(value: number): number {
+  return value * 0.352778;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) {
+    return null;
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function roundTo(value: number, digits: number): number {
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
 }
 
 function fileToDataUrl(file: File): Promise<string> {

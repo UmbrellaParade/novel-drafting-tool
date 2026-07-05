@@ -21,7 +21,7 @@ import {
   Trash2,
   XCircle
 } from "lucide-react";
-import { TiptapEditor, TiptapToolbar } from "./TiptapEditor";
+import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
 import { exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
@@ -386,6 +386,7 @@ export function EditorShell() {
   const scrollFrameRef = useRef<number | null>(null);
   const pendingScrollTopRef = useRef(0);
   const fastEditingRef = useRef(false);
+  const editingScrollLockRef = useRef<{ top: number; left: number } | null>(null);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pendingChapterContentRef = useRef<string | null>(null);
@@ -543,20 +544,54 @@ export function EditorShell() {
     });
   }, []);
 
+  const restoreEditingScrollLock = useCallback(() => {
+    const stage = pageStageRef.current;
+    const locked = editingScrollLockRef.current;
+    if (!stage || !locked) {
+      return;
+    }
+
+    const restore = () => {
+      if (!fastEditingRef.current) {
+        return;
+      }
+
+      const maxScrollTop = Math.max(0, stage.scrollHeight - stage.clientHeight);
+      const nextTop = Math.max(0, Math.min(locked.top, maxScrollTop));
+      if (Math.abs(stage.scrollTop - nextTop) > 1) {
+        stage.scrollTop = nextTop;
+      }
+      if (Math.abs(stage.scrollLeft - locked.left) > 1) {
+        stage.scrollLeft = locked.left;
+      }
+      stage.style.setProperty("--page-scroll-top", `${stage.scrollTop}px`);
+    };
+
+    window.requestAnimationFrame(restore);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(restore));
+    window.setTimeout(restore, 80);
+  }, []);
+
   const markTypingActivity = useCallback(() => {
+    const stage = pageStageRef.current;
     if (!fastEditingRef.current) {
+      editingScrollLockRef.current = stage ? { top: stage.scrollTop, left: stage.scrollLeft } : null;
       fastEditingRef.current = true;
       setFastEditing(true);
+    } else if (!editingScrollLockRef.current && stage) {
+      editingScrollLockRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
     }
+    restoreEditingScrollLock();
     if (fastEditingTimerRef.current !== null) {
       window.clearTimeout(fastEditingTimerRef.current);
     }
     fastEditingTimerRef.current = window.setTimeout(() => {
       fastEditingTimerRef.current = null;
       fastEditingRef.current = false;
+      editingScrollLockRef.current = null;
       setFastEditing(false);
     }, FAST_EDITING_RESET_MS);
-  }, []);
+  }, [restoreEditingScrollLock]);
 
   const readLatestEditorContent = useCallback(() => pendingChapterContentRef.current ?? activeEditor?.getHTML() ?? null, [activeEditor]);
 
@@ -590,6 +625,7 @@ export function EditorShell() {
       fastEditingTimerRef.current = null;
     }
     fastEditingRef.current = false;
+    editingScrollLockRef.current = null;
     setFastEditing(false);
     pendingChapterContentRef.current = null;
     updateProject((previous) => ({
@@ -888,6 +924,19 @@ export function EditorShell() {
         pageSettings: { ...previous.pageSettings, ...pending }
       }));
     }, 300);
+  };
+
+  const applyPasteLayoutHints = (hints: PasteLayoutHints) => {
+    updateProject((previous) => ({
+      ...previous,
+      pageSettings: {
+        ...previous.pageSettings,
+        ...(hints.fontSizePt ? { fontSizePt: hints.fontSizePt } : {}),
+        ...(hints.lineHeight ? { lineHeight: hints.lineHeight } : {}),
+        ...(hints.paragraphSpacingMm !== undefined ? { paragraphSpacingMm: hints.paragraphSpacingMm } : {})
+      }
+    }));
+    setStatusText("Google Docsの文字設定を反映");
   };
 
   const updateTocSetting = (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => {
@@ -1354,6 +1403,7 @@ export function EditorShell() {
                   content={activeChapter.content}
                   onChange={updateActiveChapterContent}
                   onTypingActivity={markTypingActivity}
+                  onPasteLayoutHints={applyPasteLayoutHints}
                   onReady={setActiveEditor}
                 />
               </div>
@@ -1448,8 +1498,11 @@ function ProjectPanel({
   const settings = project.pageSettings;
   const fontSizeMm = settings.fontSizePt * 0.352778;
   const lineAdvanceMm = Math.max(0.1, fontSizeMm * settings.lineHeight);
+  const textWidthMm = Math.max(0, settings.pageWidthMm - settings.marginLeftMm - settings.marginRightMm);
   const textHeightMm = Math.max(0, settings.pageHeightMm - settings.marginTopMm - settings.marginBottomMm);
+  const charsPerLine = Math.max(1, Math.floor(textWidthMm / Math.max(0.1, fontSizeMm)));
   const linesPerPage = Math.max(1, Math.floor(textHeightMm / lineAdvanceMm));
+  const charsPerPage = charsPerLine * linesPerPage;
   const updateProjectText = (key: "title" | "subtitle" | "author", value: string) => {
     onProjectChange((previous) => ({ ...previous, [key]: value }));
   };
@@ -1501,12 +1554,16 @@ function ProjectPanel({
         <NumberField label="本文pt" value={settings.fontSizePt} step={0.1} onChange={(value) => onPageChange("fontSizePt", value)} />
         <NumberField label="ルビpt" value={settings.rubySizePt} step={0.1} onChange={(value) => onPageChange("rubySizePt", value)} />
         <NumberField label="行間倍率" value={settings.lineHeight} step={0.01} onChange={(value) => onPageChange("lineHeight", value)} />
-        <NumberField label="段落mm" value={settings.paragraphSpacingMm} step={0.1} onChange={(value) => onPageChange("paragraphSpacingMm", value)} />
+        <NumberField label="改行後mm" value={settings.paragraphSpacingMm} step={0.1} onChange={(value) => onPageChange("paragraphSpacingMm", value)} />
         <NumberField label="画像高mm" value={settings.imageMaxHeightMm} step={1} onChange={(value) => onPageChange("imageMaxHeightMm", value)} />
       </div>
       <div className="settings-readout">
+        <span>本文枠 {textWidthMm.toFixed(1)}×{textHeightMm.toFixed(1)}mm</span>
+        <span>1行 約{charsPerLine}字</span>
         <span>行送り {lineAdvanceMm.toFixed(2)}mm</span>
         <span>約{linesPerPage}行/頁</span>
+        <span>約{charsPerPage.toLocaleString("ja-JP")}字/頁</span>
+        <span>改行後 +{settings.paragraphSpacingMm.toFixed(1)}mm</span>
       </div>
 
       <div className="toggle-row">
