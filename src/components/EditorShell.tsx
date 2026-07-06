@@ -87,6 +87,9 @@ type QrDraft = {
   description: string;
   category: string;
   template: QrCardTemplateId;
+  labelFontSizePt: number;
+  titleFontSizePt: number;
+  descriptionFontSizePt: number;
 };
 
 type PdfExportSnapshot = {
@@ -242,7 +245,22 @@ const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: 
   }
 };
 
-const EMPTY_QR_DRAFT: QrDraft = { name: "", url: "", description: "", category: "公式サイト", template: "umbrella" };
+const QR_TEXT_SIZE_MIN_PT = 5;
+const QR_TEXT_SIZE_MAX_PT = 24;
+const DEFAULT_QR_LABEL_FONT_SIZE_PT = 8;
+const DEFAULT_QR_TITLE_FONT_SIZE_PT = 9;
+const DEFAULT_QR_DESCRIPTION_FONT_SIZE_PT = 7;
+
+const EMPTY_QR_DRAFT: QrDraft = {
+  name: "",
+  url: "",
+  description: "",
+  category: "公式サイト",
+  template: "umbrella",
+  labelFontSizePt: DEFAULT_QR_LABEL_FONT_SIZE_PT,
+  titleFontSizePt: DEFAULT_QR_TITLE_FONT_SIZE_PT,
+  descriptionFontSizePt: DEFAULT_QR_DESCRIPTION_FONT_SIZE_PT
+};
 const EMPTY_DRIVE_SETTINGS: GoogleDriveSettings = { clientId: "", apiKey: "" };
 const QR_DRAFT_STORAGE_KEY = "novel-drafting-tool:last-qr-draft";
 
@@ -273,12 +291,27 @@ function getQrCardTemplateId(value: QrCardTemplateId | undefined): QrCardTemplat
   return value && QR_CARD_TEMPLATES[value] ? value : "umbrella";
 }
 
+function normalizeQrTextSizePt(value: unknown, fallback: number): number {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
+  const size = Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  return Math.max(QR_TEXT_SIZE_MIN_PT, Math.min(QR_TEXT_SIZE_MAX_PT, Number(size.toFixed(1))));
+}
+
+function qrTextSizeSettings(source: Partial<QrDraft | QrLink>) {
+  return {
+    labelFontSizePt: normalizeQrTextSizePt(source.labelFontSizePt, DEFAULT_QR_LABEL_FONT_SIZE_PT),
+    titleFontSizePt: normalizeQrTextSizePt(source.titleFontSizePt, DEFAULT_QR_TITLE_FONT_SIZE_PT),
+    descriptionFontSizePt: normalizeQrTextSizePt(source.descriptionFontSizePt, DEFAULT_QR_DESCRIPTION_FONT_SIZE_PT)
+  };
+}
+
 function reusableQrDraft(draft: QrDraft): QrDraft {
   return {
     ...EMPTY_QR_DRAFT,
     description: draft.description,
     category: draft.category,
-    template: getQrCardTemplateId(draft.template)
+    template: getQrCardTemplateId(draft.template),
+    ...qrTextSizeSettings(draft)
   };
 }
 
@@ -298,7 +331,8 @@ function readStoredQrDraft(): QrDraft {
       ...EMPTY_QR_DRAFT,
       description: typeof parsed.description === "string" ? parsed.description : EMPTY_QR_DRAFT.description,
       category: typeof parsed.category === "string" && parsed.category.trim() ? parsed.category : EMPTY_QR_DRAFT.category,
-      template: getQrCardTemplateId(parsed.template)
+      template: getQrCardTemplateId(parsed.template),
+      ...qrTextSizeSettings(parsed)
     };
   } catch {
     return EMPTY_QR_DRAFT;
@@ -2012,7 +2046,7 @@ export function EditorShell() {
       return null;
     }
 
-    return { name, url, description, category, template };
+    return { name, url, description, category, template, ...qrTextSizeSettings(draft) };
   };
 
   const addQrLink = (draft: QrDraft, mode: "save" | "insert" = "save") => {
@@ -2061,6 +2095,7 @@ export function EditorShell() {
             description: link.description,
             src,
             template,
+            ...qrTextSizeSettings(link),
             label: link.category || "記録室リンク"
           }
         },
@@ -2103,6 +2138,7 @@ export function EditorShell() {
               description: nextLink.description,
               src,
               template,
+              ...qrTextSizeSettings(nextLink),
               label: nextLink.category || "記録室リンク"
             });
           }
@@ -2145,7 +2181,8 @@ export function EditorShell() {
       url: link.url,
       description: link.description,
       category: link.category,
-      template
+      template,
+      ...qrTextSizeSettings(link)
     });
   };
 
@@ -2775,6 +2812,43 @@ function CheckPanel({
   );
 }
 
+function QrTextSizeControls({
+  draft,
+  onChange
+}: {
+  draft: QrDraft;
+  onChange: (draft: QrDraft) => void;
+}) {
+  return (
+    <div className="qr-text-size-grid">
+      <NumberField
+        label="ラベルpt"
+        value={draft.labelFontSizePt}
+        min={QR_TEXT_SIZE_MIN_PT}
+        max={QR_TEXT_SIZE_MAX_PT}
+        step={0.5}
+        onChange={(value) => onChange({ ...draft, labelFontSizePt: normalizeQrTextSizePt(value, DEFAULT_QR_LABEL_FONT_SIZE_PT) })}
+      />
+      <NumberField
+        label="タイトルpt"
+        value={draft.titleFontSizePt}
+        min={QR_TEXT_SIZE_MIN_PT}
+        max={QR_TEXT_SIZE_MAX_PT}
+        step={0.5}
+        onChange={(value) => onChange({ ...draft, titleFontSizePt: normalizeQrTextSizePt(value, DEFAULT_QR_TITLE_FONT_SIZE_PT) })}
+      />
+      <NumberField
+        label="説明pt"
+        value={draft.descriptionFontSizePt}
+        min={QR_TEXT_SIZE_MIN_PT}
+        max={QR_TEXT_SIZE_MAX_PT}
+        step={0.5}
+        onChange={(value) => onChange({ ...draft, descriptionFontSizePt: normalizeQrTextSizePt(value, DEFAULT_QR_DESCRIPTION_FONT_SIZE_PT) })}
+      />
+    </div>
+  );
+}
+
 function QrLibraryPanel({
   panelRef,
   links,
@@ -2816,7 +2890,8 @@ function QrLibraryPanel({
         url: link.url,
         description: link.description,
         category: link.category,
-        template: getQrCardTemplateId(link.template)
+        template: getQrCardTemplateId(link.template),
+        ...qrTextSizeSettings(link)
       }
     });
   };
@@ -2849,6 +2924,10 @@ function QrLibraryPanel({
             ))}
           </select>
         </label>
+        <div className="qr-form-field wide">
+          <span>文字サイズ</span>
+          <QrTextSizeControls draft={newQr} onChange={setNewQr} />
+        </div>
         <label className="qr-form-field wide">
           <span>QRのURL</span>
           <input placeholder="https://..." value={newQr.url} onChange={(event) => setNewQr({ ...newQr, url: event.target.value })} />
@@ -2909,6 +2988,13 @@ function QrLibraryPanel({
                       ))}
                     </select>
                   </label>
+                  <div className="qr-link-editor-size-group">
+                    <span>文字サイズ</span>
+                    <QrTextSizeControls
+                      draft={editingQr.draft}
+                      onChange={(draft) => setEditingQr({ ...editingQr, draft })}
+                    />
+                  </div>
                   <label>
                     <span>QRのURL</span>
                     <input value={editingQr.draft.url} onChange={(event) => setEditingQr({ ...editingQr, draft: { ...editingQr.draft, url: event.target.value } })} />
@@ -2934,16 +3020,21 @@ function QrLibraryPanel({
 function NumberField({
   label,
   value,
+  min = 0,
+  max,
   step = 1,
   onChange
 }: {
   label: string;
   value: number;
+  min?: number;
+  max?: number;
   step?: number;
   onChange: (value: number) => void;
 }) {
   const [draftValue, setDraftValue] = useState(() => String(value));
   const isFocusedRef = useRef(false);
+  const clampValue = (nextValue: number) => Math.max(min, Math.min(max ?? nextValue, nextValue));
 
   useEffect(() => {
     if (!isFocusedRef.current) {
@@ -2958,15 +3049,19 @@ function NumberField({
     }
 
     const parsed = Number(nextValue);
-    if (Number.isFinite(parsed) && parsed >= 0) {
-      onChange(parsed);
+    if (Number.isFinite(parsed)) {
+      onChange(clampValue(parsed));
     }
   };
 
   const handleBlur = () => {
     isFocusedRef.current = false;
     const parsed = Number(draftValue);
-    setDraftValue(Number.isFinite(parsed) && parsed >= 0 ? String(parsed) : String(value));
+    const nextValue = Number.isFinite(parsed) ? clampValue(parsed) : value;
+    setDraftValue(String(nextValue));
+    if (nextValue !== value) {
+      onChange(nextValue);
+    }
   };
 
   return (
@@ -2975,7 +3070,8 @@ function NumberField({
       <input
         type="number"
         value={draftValue}
-        min={0}
+        min={min}
+        max={max}
         step={step}
         onFocus={() => {
           isFocusedRef.current = true;

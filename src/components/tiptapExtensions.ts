@@ -59,6 +59,44 @@ function qrCardSizeAttributes(width: unknown, height: unknown): Record<string, s
   return attributes;
 }
 
+function positiveRoundedFontSize(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Number(parsed.toFixed(1)) : null;
+}
+
+function qrCardTextSizeAttributes(
+  labelFontSizePt: unknown,
+  titleFontSizePt: unknown,
+  descriptionFontSizePt: unknown
+): Record<string, string> {
+  const labelSize = positiveRoundedFontSize(labelFontSizePt);
+  const titleSize = positiveRoundedFontSize(titleFontSizePt);
+  const descriptionSize = positiveRoundedFontSize(descriptionFontSizePt);
+  const attributes: Record<string, string> = {};
+  const styles: string[] = [];
+
+  if (labelSize) {
+    attributes["data-label-font-size-pt"] = String(labelSize);
+    styles.push(`--qr-label-font-size: ${labelSize}pt`);
+  }
+
+  if (titleSize) {
+    attributes["data-title-font-size-pt"] = String(titleSize);
+    styles.push(`--qr-title-font-size: ${titleSize}pt`);
+  }
+
+  if (descriptionSize) {
+    attributes["data-description-font-size-pt"] = String(descriptionSize);
+    styles.push(`--qr-description-font-size: ${descriptionSize}pt`);
+  }
+
+  if (styles.length > 0) {
+    attributes.style = styles.join("; ");
+  }
+
+  return attributes;
+}
+
 type TocNodeItem = {
   title: string;
   page: number | null;
@@ -422,6 +460,21 @@ export const QrCardNode = Node.create({
       src: { default: "" },
       template: { default: "umbrella" },
       label: { default: "記録室リンク" },
+      labelFontSizePt: {
+        default: null,
+        parseHTML: (element) => (element as HTMLElement).dataset.labelFontSizePt ?? null,
+        renderHTML: () => ({})
+      },
+      titleFontSizePt: {
+        default: null,
+        parseHTML: (element) => (element as HTMLElement).dataset.titleFontSizePt ?? null,
+        renderHTML: () => ({})
+      },
+      descriptionFontSizePt: {
+        default: null,
+        parseHTML: (element) => (element as HTMLElement).dataset.descriptionFontSizePt ?? null,
+        renderHTML: () => ({})
+      },
       width: {
         default: null,
         parseHTML: (element) => (element as HTMLElement).dataset.width ?? (element as HTMLElement).style.width ?? null,
@@ -449,6 +502,9 @@ export const QrCardNode = Node.create({
             src: element.dataset.src ?? element.querySelector("img")?.getAttribute("src") ?? "",
             template: element.dataset.template ?? "umbrella",
             label: element.dataset.label ?? "記録室リンク",
+            labelFontSizePt: element.dataset.labelFontSizePt ?? null,
+            titleFontSizePt: element.dataset.titleFontSizePt ?? null,
+            descriptionFontSizePt: element.dataset.descriptionFontSizePt ?? null,
             width: element.dataset.width ?? element.style.width ?? null,
             height: element.dataset.height ?? element.style.height ?? null
           };
@@ -469,6 +525,7 @@ export const QrCardNode = Node.create({
         "data-src": node.attrs.src,
         "data-template": node.attrs.template,
         "data-label": node.attrs.label,
+        ...qrCardTextSizeAttributes(node.attrs.labelFontSizePt, node.attrs.titleFontSizePt, node.attrs.descriptionFontSizePt),
         class: `qr-card qr-card-${node.attrs.template}`
       }),
       ["div", { class: "qr-card-label" }, node.attrs.label],

@@ -35,6 +35,9 @@ export type QrLink = {
   description: string;
   category: string;
   template?: QrCardTemplateId;
+  labelFontSizePt?: number;
+  titleFontSizePt?: number;
+  descriptionFontSizePt?: number;
 };
 
 export type DriveState = {

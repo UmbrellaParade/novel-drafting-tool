@@ -142,6 +142,8 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 
 const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight", "ornate"]);
 const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnight", "ornate"]);
+const QR_TEXT_SIZE_MIN_PT = 5;
+const QR_TEXT_SIZE_MAX_PT = 24;
 
 export const DEFAULT_TOC_SETTINGS: TocSettings = {
   title: "目次",
@@ -205,11 +207,35 @@ export function normalizeProject(project: ManuscriptProject): ManuscriptProject 
     pageSettings: normalizePageSettings(project.pageSettings),
     tocSettings: normalizeTocSettings(project.tocSettings),
     drive: normalizeDriveState(project.drive),
-    qrLinks: (project.qrLinks ?? []).map((link) => ({
-      ...link,
-      template: QR_CARD_TEMPLATE_IDS.has(link.template ?? "umbrella") ? link.template ?? "umbrella" : "umbrella"
-    }))
+    qrLinks: (project.qrLinks ?? []).map((link) => {
+      const {
+        labelFontSizePt: linkLabelFontSizePt,
+        titleFontSizePt: linkTitleFontSizePt,
+        descriptionFontSizePt: linkDescriptionFontSizePt,
+        ...restLink
+      } = link;
+      const labelFontSizePt = normalizeQrTextSizePt(linkLabelFontSizePt);
+      const titleFontSizePt = normalizeQrTextSizePt(linkTitleFontSizePt);
+      const descriptionFontSizePt = normalizeQrTextSizePt(linkDescriptionFontSizePt);
+
+      return {
+        ...restLink,
+        template: QR_CARD_TEMPLATE_IDS.has(link.template ?? "umbrella") ? link.template ?? "umbrella" : "umbrella",
+        ...(labelFontSizePt ? { labelFontSizePt } : {}),
+        ...(titleFontSizePt ? { titleFontSizePt } : {}),
+        ...(descriptionFontSizePt ? { descriptionFontSizePt } : {})
+      };
+    })
   };
+}
+
+function normalizeQrTextSizePt(value: unknown): number | undefined {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number.parseFloat(value) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return Math.max(QR_TEXT_SIZE_MIN_PT, Math.min(QR_TEXT_SIZE_MAX_PT, Number(parsed.toFixed(1))));
 }
 
 function normalizeDriveState(state?: Partial<DriveState>): DriveState | undefined {

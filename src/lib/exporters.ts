@@ -47,7 +47,16 @@ type DocxBlock =
   | { kind: "paragraph" | "heading"; text: string }
   | { kind: "pageBreak"; text: "" }
   | { kind: "image"; src: string; alt: string; widthPx?: number; heightPx?: number }
-  | { kind: "qrCard"; title: string; description: string; src: string; widthPx?: number; heightPx?: number };
+  | {
+      kind: "qrCard";
+      title: string;
+      description: string;
+      src: string;
+      widthPx?: number;
+      heightPx?: number;
+      titleFontSizePt?: number;
+      descriptionFontSizePt?: number;
+    };
 
 type DocxModule = typeof import("docx");
 type DocxParagraph = InstanceType<DocxModule["Paragraph"]>;
@@ -253,7 +262,7 @@ async function createDocxQrCardParagraph(
             text: block.title,
             bold: true,
             font: options.font,
-            size: Math.round(options.fontSizePt * 2)
+            size: Math.round((block.titleFontSizePt ?? options.fontSizePt) * 2)
           })
         ]
       })
@@ -289,7 +298,7 @@ async function createDocxQrCardParagraph(
           new docx.TextRun({
             text: block.description,
             font: options.font,
-            size: Math.round(options.fontSizePt * 1.8)
+            size: Math.round((block.descriptionFontSizePt ?? options.fontSizePt * 0.9) * 2)
           })
         ]
       })
@@ -798,6 +807,18 @@ img {
   display: block;
 }
 
+.qr-card-label {
+  font-size: var(--qr-label-font-size, 0.9em);
+}
+
+.qr-card-title {
+  font-size: var(--qr-title-font-size, 1em);
+}
+
+.qr-card-description {
+  font-size: var(--qr-description-font-size, 0.86em);
+}
+
 .qr-card-ornate {
   padding: 30px 28px 24px;
   border: 2px solid #111111;
@@ -830,7 +851,7 @@ img {
 }
 
 .qr-card-ornate .qr-card-title {
-  font-size: 1.18em;
+  font-size: var(--qr-title-font-size, 1.18em);
   font-weight: bold;
 }
 
@@ -1085,7 +1106,9 @@ function parseDocxBlocks(html: string): DocxBlock[] {
         description,
         src: element.dataset.src ?? image?.getAttribute("src") ?? "",
         widthPx: readElementDimensionPx(element, "width"),
-        heightPx: readElementDimensionPx(element, "height")
+        heightPx: readElementDimensionPx(element, "height"),
+        titleFontSizePt: readElementFontSizePt(element, "titleFontSizePt"),
+        descriptionFontSizePt: readElementFontSizePt(element, "descriptionFontSizePt")
       });
       return;
     }
@@ -1129,6 +1152,11 @@ function readElementDimensionPx(element: HTMLElement, dimension: "width" | "heig
   const styleValue = element.style[dimension];
 
   return parseCssDimensionPx(datasetValue) ?? parseCssDimensionPx(attributeValue) ?? parseCssDimensionPx(styleValue);
+}
+
+function readElementFontSizePt(element: HTMLElement, datasetKey: "titleFontSizePt" | "descriptionFontSizePt"): number | undefined {
+  const numeric = Number.parseFloat(element.dataset[datasetKey] ?? "");
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined;
 }
 
 function parseCssDimensionPx(value: string | null | undefined): number | undefined {
