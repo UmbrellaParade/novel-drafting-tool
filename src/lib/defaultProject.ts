@@ -75,6 +75,48 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       showSafeArea: true
     }
   },
+  "shimauma-a6-manga": {
+    label: "しまうまA6漫画塗り足し版",
+    settings: {
+      preset: "shimauma-a6-manga",
+      fontFamily: "noto-serif-jp",
+      pageWidthMm: 111,
+      pageHeightMm: 154,
+      marginTopMm: 0,
+      marginBottomMm: 0,
+      marginLeftMm: 0,
+      marginRightMm: 0,
+      fontSizePt: 8.8,
+      rubySizePt: 4.6,
+      lineHeight: 1.72,
+      paragraphSpacingMm: 0,
+      imageMaxHeightMm: 154,
+      showPageNumber: false,
+      showBleedGuide: true,
+      showSafeArea: false
+    }
+  },
+  "shimauma-a5-manga": {
+    label: "しまうまA5漫画塗り足し版",
+    settings: {
+      preset: "shimauma-a5-manga",
+      fontFamily: "noto-serif-jp",
+      pageWidthMm: 154,
+      pageHeightMm: 216,
+      marginTopMm: 0,
+      marginBottomMm: 0,
+      marginLeftMm: 0,
+      marginRightMm: 0,
+      fontSizePt: 10,
+      rubySizePt: 5.2,
+      lineHeight: 1.76,
+      paragraphSpacingMm: 0,
+      imageMaxHeightMm: 216,
+      showPageNumber: false,
+      showBleedGuide: true,
+      showSafeArea: false
+    }
+  },
   custom: {
     label: "カスタム",
     settings: {

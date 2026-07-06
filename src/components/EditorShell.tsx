@@ -62,6 +62,7 @@ const PAGE_SCROLL_ALIGN_TOLERANCE_PX = 1.5;
 const PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS = 450;
 const PAGE_USER_SCROLL_WINDOW_MS = 900;
 const PDF_EXPORT_DPI = 300;
+const MANGA_PRESETS = new Set<PagePresetId>(["shimauma-a6-manga", "shimauma-a5-manga"]);
 
 type OutlineItem = {
   id: string;
@@ -116,6 +117,13 @@ type PreviewPageMeasurement = {
   count: number;
 };
 
+type ImageLayoutVars = {
+  blockMargin: string;
+  contentHeightOffset: string;
+  pageHeightLimit: string;
+  fitPadding: string;
+};
+
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "umbrella-parade:sidebar-collapsed-panels";
 const DEFAULT_SIDEBAR_COLLAPSE_STATE: SidebarCollapseState = {
   outline: false,
@@ -145,6 +153,24 @@ function useDebouncedVersionedValue<T>(value: T, delayMs: number): DebouncedVers
   }, [delayMs, value]);
 
   return debouncedValue;
+}
+
+function imageLayoutVarsForPage(settings: PageSettings): ImageLayoutVars {
+  if (MANGA_PRESETS.has(settings.preset)) {
+    return {
+      blockMargin: "0mm",
+      contentHeightOffset: "0mm",
+      pageHeightLimit: "var(--page-height)",
+      fitPadding: "0px"
+    };
+  }
+
+  return {
+    blockMargin: "4mm",
+    contentHeightOffset: "4mm",
+    pageHeightLimit: "calc(var(--page-height) - 8mm)",
+    fitPadding: "8px"
+  };
 }
 
 function readSidebarCollapseState(): SidebarCollapseState {
@@ -536,6 +562,7 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
 
 function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): void {
   const page = snapshot.project.pageSettings;
+  const imageLayout = imageLayoutVarsForPage(page);
   const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
   const columnGapMm = page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
   const pagedContentWidthMm = contentWidthMm * snapshot.pageCount + columnGapMm * Math.max(0, snapshot.pageCount - 1);
@@ -551,6 +578,10 @@ function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): 
   root.style.setProperty("--line-height", String(page.lineHeight));
   root.style.setProperty("--paragraph-spacing", `${page.paragraphSpacingMm}mm`);
   root.style.setProperty("--image-max-height", `${page.imageMaxHeightMm}mm`);
+  root.style.setProperty("--image-block-margin", imageLayout.blockMargin);
+  root.style.setProperty("--image-content-height-offset", imageLayout.contentHeightOffset);
+  root.style.setProperty("--image-page-height-limit", imageLayout.pageHeightLimit);
+  root.style.setProperty("--image-fit-padding", imageLayout.fitPadding);
   root.style.setProperty("--page-gap", `${PAGE_GAP_MM}mm`);
   root.style.setProperty("--content-width", "calc(var(--page-width) - var(--margin-left) - var(--margin-right))");
   root.style.setProperty("--content-height", "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))");
@@ -1448,6 +1479,7 @@ export function EditorShell() {
   }
 
   const stylePageSettings = project.pageSettings;
+  const imageLayout = imageLayoutVarsForPage(stylePageSettings);
   const pageStyle = {
     "--page-width": `${stylePageSettings.pageWidthMm}mm`,
     "--page-height": `${stylePageSettings.pageHeightMm}mm`,
@@ -1462,6 +1494,10 @@ export function EditorShell() {
     "--line-height": stylePageSettings.lineHeight,
     "--paragraph-spacing": `${stylePageSettings.paragraphSpacingMm}mm`,
     "--image-max-height": `${stylePageSettings.imageMaxHeightMm}mm`,
+    "--image-block-margin": imageLayout.blockMargin,
+    "--image-content-height-offset": imageLayout.contentHeightOffset,
+    "--image-page-height-limit": imageLayout.pageHeightLimit,
+    "--image-fit-padding": imageLayout.fitPadding,
     "--page-gap": `${PAGE_GAP_MM}mm`,
     "--content-width": "calc(var(--page-width) - var(--margin-left) - var(--margin-right))",
     "--content-height": "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))",
