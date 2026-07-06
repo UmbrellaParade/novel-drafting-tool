@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TextAlign from "@tiptap/extension-text-align";
-import Underline from "@tiptap/extension-underline";
 import { NodeSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -141,7 +140,6 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       StarterKit.configure({
         horizontalRule: false
       }),
-      Underline,
       FontSizeMark,
       BlockFontSizeExtension,
       BlockLineHeightExtension,
