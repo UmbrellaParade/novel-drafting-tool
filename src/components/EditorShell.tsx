@@ -105,6 +105,8 @@ type RasterPdfBuildResult = {
   missingPagesForShimauma: number;
 };
 
+type RasterPdfBuildProgress = (pageIndex: number, totalPages: number) => void;
+
 type SidebarPanelId = "outline" | "toc" | "project" | "qr" | "drive" | "check";
 type SidebarCollapseState = Record<SidebarPanelId, boolean>;
 
@@ -441,23 +443,54 @@ async function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> 
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnapshot): Promise<RasterPdfBuildResult> {
+async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnapshot, onProgress?: RasterPdfBuildProgress): Promise<RasterPdfBuildResult> {
   const [{ default: html2canvas }, { PDFDocument }] = await Promise.all([import("html2canvas"), import("pdf-lib")]);
   await waitForPdfExportDom(root);
 
-  const pageElements = Array.from(root.querySelectorAll<HTMLElement>(".pdf-export-page"));
-  if (pageElements.length !== snapshot.pageCount) {
-    throw new Error(`原稿ツールのページ数とPDF化するページ数が一致しません。原稿: ${snapshot.pageCount}ページ / PDF化対象: ${pageElements.length}ページ`);
+  const pageElement = root.querySelector<HTMLElement>(".pdf-export-page");
+  const flow = root.querySelector<HTMLElement>(".pdf-export-flow");
+  if (!pageElement || !flow) {
+    throw new Error("PDF用ページを作成できませんでした。");
   }
 
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle(snapshot.project.title);
 
+  const pageSettings = snapshot.project.pageSettings;
   const pageWidthPt = mmToPt(snapshot.project.pageSettings.pageWidthMm);
   const pageHeightPt = mmToPt(snapshot.project.pageSettings.pageHeightMm);
   const renderScale = PDF_EXPORT_DPI / 96;
+  const contentWidthMm = Math.max(1, pageSettings.pageWidthMm - pageSettings.marginLeftMm - pageSettings.marginRightMm);
+  const pagePitchMm = contentWidthMm + pageSettings.marginLeftMm + pageSettings.marginRightMm + PAGE_GAP_MM;
 
-  for (const pageElement of pageElements) {
+  for (let pageIndex = 0; pageIndex < snapshot.pageCount; pageIndex += 1) {
+    pageElement.dataset.pageNumber = String(pageIndex + 1);
+    const header = pageElement.querySelector<HTMLElement>(".pdf-export-page-header");
+    if (header) {
+      header.replaceChildren();
+      const title = snapshot.sectionTitles[pageIndex] ?? "";
+      if (title) {
+        const span = document.createElement("span");
+        span.textContent = title;
+        header.append(span);
+      }
+    }
+
+    const footer = pageElement.querySelector<HTMLElement>(".pdf-export-page-footer");
+    if (footer) {
+      footer.replaceChildren();
+      if (pageSettings.showPageNumber) {
+        const span = document.createElement("span");
+        span.textContent = String(pageIndex + 1);
+        footer.append(span);
+      }
+    }
+
+    flow.style.marginLeft = `-${pageIndex * pagePitchMm}mm`;
+    onProgress?.(pageIndex, snapshot.pageCount);
+    await nextAnimationFrame();
+
+    const pageRect = pageElement.getBoundingClientRect();
     const canvas = await html2canvas(pageElement, {
       backgroundColor: "#ffffff",
       scale: renderScale,
@@ -467,16 +500,16 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
       imageTimeout: 30000,
       scrollX: 0,
       scrollY: 0,
-      windowWidth: Math.ceil(pageElement.scrollWidth),
-      windowHeight: Math.ceil(pageElement.scrollHeight)
+      windowWidth: Math.ceil(pageRect.width),
+      windowHeight: Math.ceil(pageRect.height)
     });
     const imageBytes = await canvasToPngBytes(canvas);
     canvas.width = 0;
     canvas.height = 0;
 
     const image = await pdfDoc.embedPng(imageBytes);
-    const page = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
-    page.drawImage(image, {
+    const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+    pdfPage.drawImage(image, {
       x: 0,
       y: 0,
       width: pageWidthPt,
@@ -485,7 +518,7 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
   }
 
   const bytes = await pdfDoc.save();
-  const pageCount = pageElements.length;
+  const pageCount = snapshot.pageCount;
   return {
     bytes: new Uint8Array(bytes),
     pageCount,
@@ -520,15 +553,13 @@ function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): 
 
 function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
   const page = snapshot.project.pageSettings;
-  const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
-  const pagePitchMm = contentWidthMm + page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
   const root = document.createElement("div");
   root.className = "pdf-export-document";
   root.lang = "ja";
   root.setAttribute("aria-hidden", "true");
   setPdfExportStyleVars(root, snapshot);
 
-  for (let pageIndex = 0; pageIndex < snapshot.pageCount; pageIndex += 1) {
+  for (let pageIndex = 0; pageIndex < 1; pageIndex += 1) {
     const pageElement = document.createElement("section");
     pageElement.className = "pdf-export-page";
     pageElement.dataset.pageNumber = String(pageIndex + 1);
@@ -547,7 +578,6 @@ function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
     contentWindow.className = "pdf-export-content-window";
     const flow = document.createElement("div");
     flow.className = "pdf-export-flow manuscript-prose";
-    flow.style.marginLeft = `-${pageIndex * pagePitchMm}mm`;
     flow.innerHTML = snapshot.chapter.content;
     contentWindow.append(flow);
     pageElement.append(contentWindow);
@@ -1647,7 +1677,7 @@ export function EditorShell() {
     downloadBlob(new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" }), result.fileName);
     setStatusText(
       result.missingPagesForShimauma > 0
-        ? `PDFをダウンロードしました。しまうま出稿前にあと${result.missingPagesForShimauma}ページ分の調整が必要です`
+        ? `PDFをダウンロードしました。しまうま入稿条件: 総ページ数が4の倍数ではありません（現在${result.pageCount}ページ、あと${result.missingPagesForShimauma}ページで4の倍数）。これは原稿ツールとPDFのページ数ズレではありません。`
         : "PDFをダウンロードしました"
     );
   };
@@ -1683,7 +1713,9 @@ export function EditorShell() {
       await nextAnimationFrame();
       await nextAnimationFrame();
 
-      const result = await buildRasterPdfFromDom(exportRoot, snapshot);
+      const result = await buildRasterPdfFromDom(exportRoot, snapshot, (pageIndex, totalPages) => {
+        setStatusText(`PDF作成中: ${pageIndex + 1}/${totalPages}ページ`);
+      });
       if (result.pageCount !== exportPageCount) {
         throw new Error(`原稿ツールとPDFのページ数が一致しません。原稿: ${exportPageCount}ページ / PDF: ${result.pageCount}ページ`);
       }
@@ -2749,3 +2781,4 @@ function NumberField({
     </label>
   );
 }
+
