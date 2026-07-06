@@ -76,8 +76,9 @@ const FONT_SIZE_SCOPES = {
 } as const;
 
 const LINE_HEIGHT_BLOCK_TYPES = new Set(["paragraph", "heading", "blockquote", "listItem"]);
-const EDITOR_HTML_COMMIT_DELAY_MS = 1200;
-const EDITOR_HTML_IDLE_TIMEOUT_MS = 1800;
+const EDITOR_HTML_COMMIT_DELAY_MS = 2400;
+const EDITOR_HTML_BLUR_COMMIT_DELAY_MS = 250;
+const EDITOR_HTML_IDLE_TIMEOUT_MS = 3200;
 const IMAGE_FIT_PADDING_PX = 8;
 
 function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
@@ -106,6 +107,33 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   useEffect(() => {
     onPasteLayoutHintsRef.current = onPasteLayoutHints;
   }, [onPasteLayoutHints]);
+
+  const clearScheduledHtmlCommit = () => {
+    if (onUpdateTimerRef.current !== null) {
+      clearTimeout(onUpdateTimerRef.current);
+      onUpdateTimerRef.current = null;
+    }
+    if (onUpdateIdleRef.current !== null) {
+      window.cancelIdleCallback?.(onUpdateIdleRef.current);
+      onUpdateIdleRef.current = null;
+    }
+  };
+
+  const scheduleHtmlCommit = (updatedEditor: Editor, delayMs = EDITOR_HTML_COMMIT_DELAY_MS) => {
+    clearScheduledHtmlCommit();
+    onUpdateTimerRef.current = setTimeout(() => {
+      onUpdateTimerRef.current = null;
+      const commitHtml = () => {
+        onUpdateIdleRef.current = null;
+        onChangeRef.current(updatedEditor.getHTML());
+      };
+      if (window.requestIdleCallback) {
+        onUpdateIdleRef.current = window.requestIdleCallback(commitHtml, { timeout: EDITOR_HTML_IDLE_TIMEOUT_MS });
+      } else {
+        commitHtml();
+      }
+    }, delayMs);
+  };
 
   const editor = useEditor({
     extensions: [
@@ -201,38 +229,12 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         onTypingActivityRef.current?.();
       }
 
-      // getHTML()は重いため、80msのdebounceで連続呼び出しをまとめる
-      // （画像を1pxドラッグするたびにシリアライズが走るのを防ぐ）
-      if (onUpdateTimerRef.current !== null) {
-        clearTimeout(onUpdateTimerRef.current);
-      }
-      if (onUpdateIdleRef.current !== null) {
-        window.cancelIdleCallback?.(onUpdateIdleRef.current);
-        onUpdateIdleRef.current = null;
-      }
-      onUpdateTimerRef.current = setTimeout(() => {
-        onUpdateTimerRef.current = null;
-        const commitHtml = () => {
-          onUpdateIdleRef.current = null;
-          onChangeRef.current(editor.getHTML());
-        };
-        if (window.requestIdleCallback) {
-          onUpdateIdleRef.current = window.requestIdleCallback(commitHtml, { timeout: EDITOR_HTML_IDLE_TIMEOUT_MS });
-        } else {
-          commitHtml();
-        }
-      }, EDITOR_HTML_COMMIT_DELAY_MS);
+      // getHTML() can serialize tens of MB when images are embedded, so never do it
+      // directly inside the editing transaction.
+      scheduleHtmlCommit(editor);
     },
     onBlur: ({ editor }) => {
-      if (onUpdateTimerRef.current !== null) {
-        clearTimeout(onUpdateTimerRef.current);
-        onUpdateTimerRef.current = null;
-      }
-      if (onUpdateIdleRef.current !== null) {
-        window.cancelIdleCallback?.(onUpdateIdleRef.current);
-        onUpdateIdleRef.current = null;
-      }
-      onChangeRef.current(editor.getHTML());
+      scheduleHtmlCommit(editor, EDITOR_HTML_BLUR_COMMIT_DELAY_MS);
     }
   });
 
@@ -248,12 +250,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   // コンポーネントアンマウント時にタイマーをクリア
   useEffect(() => {
     return () => {
-      if (onUpdateTimerRef.current !== null) {
-        clearTimeout(onUpdateTimerRef.current);
-      }
-      if (onUpdateIdleRef.current !== null) {
-        window.cancelIdleCallback?.(onUpdateIdleRef.current);
-      }
+      clearScheduledHtmlCommit();
     };
   }, []);
 
