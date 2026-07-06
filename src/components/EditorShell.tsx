@@ -1645,7 +1645,11 @@ export function EditorShell() {
 
   const downloadPdfResult = (result: RasterPdfBuildResult) => {
     downloadBlob(new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" }), result.fileName);
-    setStatusText("PDFをダウンロードしました");
+    setStatusText(
+      result.missingPagesForShimauma > 0
+        ? `PDFをダウンロードしました。しまうま出稿前にあと${result.missingPagesForShimauma}ページ分の調整が必要です`
+        : "PDFをダウンロードしました"
+    );
   };
 
   const exportPdf = async () => {
@@ -1667,14 +1671,6 @@ export function EditorShell() {
       };
       const measuredLayout = await measurePdfExportLayout(baseSnapshot);
       const exportPageCount = measuredLayout.pageCount;
-      const missingPages = missingPagesForShimauma(latestProject, exportPageCount);
-      if (missingPages > 0) {
-        window.alert(
-          `しまうま出稿では4ページ単位が必要です。現在の原稿ツールは${exportPageCount}ページなので、本文・奥付・QRページなど意図した内容であと${missingPages}ページ分を調整してからPDF保存してください。`
-        );
-        setStatusText("PDFは4ページ単位に調整が必要です");
-        return;
-      }
 
       const snapshot: PdfExportSnapshot = {
         project: latestProject,
