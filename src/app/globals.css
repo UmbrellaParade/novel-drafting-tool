@@ -1543,7 +1543,7 @@ h1 {
 }
 
 .manuscript-prose .manuscript-toc .toc-list {
-  margin: 0;
+  margin: var(--toc-title-gap, 18pt) 0 0;
   padding: 0;
   list-style: none;
 }
