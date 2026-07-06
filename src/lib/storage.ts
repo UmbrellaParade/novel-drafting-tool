@@ -1,11 +1,18 @@
 import type { ManuscriptProject } from "./types";
 import { normalizeProject, sanitizeFileName } from "./defaultProject";
+import {
+  PROJECT_STORE,
+  collectReferencedAssetIds,
+  exportAssetsAsDataUrls,
+  importAssetsFromDataUrls,
+  openAppDb,
+  purgeUnreferencedAssets,
+  toPersistedImageHtml,
+  toRuntimeImageHtml
+} from "./imageAssets";
 
 const STORAGE_KEY = "umbrella-parade:novel-drafting-tool:project";
-const DB_NAME = "umbrella-parade-novel-drafting-tool";
-const DB_VERSION = 1;
-const PROJECT_STORE = "projects";
-const INDEXED_DB_TIMEOUT_MS = 2500;
+const INDEXED_DB_TIMEOUT_MS = 8000;
 
 type StoredProjectRecord = {
   id: string;
@@ -13,13 +20,43 @@ type StoredProjectRecord = {
   updatedAt: string;
 };
 
+// JSON書き出し形式: 画像バイナリは assets に data URI で同梱する
+export type ExportedProject = ManuscriptProject & {
+  assets?: Record<string, string>;
+};
+
+// 保存用: 本文中の blob: URL を asset:// 参照に置き換えたプロジェクト
+export function toPersistableProject(project: ManuscriptProject): ManuscriptProject {
+  return {
+    ...project,
+    chapters: project.chapters.map((chapter) => ({
+      ...chapter,
+      content: toPersistedImageHtml(chapter.content)
+    }))
+  };
+}
+
+// 実行時用: asset:// 参照を blob: URL に解決したプロジェクト。
+// 旧形式（data URI直埋め込み）はここでアセットに移行される。
+export async function toRuntimeProject(project: ManuscriptProject): Promise<{ project: ManuscriptProject; migrated: boolean }> {
+  let migrated = false;
+  const chapters = [];
+  for (const chapter of project.chapters) {
+    const result = await toRuntimeImageHtml(chapter.content);
+    migrated = migrated || result.migrated;
+    chapters.push({ ...chapter, content: result.html });
+  }
+  return { project: { ...project, chapters }, migrated };
+}
+
 export async function saveProjectToBrowser(project: ManuscriptProject): Promise<void> {
+  const persistable = toPersistableProject(project);
   try {
-    await withTimeout(saveProjectToIndexedDb(project), INDEXED_DB_TIMEOUT_MS);
+    await withTimeout(saveProjectToIndexedDb(persistable), INDEXED_DB_TIMEOUT_MS);
     localStorage.setItem(`${STORAGE_KEY}:backend`, "indexeddb");
   } catch (error) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
     } catch {
       throw new Error(
         error instanceof Error
@@ -31,10 +68,35 @@ export async function saveProjectToBrowser(project: ManuscriptProject): Promise<
 }
 
 export async function loadProjectFromBrowser(): Promise<ManuscriptProject | null> {
+  const stored = await loadStoredProject();
+  if (!stored) {
+    return null;
+  }
+
+  const { project, migrated } = await toRuntimeProject(normalizeProject(stored));
+  if (migrated) {
+    // 旧形式からの移行を確定させる（次回以降の再移行と重複アセットを防ぐ）
+    try {
+      await saveProjectToBrowser(project);
+    } catch {
+      // 保存に失敗しても編集は続行できる
+    }
+  }
+
+  try {
+    await purgeUnreferencedAssets(collectReferencedAssetIds(project.chapters.map((chapter) => chapter.content)));
+  } catch {
+    // 掃除の失敗は無視してよい
+  }
+
+  return project;
+}
+
+async function loadStoredProject(): Promise<ManuscriptProject | null> {
   try {
     const indexedProject = await withTimeout(loadProjectFromIndexedDb(), INDEXED_DB_TIMEOUT_MS);
     if (indexedProject) {
-      return normalizeProject(indexedProject);
+      return indexedProject;
     }
   } catch {
     // Fall back to the legacy localStorage copy below.
@@ -46,14 +108,14 @@ export async function loadProjectFromBrowser(): Promise<ManuscriptProject | null
   }
 
   try {
-    return normalizeProject(JSON.parse(raw) as ManuscriptProject);
+    return JSON.parse(raw) as ManuscriptProject;
   } catch {
     return null;
   }
 }
 
 async function saveProjectToIndexedDb(project: ManuscriptProject): Promise<void> {
-  const db = await openProjectDb();
+  const db = await openAppDb();
   try {
     await writeProjectToIndexedDb(db, project);
   } finally {
@@ -62,7 +124,7 @@ async function saveProjectToIndexedDb(project: ManuscriptProject): Promise<void>
 }
 
 async function loadProjectFromIndexedDb(): Promise<ManuscriptProject | null> {
-  const db = await openProjectDb();
+  const db = await openAppDb();
   try {
     return await readProjectFromIndexedDb(db);
   } finally {
@@ -77,26 +139,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
       .then((value) => resolve(value))
       .catch((error) => reject(error))
       .finally(() => window.clearTimeout(handle));
-  });
-}
-
-function openProjectDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("IndexedDB is not available"));
-      return;
-    }
-
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(PROJECT_STORE)) {
-        db.createObjectStore(PROJECT_STORE, { keyPath: "id" });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDBを開けませんでした。"));
-    request.onblocked = () => reject(new Error("IndexedDBが別のタブで使用中です。"));
   });
 }
 
@@ -131,8 +173,21 @@ function readProjectFromIndexedDb(db: IDBDatabase): Promise<ManuscriptProject | 
   });
 }
 
-export function exportProjectJson(project: ManuscriptProject): void {
-  const blob = new Blob([JSON.stringify(project, null, 2)], {
+// JSON文字列（画像はdata URIで同梱）を作る。Drive保存とJSON書き出しで共用。
+export async function buildExportedProjectJson(project: ManuscriptProject): Promise<string> {
+  const persistable = toPersistableProject(project);
+  const assetIds = collectReferencedAssetIds(persistable.chapters.map((chapter) => chapter.content));
+  const assets = await exportAssetsAsDataUrls(assetIds);
+  const exported: ExportedProject = {
+    ...persistable,
+    ...(Object.keys(assets).length > 0 ? { assets } : {})
+  };
+  return JSON.stringify(exported, null, 2);
+}
+
+export async function exportProjectJson(project: ManuscriptProject): Promise<void> {
+  const json = await buildExportedProjectJson(project);
+  const blob = new Blob([json], {
     type: "application/json;charset=utf-8"
   });
   downloadBlob(blob, `${sanitizeFileName(project.title)}.json`);
@@ -158,11 +213,17 @@ export function readJsonFile(file: File): Promise<ManuscriptProject> {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("JSONを読み込めませんでした"));
     reader.onload = () => {
-      try {
-        resolve(normalizeProject(JSON.parse(String(reader.result)) as ManuscriptProject));
-      } catch {
-        reject(new Error("JSON形式を確認してください"));
-      }
+      void (async () => {
+        try {
+          const parsed = JSON.parse(String(reader.result)) as ExportedProject;
+          const { assets, ...projectData } = parsed;
+          await importAssetsFromDataUrls(assets);
+          const { project } = await toRuntimeProject(normalizeProject(projectData as ManuscriptProject));
+          resolve(project);
+        } catch {
+          reject(new Error("JSON形式を確認してください"));
+        }
+      })();
     };
     reader.readAsText(file, "utf-8");
   });

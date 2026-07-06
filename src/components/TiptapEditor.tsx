@@ -25,7 +25,8 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, BlockLineHeightExtension, FontSizeMark, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, FontSizeMark, ImageAssetIdExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode } from "./tiptapExtensions";
+import { internImageBlob, internImageDataUrl } from "@/lib/imageAssets";
 
 type TiptapEditorProps = {
   content: string;
@@ -144,6 +145,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       FontSizeMark,
       BlockFontSizeExtension,
       BlockLineHeightExtension,
+      ImageAssetIdExtension,
       Image.configure({
         allowBase64: true,
         inline: false,
@@ -486,62 +488,68 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const src = String(reader.result);
-      if (mode === "replace") {
-        const target = imageReplaceTargetRef.current;
-        imageReplaceTargetRef.current = null;
-        const position = target ? resolveImagePosition(editor, target) : null;
-        const imageNode = position !== null ? editor.state.doc.nodeAt(position) : null;
-        const replaced = withStablePageStageScroll(
-          editor,
-          () =>
-            Boolean(
-              position !== null &&
-                imageNode &&
-                imageNode.type.name === "image" &&
-                editor
-                  .chain()
-                  .focus()
-                  .insertContentAt(
-                    { from: position, to: position + imageNode.nodeSize },
-                    {
-                      type: "image",
-                      attrs: {
-                        ...imageNode.attrs,
-                        src,
-                        alt: file.name,
-                        title: file.name
+    void internImageBlob(file)
+      .then(({ assetId, url: src }) => {
+        if (mode === "replace") {
+          const target = imageReplaceTargetRef.current;
+          imageReplaceTargetRef.current = null;
+          const position = target ? resolveImagePosition(editor, target) : null;
+          const imageNode = position !== null ? editor.state.doc.nodeAt(position) : null;
+          const replaced = withStablePageStageScroll(
+            editor,
+            () =>
+              Boolean(
+                position !== null &&
+                  imageNode &&
+                  imageNode.type.name === "image" &&
+                  editor
+                    .chain()
+                    .focus()
+                    .insertContentAt(
+                      { from: position, to: position + imageNode.nodeSize },
+                      {
+                        type: "image",
+                        attrs: {
+                          ...imageNode.attrs,
+                          src,
+                          assetId,
+                          alt: file.name,
+                          title: file.name
+                        }
                       }
-                    }
-                  )
-                  .run()
-            )
-        );
+                    )
+                    .run()
+              )
+          );
 
-        if (!replaced) {
-          window.alert("置換する画像をもう一度選択してください。");
-        } else if (target) {
-          syncRenderedImage(editor, target, { src, alt: file.name, title: file.name });
+          if (!replaced) {
+            window.alert("置換する画像をもう一度選択してください。");
+          } else if (target) {
+            syncRenderedImage(editor, target, { src, alt: file.name, title: file.name });
+          }
+          return;
         }
-        return;
-      }
 
-      withStablePageStageScroll(editor, () => {
-        editor
-          .chain()
-          .focus()
-          .setImage({
-            src,
-            alt: file.name,
-            title: file.name,
-            width: Math.round(readPageWidthPx(editor) * 0.75)
-          })
-          .run();
+        withStablePageStageScroll(editor, () => {
+          editor
+            .chain()
+            .focus()
+            .insertContent({
+              type: "image",
+              attrs: {
+                src,
+                assetId,
+                alt: file.name,
+                title: file.name,
+                width: Math.round(readPageWidthPx(editor) * 0.75)
+              }
+            })
+            .run();
+        });
+      })
+      .catch(() => {
+        window.alert("画像を読み込めませんでした。");
       });
-    };
-    reader.readAsDataURL(file);
   };
 
   const prepareReplaceImage = () => {
@@ -1232,16 +1240,20 @@ function withStablePageStageScroll<T>(editor: Editor, action: () => T): T {
 
 async function insertClipboardImageFiles(editor: Editor, files: File[]): Promise<void> {
   for (const file of files) {
-    const src = await fileToDataUrl(file);
+    const { assetId, url: src } = await internImageBlob(file);
     withStablePageStageScroll(editor, () => {
       editor
         .chain()
         .focus()
-        .setImage({
-          src,
-          alt: file.name,
-          title: file.name,
-          width: Math.round(readPageWidthPx(editor) * 0.75)
+        .insertContent({
+          type: "image",
+          attrs: {
+            src,
+            assetId,
+            alt: file.name,
+            title: file.name,
+            width: Math.round(readPageWidthPx(editor) * 0.75)
+          }
         })
         .run();
     });
@@ -1259,7 +1271,15 @@ async function insertPastedHtmlWithImages(editor: Editor, html: string): Promise
         return;
       }
 
-      image.setAttribute("src", await toEmbeddableImageSrc(src));
+      const embeddableSrc = await toEmbeddableImageSrc(src);
+      if (embeddableSrc.startsWith("data:")) {
+        // 画像バイナリは本文に埋め込まず、アセットとして分離保存する
+        const { assetId, url } = await internImageDataUrl(embeddableSrc);
+        image.setAttribute("src", url);
+        image.setAttribute("data-asset-id", assetId);
+      } else {
+        image.setAttribute("src", embeddableSrc);
+      }
       image.setAttribute("alt", image.getAttribute("alt") || image.getAttribute("title") || `貼り付け画像 ${index + 1}`);
       image.setAttribute("title", image.getAttribute("title") || image.getAttribute("alt") || `貼り付け画像 ${index + 1}`);
     })

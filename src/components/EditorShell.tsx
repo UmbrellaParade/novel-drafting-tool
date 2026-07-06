@@ -28,6 +28,8 @@ import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEdit
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
+import { blobToDataUrl } from "@/lib/imageAssets";
+import { buildManuscriptFontEmbedCss } from "@/lib/pdfFonts";
 import {
   clearGoogleDriveSettings,
   connectGoogleDrive,
@@ -478,8 +480,95 @@ async function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> 
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+// html-to-imageはクローン時に font-size を「floor(値)-0.1px」に縮める内部ハックを持つ
+// （例: 11.7333px → 10.9px）。日本語組版では字送りが変わり折り返しがズレるため、
+// 生成されたSVGを元DOMと突き合わせて正しいfont-sizeへ書き戻す。
+function correctSvgFontSizes(originalRoot: HTMLElement, svgDataUrl: string): string {
+  const commaIndex = svgDataUrl.indexOf(",");
+  const svgText = decodeURIComponent(svgDataUrl.slice(commaIndex + 1));
+  const parsed = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  const cloneRoot = parsed.querySelector("foreignObject > *");
+  if (!cloneRoot) {
+    return svgDataUrl;
+  }
+
+  // クローン側には擬似要素・フォント用の<style>タグが追加されるため除外して比較する
+  const withoutStyleTags = (elements: Element[]) => elements.filter((element) => element.tagName.toLowerCase() !== "style");
+  const originals = withoutStyleTags([originalRoot, ...Array.from(originalRoot.querySelectorAll("*"))]);
+  const clones = withoutStyleTags([cloneRoot, ...Array.from(cloneRoot.querySelectorAll("*"))]);
+  if (originals.length !== clones.length) {
+    window.console.warn(`PDF書き出し: フォントサイズ補正をスキップ（要素数不一致 ${originals.length} vs ${clones.length}）`);
+    return svgDataUrl;
+  }
+
+  for (let index = 0; index < originals.length; index += 1) {
+    const original = originals[index];
+    const clone = clones[index];
+    if (original.tagName.toLowerCase() !== clone.tagName.toLowerCase()) {
+      return svgDataUrl;
+    }
+
+    const fontSize = window.getComputedStyle(original).fontSize;
+    if (fontSize) {
+      // style属性内で後に書いた宣言が優先される
+      clone.setAttribute("style", `${clone.getAttribute("style") ?? ""}; font-size: ${fontSize};`);
+    }
+  }
+
+  const fixedSvg = new XMLSerializer().serializeToString(parsed);
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(fixedSvg)}`;
+}
+
+async function svgDataUrlToCanvas(svgDataUrl: string, widthPx: number, heightPx: number, pixelRatio: number): Promise<HTMLCanvasElement> {
+  const image = new Image();
+  image.decoding = "sync";
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("PDF用ページ画像を描画できませんでした。"));
+    image.src = svgDataUrl;
+  });
+  // SVG内に埋め込んだWebフォントの読み込みを確実に反映させる
+  await nextAnimationFrame();
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(widthPx * pixelRatio));
+  canvas.height = Math.max(1, Math.round(heightPx * pixelRatio));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("PDF用ページ画像を作成できませんでした。");
+  }
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// 画像srcをdata URIに変換しておく（SVG foreignObject描画は外部参照を解決できないため）
+async function inlineImagesForPdfExport(root: HTMLElement): Promise<void> {
+  const images = Array.from(root.querySelectorAll<HTMLImageElement>("img"));
+  await Promise.all(
+    images.map(async (image) => {
+      const src = image.getAttribute("src") ?? "";
+      if (!src || src.startsWith("data:")) {
+        return;
+      }
+
+      try {
+        const blob = await (await fetch(src)).blob();
+        image.setAttribute("src", await blobToDataUrl(blob));
+      } catch {
+        // 変換できない画像は元のsrcのまま描画を試みる
+      }
+    })
+  );
+}
+
 async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnapshot, onProgress?: RasterPdfBuildProgress): Promise<RasterPdfBuildResult> {
-  const [{ default: html2canvas }, { PDFDocument }] = await Promise.all([import("html2canvas"), import("pdf-lib")]);
+  // html2canvasは独自のテキスト描画のため日本語・ルビの折り返しが編集画面とズレる。
+  // html-to-image(SVG foreignObject)はブラウザ本来のレンダリングをそのまま使うので、
+  // 編集画面と同じ改行・同じルビ配置でPDF化できる。
+  const [htmlToImage, { PDFDocument }] = await Promise.all([import("html-to-image"), import("pdf-lib")]);
+  await inlineImagesForPdfExport(root);
   await waitForPdfExportDom(root);
 
   const pageElement = root.querySelector<HTMLElement>(".pdf-export-page");
@@ -490,6 +579,17 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
 
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle(snapshot.project.title);
+
+  // フォント埋め込みCSSは全ページ共通なので1回だけ作る。
+  // 原稿に含まれる文字のサブセットだけを埋め込む（全部埋め込むと数十MBになり
+  // SVG内でフォントが適用されず、編集画面と折り返しがズレる）。
+  let fontEmbedCSS: string | undefined;
+  try {
+    fontEmbedCSS = await buildManuscriptFontEmbedCss(root.textContent ?? "");
+  } catch {
+    // 取得に失敗した場合はhtml-to-image標準の埋め込みに任せる
+    fontEmbedCSS = undefined;
+  }
 
   const pageSettings = snapshot.project.pageSettings;
   const pageWidthPt = mmToPt(snapshot.project.pageSettings.pageWidthMm);
@@ -526,18 +626,14 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
     await nextAnimationFrame();
 
     const pageRect = pageElement.getBoundingClientRect();
-    const canvas = await html2canvas(pageElement, {
+    const svgDataUrl = await htmlToImage.toSvg(pageElement, {
       backgroundColor: "#ffffff",
-      scale: renderScale,
-      useCORS: true,
-      allowTaint: false,
-      logging: false,
-      imageTimeout: 30000,
-      scrollX: 0,
-      scrollY: 0,
-      windowWidth: Math.ceil(pageRect.width),
-      windowHeight: Math.ceil(pageRect.height)
+      fontEmbedCSS,
+      skipAutoScale: true,
+      cacheBust: false
     });
+    const correctedSvg = correctSvgFontSizes(pageElement, svgDataUrl);
+    const canvas = await svgDataUrlToCanvas(correctedSvg, pageRect.width, pageRect.height, renderScale);
     const imageBytes = await canvasToPngBytes(canvas);
     canvas.width = 0;
     canvas.height = 0;
@@ -1704,11 +1800,15 @@ export function EditorShell() {
     }
   };
 
-  const exportJson = () => {
-    const latestProject = projectWithLatestContent(project);
-    exportProjectJson(latestProject);
-    flushPendingChapterContent();
-    setStatusText("JSONを書き出し");
+  const exportJson = async () => {
+    try {
+      const latestProject = projectWithLatestContent(project);
+      await exportProjectJson(latestProject);
+      flushPendingChapterContent();
+      setStatusText("JSONを書き出し");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "JSONを書き出せませんでした。");
+    }
   };
 
   const manualSave = async () => {

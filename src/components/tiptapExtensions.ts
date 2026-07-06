@@ -174,6 +174,33 @@ export const BlockLineHeightExtension = Extension.create({
   }
 });
 
+// 画像ノードに data-asset-id を保持させる。
+// 画像バイナリはIndexedDB側（imageAssets.ts）にあり、srcは実行時のみ有効なblob: URL。
+export const ImageAssetIdExtension = Extension.create({
+  name: "imageAssetId",
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: ["image"],
+        attributes: {
+          assetId: {
+            default: null,
+            parseHTML: (element) => element.getAttribute("data-asset-id"),
+            renderHTML: (attributes) => {
+              if (!attributes.assetId) {
+                return {};
+              }
+
+              return { "data-asset-id": attributes.assetId };
+            }
+          }
+        }
+      }
+    ];
+  }
+});
+
 export const PageBreakBeforeExtension = Extension.create({
   name: "pageBreakBefore",
 

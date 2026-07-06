@@ -1,5 +1,6 @@
 import type { ManuscriptProject } from "./types";
 import { sanitizeFileName } from "./defaultProject";
+import { buildExportedProjectJson } from "./storage";
 
 declare global {
   interface Window {
@@ -227,6 +228,8 @@ async function saveProject(project: ManuscriptProject, folderId = project.drive?
   }
 
   const boundary = `drafting-tool-${Date.now()}`;
+  // 画像はdata URIとしてassetsに同梱される（本文HTMLはasset://参照のまま軽量）
+  const projectJson = await buildExportedProjectJson(project);
   const body = [
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
@@ -235,7 +238,7 @@ async function saveProject(project: ManuscriptProject, folderId = project.drive?
     `--${boundary}`,
     "Content-Type: application/json; charset=UTF-8",
     "",
-    JSON.stringify(project, null, 2),
+    projectJson,
     `--${boundary}--`
   ].join("\r\n");
 
