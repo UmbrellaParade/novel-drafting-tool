@@ -877,6 +877,32 @@ function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
   };
 }
 
+function shouldStartInsertedBlockOnNewPage(editor: Editor, insertPosition: number): boolean {
+  if (insertPosition <= 1) {
+    return false;
+  }
+
+  if (editor.state.doc.textBetween(0, insertPosition, "", "").trim()) {
+    return true;
+  }
+
+  let hasAtomicContentBefore = false;
+  editor.state.doc.nodesBetween(0, insertPosition, (node, position) => {
+    if (hasAtomicContentBefore || position >= insertPosition) {
+      return false;
+    }
+
+    if (node.isAtom && !node.isText) {
+      hasAtomicContentBefore = true;
+      return false;
+    }
+
+    return true;
+  });
+
+  return hasAtomicContentBefore;
+}
+
 function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries: TocEntry[]): boolean {
   const attrs = tableOfContentsAttrs(settings, entries);
   let changed = false;
@@ -1698,7 +1724,10 @@ export function EditorShell() {
       .insertContentAt(insertPosition, [
         {
           type: "tableOfContents",
-          attrs: tableOfContentsAttrs(project.tocSettings, tocEntries)
+          attrs: {
+            ...tableOfContentsAttrs(project.tocSettings, tocEntries),
+            pageBreakBefore: shouldStartInsertedBlockOnNewPage(activeEditor, insertPosition)
+          }
         },
         {
           type: "paragraph"
