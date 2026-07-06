@@ -107,7 +107,7 @@ type RasterPdfBuildResult = {
 
 type RasterPdfBuildProgress = (pageIndex: number, totalPages: number) => void;
 
-type SidebarPanelId = "outline" | "toc" | "project" | "qr" | "drive" | "check";
+type SidebarPanelId = "toc" | "project" | "qr" | "drive" | "check";
 type SidebarCollapseState = Record<SidebarPanelId, boolean>;
 
 type PreviewPageMeasurement = {
@@ -127,7 +127,6 @@ type ImageLayoutVars = {
 
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "umbrella-parade:sidebar-collapsed-panels";
 const DEFAULT_SIDEBAR_COLLAPSE_STATE: SidebarCollapseState = {
-  outline: false,
   toc: false,
   project: false,
   qr: false,
@@ -170,7 +169,7 @@ function imageLayoutVarsForPage(settings: PageSettings): ImageLayoutVars {
   return {
     blockMargin: "4mm",
     contentHeightOffset: "4mm",
-    fragmentationGuard: "0.8mm",
+    fragmentationGuard: "0.25mm",
     pageHeightLimit: "calc(var(--page-height) - 8mm)",
     fitPadding: "8px"
   };
@@ -190,7 +189,6 @@ function readSidebarCollapseState(): SidebarCollapseState {
     const parsed = JSON.parse(saved) as Partial<Record<SidebarPanelId, unknown>>;
     return {
       ...DEFAULT_SIDEBAR_COLLAPSE_STATE,
-      outline: typeof parsed.outline === "boolean" ? parsed.outline : DEFAULT_SIDEBAR_COLLAPSE_STATE.outline,
       toc: typeof parsed.toc === "boolean" ? parsed.toc : DEFAULT_SIDEBAR_COLLAPSE_STATE.toc,
       project: typeof parsed.project === "boolean" ? parsed.project : DEFAULT_SIDEBAR_COLLAPSE_STATE.project,
       qr: typeof parsed.qr === "boolean" ? parsed.qr : DEFAULT_SIDEBAR_COLLAPSE_STATE.qr,
@@ -2109,7 +2107,6 @@ export function EditorShell() {
 
       <div className="workspace-grid">
         <aside className={`left-rail mobile-panel ${mobileTab === "chapters" ? "is-mobile-active" : ""}`}>
-          <OutlinePanel items={outlineItems} collapsed={collapsedPanels.outline} onToggle={() => toggleSidebarPanel("outline")} onJump={jumpToHeading} />
           <TableOfContentsPanel
             entries={tocEntries}
             settings={project.tocSettings}
@@ -2118,6 +2115,7 @@ export function EditorShell() {
             onSettingChange={updateTocSetting}
             onInsert={insertTableOfContents}
             onRefresh={refreshTableOfContents}
+            onJump={jumpToHeading}
           />
           <ProjectPanel
             project={project}
@@ -2382,35 +2380,6 @@ function ProjectPanel({
   );
 }
 
-function OutlinePanel({
-  items,
-  collapsed,
-  onToggle,
-  onJump
-}: {
-  items: OutlineItem[];
-  collapsed: boolean;
-  onToggle: () => void;
-  onJump: (index: number) => void;
-}) {
-  return (
-    <CollapsibleToolPanel title="目次" className="outline-panel" collapsed={collapsed} onToggle={onToggle} badge={<span className="mini-badge">H1 {items.length}件</span>}>
-      {items.length ? (
-        <div className="outline-list">
-          {items.map((item) => (
-            <button key={item.id} className="outline-item" type="button" onClick={() => onJump(item.index)}>
-              <FileText size={15} />
-              <span>{item.title}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="empty-note">本文にH1見出しを入れると自動で表示されます。</p>
-      )}
-    </CollapsibleToolPanel>
-  );
-}
-
 function TableOfContentsPanel({
   entries,
   settings,
@@ -2418,7 +2387,8 @@ function TableOfContentsPanel({
   onToggle,
   onSettingChange,
   onInsert,
-  onRefresh
+  onRefresh,
+  onJump
 }: {
   entries: TocEntry[];
   settings: TocSettings;
@@ -2427,6 +2397,7 @@ function TableOfContentsPanel({
   onSettingChange: (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => void;
   onInsert: () => void;
   onRefresh: () => void;
+  onJump: (index: number) => void;
 }) {
   const tocFontSizePt = settings.fontSizePt ?? 9;
   const tocTitleGapPt = settings.titleGapPt ?? 18;
@@ -2506,13 +2477,13 @@ function TableOfContentsPanel({
       </div>
       {entries.length ? (
         <div className="toc-preview-list">
-          {entries.slice(0, 8).map((entry) => (
-            <div key={entry.id} className="toc-preview-item">
+          {entries.map((entry) => (
+            <button key={entry.id} className="toc-preview-item" type="button" onClick={() => onJump(entry.index)}>
+              <FileText size={15} />
               <span>{entry.title}</span>
               <strong>{entry.page ?? "…"}</strong>
-            </div>
+            </button>
           ))}
-          {entries.length > 8 ? <p className="empty-note">ほか {entries.length - 8} 件</p> : null}
         </div>
       ) : (
         <p className="empty-note">H1見出しを本文に入れると目次にできます。</p>
