@@ -102,7 +102,7 @@ function tocItemsFromElement(element: HTMLElement): TocNodeItem[] {
 }
 
 function tocStyle(value: unknown): string {
-  return value === "rain" || value === "antique" || value === "midnight" || value === "classic" ? value : "classic";
+  return value === "rain" || value === "antique" || value === "midnight" || value === "ornate" || value === "classic" ? value : "classic";
 }
 
 function tocItemsAttribute(items: unknown): string {

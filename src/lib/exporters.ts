@@ -753,6 +753,20 @@ img {
     #ffffff;
 }
 
+.manuscript-toc-ornate {
+  padding: 30px 28px 26px;
+  border: 2px solid #111111;
+  box-shadow: inset 0 0 0 3px #ffffff, inset 0 0 0 5px #111111;
+  background:
+    radial-gradient(circle at 24px 24px, transparent 0 12px, #111111 13px 14px, transparent 15px) left top / 72px 72px no-repeat,
+    radial-gradient(circle at 48px 24px, transparent 0 12px, #111111 13px 14px, transparent 15px) right top / 72px 72px no-repeat,
+    radial-gradient(circle at 24px 48px, transparent 0 12px, #111111 13px 14px, transparent 15px) left bottom / 72px 72px no-repeat,
+    radial-gradient(circle at 48px 48px, transparent 0 12px, #111111 13px 14px, transparent 15px) right bottom / 72px 72px no-repeat,
+    linear-gradient(#111111 0 0) center 10px / calc(100% - 104px) 1px no-repeat,
+    linear-gradient(#111111 0 0) center calc(100% - 10px) / calc(100% - 104px) 1px no-repeat,
+    #ffffff;
+}
+
 .qr-card {
   display: block;
   width: min(100%, 74mm);
@@ -782,6 +796,42 @@ img {
 .qr-card-title,
 .qr-card-description {
   display: block;
+}
+
+.qr-card-ornate {
+  padding: 30px 28px 24px;
+  border: 2px solid #111111;
+  text-align: center;
+  box-shadow: inset 0 0 0 3px #ffffff, inset 0 0 0 5px #111111;
+  background:
+    radial-gradient(circle at 24px 24px, transparent 0 12px, #111111 13px 14px, transparent 15px) left top / 72px 72px no-repeat,
+    radial-gradient(circle at 48px 24px, transparent 0 12px, #111111 13px 14px, transparent 15px) right top / 72px 72px no-repeat,
+    radial-gradient(circle at 24px 48px, transparent 0 12px, #111111 13px 14px, transparent 15px) left bottom / 72px 72px no-repeat,
+    radial-gradient(circle at 48px 48px, transparent 0 12px, #111111 13px 14px, transparent 15px) right bottom / 72px 72px no-repeat,
+    linear-gradient(#111111 0 0) center 10px / calc(100% - 104px) 1px no-repeat,
+    linear-gradient(#111111 0 0) center calc(100% - 10px) / calc(100% - 104px) 1px no-repeat,
+    #ffffff;
+}
+
+.qr-card-ornate .qr-card-body,
+.qr-card-ornate .qr-card-caption {
+  display: block;
+}
+
+.qr-card-ornate .qr-card-image {
+  display: block;
+  width: min(68%, 46mm);
+  height: auto;
+  margin: 0 auto 14px;
+}
+
+.qr-card-ornate .qr-card-caption {
+  padding-left: 0;
+}
+
+.qr-card-ornate .qr-card-title {
+  font-size: 1.18em;
+  font-weight: bold;
 }
 
 .qr-card-url {

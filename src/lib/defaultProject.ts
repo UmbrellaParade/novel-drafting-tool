@@ -140,8 +140,8 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
   }
 };
 
-const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight"]);
-const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnight"]);
+const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight", "ornate"]);
+const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnight", "ornate"]);
 
 export const DEFAULT_TOC_SETTINGS: TocSettings = {
   title: "目次",

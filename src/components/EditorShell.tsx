@@ -234,6 +234,11 @@ const QR_CARD_TEMPLATES: Record<QrCardTemplateId, { label: string; description: 
     label: "夜の祝祭",
     description: "濃紺に金の差し色",
     qrDark: "#141c2d"
+  },
+  ornate: {
+    label: "装飾フレーム",
+    description: "四隅の飾り罫と星の額縁",
+    qrDark: "#111111"
   }
 };
 
@@ -257,6 +262,10 @@ const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string
   midnight: {
     label: "傘のアーチ",
     description: "天幕のようなアーチ罫"
+  },
+  ornate: {
+    label: "装飾フレーム",
+    description: "四隅の飾り罫と星を添えた額縁"
   }
 };
 

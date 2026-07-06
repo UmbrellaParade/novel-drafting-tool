@@ -1536,6 +1536,50 @@ h1 {
   border-top-right-radius: 18mm 8mm;
 }
 
+.manuscript-toc-ornate {
+  border: 0.45mm solid #111111;
+  padding: 8mm 7mm 7mm;
+  box-shadow:
+    inset 0 0 0 0.6mm #ffffff,
+    inset 0 0 0 0.9mm #111111;
+  background:
+    radial-gradient(circle at 7mm 7mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) left top / 20mm 20mm no-repeat,
+    radial-gradient(circle at 13mm 7mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) right top / 20mm 20mm no-repeat,
+    radial-gradient(circle at 7mm 13mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) left bottom / 20mm 20mm no-repeat,
+    radial-gradient(circle at 13mm 13mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) right bottom / 20mm 20mm no-repeat,
+    linear-gradient(#111111 0 0) center 2.7mm / calc(100% - 28mm) 0.28mm no-repeat,
+    linear-gradient(#111111 0 0) center calc(100% - 2.7mm) / calc(100% - 28mm) 0.28mm no-repeat,
+    linear-gradient(#111111 0 0) 2.7mm center / 0.28mm calc(100% - 28mm) no-repeat,
+    linear-gradient(#111111 0 0) calc(100% - 2.7mm) center / 0.28mm calc(100% - 28mm) no-repeat,
+    #ffffff;
+}
+
+.manuscript-toc-ornate::before {
+  inset: 3.6mm;
+  border: 0.25mm solid rgba(17, 17, 17, 0.82);
+}
+
+.manuscript-toc-ornate::after {
+  top: 1.4mm;
+  bottom: 1.4mm;
+  left: calc(50% - 1.9mm);
+  width: 3.8mm;
+  background:
+    linear-gradient(45deg, transparent 37%, #111111 38% 62%, transparent 63%) center top / 3.8mm 3.8mm no-repeat,
+    linear-gradient(-45deg, transparent 37%, #111111 38% 62%, transparent 63%) center top / 3.8mm 3.8mm no-repeat,
+    linear-gradient(45deg, transparent 37%, #111111 38% 62%, transparent 63%) center bottom / 3.8mm 3.8mm no-repeat,
+    linear-gradient(-45deg, transparent 37%, #111111 38% 62%, transparent 63%) center bottom / 3.8mm 3.8mm no-repeat;
+}
+
+.manuscript-toc-ornate .toc-title {
+  padding: 1.6mm 0 0.6mm;
+}
+
+.manuscript-toc-ornate .toc-list {
+  position: relative;
+  z-index: 1;
+}
+
 .manuscript-prose ul,
 .manuscript-prose ol {
   margin: 0 0 var(--paragraph-spacing) 1.4em;
@@ -1897,6 +1941,92 @@ h1 {
 
 .qr-card-url {
   display: none;
+}
+
+.qr-card-ornate {
+  --ornate-qr-size: clamp(18mm, calc(var(--qr-card-width) - 24mm), 48mm);
+  padding: 8mm 7mm 6mm;
+  border: 0.45mm solid #111111;
+  color: #111111;
+  box-shadow:
+    inset 0 0 0 0.6mm #ffffff,
+    inset 0 0 0 0.9mm #111111;
+  background:
+    radial-gradient(circle at 7mm 7mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) left top / 20mm 20mm no-repeat,
+    radial-gradient(circle at 13mm 7mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) right top / 20mm 20mm no-repeat,
+    radial-gradient(circle at 7mm 13mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) left bottom / 20mm 20mm no-repeat,
+    radial-gradient(circle at 13mm 13mm, transparent 0 3.1mm, #111111 3.2mm 3.45mm, transparent 3.55mm) right bottom / 20mm 20mm no-repeat,
+    linear-gradient(#111111 0 0) center 2.7mm / calc(100% - 28mm) 0.28mm no-repeat,
+    linear-gradient(#111111 0 0) center calc(100% - 2.7mm) / calc(100% - 28mm) 0.28mm no-repeat,
+    linear-gradient(#111111 0 0) 2.7mm center / 0.28mm calc(100% - 28mm) no-repeat,
+    linear-gradient(#111111 0 0) calc(100% - 2.7mm) center / 0.28mm calc(100% - 28mm) no-repeat,
+    #ffffff;
+}
+
+.qr-card-ornate::before {
+  inset: 3.6mm;
+  border: 0.25mm solid rgba(17, 17, 17, 0.82);
+}
+
+.qr-card-ornate::after {
+  top: 1.4mm;
+  bottom: 1.4mm;
+  left: calc(50% - 1.9mm);
+  width: 3.8mm;
+  background:
+    linear-gradient(45deg, transparent 37%, #111111 38% 62%, transparent 63%) center top / 3.8mm 3.8mm no-repeat,
+    linear-gradient(-45deg, transparent 37%, #111111 38% 62%, transparent 63%) center top / 3.8mm 3.8mm no-repeat,
+    linear-gradient(45deg, transparent 37%, #111111 38% 62%, transparent 63%) center bottom / 3.8mm 3.8mm no-repeat,
+    linear-gradient(-45deg, transparent 37%, #111111 38% 62%, transparent 63%) center bottom / 3.8mm 3.8mm no-repeat;
+}
+
+.qr-card-ornate[data-height] {
+  padding: 7mm 6mm 5.5mm;
+}
+
+.qr-card-ornate .qr-card-label {
+  margin-bottom: 2.2mm;
+  color: #111111;
+  font-size: 7pt;
+  letter-spacing: 0;
+}
+
+.qr-card-ornate .qr-card-body {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  gap: 3mm;
+}
+
+.qr-card-ornate .qr-card-image {
+  width: var(--ornate-qr-size);
+  height: var(--ornate-qr-size);
+  padding: 1mm;
+  background: #ffffff;
+}
+
+.qr-card-ornate[data-height] .qr-card-image {
+  width: clamp(18mm, calc(var(--qr-card-height) - 26mm), 46mm);
+  height: clamp(18mm, calc(var(--qr-card-height) - 26mm), 46mm);
+}
+
+.qr-card-ornate .qr-card-caption {
+  justify-items: center;
+  gap: 0.8mm;
+  max-width: calc(var(--qr-card-width) - 18mm);
+  text-align: center;
+}
+
+.qr-card-ornate .qr-card-title {
+  color: #111111;
+  font-size: 10pt;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.qr-card-ornate .qr-card-description,
+.qr-card-ornate .qr-card-url {
+  color: #333333;
 }
 
 .manuscript-prose .qr-card.ProseMirror-selectednode,
