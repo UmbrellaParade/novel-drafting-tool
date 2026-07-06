@@ -1442,8 +1442,9 @@ function readTextHeightPx(editor: Editor): number {
 function readMaximumImageWidth(editor: Editor, image: HTMLImageElement | null): number {
   const textWidth = readTextWidthPx(editor);
   const textHeight = readTextHeightPx(editor);
+  const fitPadding = readImageFitPaddingPx(editor);
   const aspectRatio = readImageAspectRatio(image);
-  return Math.max(48, Math.min(textWidth, (textHeight - IMAGE_FIT_PADDING_PX * 2) * aspectRatio));
+  return Math.max(48, Math.min(textWidth, (textHeight - fitPadding * 2) * aspectRatio));
 }
 
 function readMaximumImageWidthForCurrentPage(editor: Editor, image: HTMLImageElement | null): number {
@@ -1470,7 +1471,8 @@ function readImageAspectRatio(image: HTMLImageElement | null): number {
 }
 
 function readAvailableImageHeightForCurrentPage(editor: Editor, image: HTMLImageElement): number {
-  const fallbackHeight = Math.max(64, readTextHeightPx(editor) - IMAGE_FIT_PADDING_PX * 2);
+  const fitPadding = readImageFitPaddingPx(editor);
+  const fallbackHeight = Math.max(64, readTextHeightPx(editor) - fitPadding * 2);
   const block = image.closest<HTMLElement>("[data-resize-container][data-node='image']") ?? image.closest<HTMLElement>("[data-resize-wrapper]") ?? image;
   const blockRect = block.getBoundingClientRect();
   const safeGuide = pageSafeGuideForRect(editor, blockRect);
@@ -1482,10 +1484,20 @@ function readAvailableImageHeightForCurrentPage(editor: Editor, image: HTMLImage
   const contentAfterBottom = readFollowingContentBottomInPage(editor, block, blockRect, safeRect);
   if (contentAfterBottom !== null) {
     const currentBlockHeight = Math.max(1, blockRect.height);
-    return Math.max(64, currentBlockHeight + safeRect.bottom - contentAfterBottom - IMAGE_FIT_PADDING_PX);
+    return Math.max(64, currentBlockHeight + safeRect.bottom - contentAfterBottom - fitPadding);
   }
 
-  return Math.max(64, safeRect.bottom - blockRect.top - IMAGE_FIT_PADDING_PX);
+  return Math.max(64, safeRect.bottom - blockRect.top - fitPadding);
+}
+
+function readImageFitPaddingPx(editor: Editor): number {
+  const rawValue = getComputedStyle(editor.view.dom).getPropertyValue("--image-fit-padding").trim();
+  if (rawValue === "0" || rawValue === "0px" || rawValue === "0mm") {
+    return 0;
+  }
+
+  const value = readCssLengthPx(editor, "--image-fit-padding");
+  return Number.isFinite(value) && value >= 0 ? value : IMAGE_FIT_PADDING_PX;
 }
 
 function pageSafeGuideForRect(editor: Editor, targetRect: DOMRect): HTMLElement | null {

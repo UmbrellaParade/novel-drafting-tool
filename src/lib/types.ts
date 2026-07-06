@@ -1,4 +1,4 @@
-export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "custom";
+export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "shimauma-a6-manga" | "shimauma-a5-manga" | "custom";
 export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
 export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight";
 export type TocStyleId = "classic" | "rain" | "antique" | "midnight";

@@ -1565,9 +1565,12 @@ h1 {
 .manuscript-prose img:not(.qr-card-image) {
   display: block;
   max-width: 100%;
-  max-height: min(max(var(--image-max-height), calc(var(--content-height) - 4mm)), calc(var(--page-height) - 8mm));
+  max-height: min(
+    max(var(--image-max-height), calc(var(--content-height) - var(--image-content-height-offset, 4mm))),
+    var(--image-page-height-limit, calc(var(--page-height) - 8mm))
+  );
   height: auto;
-  margin: 4mm auto;
+  margin: var(--image-block-margin, 4mm) auto;
   break-before: auto;
   break-inside: avoid-column;
   page-break-before: auto;
@@ -1581,7 +1584,7 @@ h1 {
   width: fit-content;
   max-width: var(--content-width);
   justify-content: center;
-  margin: 4mm auto;
+  margin: var(--image-block-margin, 4mm) auto;
   break-before: auto;
   break-inside: avoid-column;
   page-break-before: auto;
