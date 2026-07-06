@@ -109,6 +109,13 @@ type RasterPdfBuildProgress = (pageIndex: number, totalPages: number) => void;
 type SidebarPanelId = "outline" | "toc" | "project" | "qr" | "drive" | "check";
 type SidebarCollapseState = Record<SidebarPanelId, boolean>;
 
+type PreviewPageMeasurement = {
+  chapterId: string;
+  content: string;
+  pageSettings: PageSettings;
+  count: number;
+};
+
 const SIDEBAR_COLLAPSE_STORAGE_KEY = "umbrella-parade:sidebar-collapsed-panels";
 const DEFAULT_SIDEBAR_COLLAPSE_STATE: SidebarCollapseState = {
   outline: false,
@@ -775,7 +782,7 @@ export function EditorShell() {
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [driveSettingsDraft, setDriveSettingsDraft] = useState<GoogleDriveSettings>(EMPTY_DRIVE_SETTINGS);
   const [collapsedPanels, setCollapsedPanels] = useState<SidebarCollapseState>(() => readSidebarCollapseState());
-  const [measuredPages, setMeasuredPages] = useState<{ signature: string; count: number } | null>(null);
+  const [measuredPages, setMeasuredPages] = useState<PreviewPageMeasurement | null>(null);
   const [pageSectionTitles, setPageSectionTitles] = useState<string[]>([]);
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
@@ -910,18 +917,15 @@ export function EditorShell() {
   const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject) : []), [layoutProject]);
   const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject) : 1), [layoutProject]);
   const characterCount = useMemo(() => (layoutProject ? countManuscriptCharacters(layoutProject) : 0), [layoutProject]);
-  const layoutSignature = useMemo(() => {
-    if (!layoutPageSettings || !activeChapter) {
-      return "";
-    }
-
-    return JSON.stringify({
-      activeChapterId: activeChapter.id,
-      content: layoutChapterContent,
-      pageSettings: layoutPageSettings
-    });
-  }, [activeChapter, layoutChapterContent, layoutPageSettings]);
-  const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
+  const measuredPageCount =
+    measuredPages &&
+    activeChapter &&
+    layoutPageSettings &&
+    measuredPages.chapterId === activeChapter.id &&
+    measuredPages.content === layoutChapterContent &&
+    measuredPages.pageSettings === layoutPageSettings
+      ? measuredPages.count
+      : null;
   const pageFrameCount = Math.max(1, Math.min(measuredPageCount ?? estimatedPages, MAX_PAGE_FRAMES));
   const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount), [pageFrameCount]);
   const clampedVisibleSpreadIndex = Math.max(0, Math.min(visibleSpreadIndex, pageSpreads.length - 1));
@@ -1291,7 +1295,7 @@ export function EditorShell() {
   }, [goToSpreadIndex]);
 
   useEffect(() => {
-    if (!layoutSignature) {
+    if (!activeChapter || !layoutPageSettings || fastEditing) {
       return;
     }
 
@@ -1338,12 +1342,17 @@ export function EditorShell() {
       setHeadingPageNumbers((previous) => (sameNumberList(previous, nextHeadingPageNumbers) ? previous : nextHeadingPageNumbers));
 
       if (Number.isFinite(nextCount) && nextCount !== measuredPageCount) {
-        setMeasuredPages({ signature: layoutSignature, count: nextCount });
+        setMeasuredPages({
+          chapterId: activeChapter.id,
+          content: layoutChapterContent,
+          pageSettings: layoutPageSettings,
+          count: nextCount
+        });
       }
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [layoutSignature, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
+  }, [activeChapter, fastEditing, layoutChapterContent, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -1759,11 +1768,9 @@ export function EditorShell() {
       flushPendingChapterContent();
       setPageSectionTitles((previous) => (sameStringList(previous, measuredLayout.sectionTitles) ? previous : measuredLayout.sectionTitles));
       setMeasuredPages({
-        signature: JSON.stringify({
-          activeChapterId: latestChapter.id,
-          content: latestChapter.content,
-          pageSettings: latestProject.pageSettings
-        }),
+        chapterId: latestChapter.id,
+        content: latestChapter.content,
+        pageSettings: latestProject.pageSettings,
         count: exportPageCount
       });
       downloadPdfResult(result);
