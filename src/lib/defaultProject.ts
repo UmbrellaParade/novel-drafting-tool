@@ -34,7 +34,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     }
   },
   "shimauma-a6": {
-    label: "しまうまA6（塗り足し）",
+    label: "しまうまA6塗り足し版",
     settings: {
       preset: "shimauma-a6",
       fontFamily: "noto-serif-jp",
@@ -55,7 +55,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     }
   },
   "shimauma-a5": {
-    label: "しまうまA5（塗り足し）",
+    label: "しまうまA5塗り足し版",
     settings: {
       preset: "shimauma-a5",
       fontFamily: "noto-serif-jp",
