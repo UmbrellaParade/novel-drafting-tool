@@ -111,7 +111,7 @@ type SidebarCollapseState = Record<SidebarPanelId, boolean>;
 
 type PreviewPageMeasurement = {
   chapterId: string;
-  content: string;
+  contentRevision: number;
   pageSettings: PageSettings;
   count: number;
 };
@@ -126,11 +126,21 @@ const DEFAULT_SIDEBAR_COLLAPSE_STATE: SidebarCollapseState = {
   check: false
 };
 
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
+type DebouncedVersionedValue<T> = {
+  value: T;
+  revision: number;
+};
+
+function useDebouncedVersionedValue<T>(value: T, delayMs: number): DebouncedVersionedValue<T> {
+  const [debouncedValue, setDebouncedValue] = useState<DebouncedVersionedValue<T>>({ value, revision: 0 });
 
   useEffect(() => {
-    const handle = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    const handle = window.setTimeout(() => {
+      setDebouncedValue((previous) => ({
+        value,
+        revision: previous.revision + 1
+      }));
+    }, delayMs);
     return () => window.clearTimeout(handle);
   }, [delayMs, value]);
 
@@ -888,7 +898,7 @@ export function EditorShell() {
   const layoutChapters = project?.chapters ?? null;
   const tocSettingsForSync = project?.tocSettings ?? null;
   const activeChapterContent = activeChapter?.content ?? "";
-  const layoutChapterContent = useDebouncedValue(activeChapterContent, LAYOUT_REFRESH_DELAY_MS);
+  const { value: layoutChapterContent, revision: layoutContentRevision } = useDebouncedVersionedValue(activeChapterContent, LAYOUT_REFRESH_DELAY_MS);
   const layoutProject = useMemo<ManuscriptProject | null>(() => {
     if (!layoutPageSettings || !layoutChapters || !activeChapter) {
       return null;
@@ -922,7 +932,7 @@ export function EditorShell() {
     activeChapter &&
     layoutPageSettings &&
     measuredPages.chapterId === activeChapter.id &&
-    measuredPages.content === layoutChapterContent &&
+    measuredPages.contentRevision === layoutContentRevision &&
     measuredPages.pageSettings === layoutPageSettings
       ? measuredPages.count
       : null;
@@ -1344,7 +1354,7 @@ export function EditorShell() {
       if (Number.isFinite(nextCount) && nextCount !== measuredPageCount) {
         setMeasuredPages({
           chapterId: activeChapter.id,
-          content: layoutChapterContent,
+          contentRevision: layoutContentRevision,
           pageSettings: layoutPageSettings,
           count: nextCount
         });
@@ -1352,7 +1362,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [activeChapter, fastEditing, layoutChapterContent, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
+  }, [activeChapter, fastEditing, layoutChapterContent, layoutContentRevision, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -1767,12 +1777,14 @@ export function EditorShell() {
 
       flushPendingChapterContent();
       setPageSectionTitles((previous) => (sameStringList(previous, measuredLayout.sectionTitles) ? previous : measuredLayout.sectionTitles));
-      setMeasuredPages({
-        chapterId: latestChapter.id,
-        content: latestChapter.content,
-        pageSettings: latestProject.pageSettings,
-        count: exportPageCount
-      });
+      if (latestChapter.content === layoutChapterContent && latestProject.pageSettings === layoutPageSettings) {
+        setMeasuredPages({
+          chapterId: latestChapter.id,
+          contentRevision: layoutContentRevision,
+          pageSettings: latestProject.pageSettings,
+          count: exportPageCount
+        });
+      }
       downloadPdfResult(result);
     } catch (error) {
       setStatusText("PDF書き出しに失敗");
