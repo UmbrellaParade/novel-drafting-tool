@@ -1359,9 +1359,11 @@ h1 {
 }
 
 .manuscript-prose {
+  box-sizing: border-box;
   width: var(--paged-content-width);
   height: var(--content-height);
   min-height: var(--content-height);
+  padding-bottom: var(--fragmentation-guard, 0.8mm);
   columns: var(--content-width) auto;
   column-width: var(--content-width);
   column-gap: var(--column-gap);
@@ -1577,10 +1579,13 @@ h1 {
   height: auto;
   margin: var(--image-block-margin, 4mm) auto;
   break-before: auto;
+  break-after: avoid-column;
   break-inside: avoid-column;
   page-break-before: auto;
+  page-break-after: avoid;
   page-break-inside: avoid;
   -webkit-column-break-before: auto;
+  -webkit-column-break-after: avoid;
   object-fit: contain;
 }
 
@@ -1591,14 +1596,20 @@ h1 {
   justify-content: center;
   margin: var(--image-block-margin, 4mm) auto;
   break-before: auto;
+  break-after: avoid-column;
   break-inside: avoid-column;
   page-break-before: auto;
+  page-break-after: avoid;
   page-break-inside: avoid;
   -webkit-column-break-before: auto;
+  -webkit-column-break-after: avoid;
 }
 
 .manuscript-prose [data-resize-container][data-node="image"] [data-resize-wrapper] {
   max-width: var(--content-width);
+  break-inside: avoid-column;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
   margin-left: auto;
   margin-right: auto;
   line-height: 0;

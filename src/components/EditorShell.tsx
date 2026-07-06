@@ -120,6 +120,7 @@ type PreviewPageMeasurement = {
 type ImageLayoutVars = {
   blockMargin: string;
   contentHeightOffset: string;
+  fragmentationGuard: string;
   pageHeightLimit: string;
   fitPadding: string;
 };
@@ -160,6 +161,7 @@ function imageLayoutVarsForPage(settings: PageSettings): ImageLayoutVars {
     return {
       blockMargin: "0mm",
       contentHeightOffset: "0mm",
+      fragmentationGuard: "0mm",
       pageHeightLimit: "var(--page-height)",
       fitPadding: "0px"
     };
@@ -168,6 +170,7 @@ function imageLayoutVarsForPage(settings: PageSettings): ImageLayoutVars {
   return {
     blockMargin: "4mm",
     contentHeightOffset: "4mm",
+    fragmentationGuard: "0.8mm",
     pageHeightLimit: "calc(var(--page-height) - 8mm)",
     fitPadding: "8px"
   };
@@ -580,6 +583,7 @@ function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): 
   root.style.setProperty("--image-max-height", `${page.imageMaxHeightMm}mm`);
   root.style.setProperty("--image-block-margin", imageLayout.blockMargin);
   root.style.setProperty("--image-content-height-offset", imageLayout.contentHeightOffset);
+  root.style.setProperty("--fragmentation-guard", imageLayout.fragmentationGuard);
   root.style.setProperty("--image-page-height-limit", imageLayout.pageHeightLimit);
   root.style.setProperty("--image-fit-padding", imageLayout.fitPadding);
   root.style.setProperty("--page-gap", `${PAGE_GAP_MM}mm`);
@@ -1496,6 +1500,7 @@ export function EditorShell() {
     "--image-max-height": `${stylePageSettings.imageMaxHeightMm}mm`,
     "--image-block-margin": imageLayout.blockMargin,
     "--image-content-height-offset": imageLayout.contentHeightOffset,
+    "--fragmentation-guard": imageLayout.fragmentationGuard,
     "--image-page-height-limit": imageLayout.pageHeightLimit,
     "--image-fit-padding": imageLayout.fitPadding,
     "--page-gap": `${PAGE_GAP_MM}mm`,
