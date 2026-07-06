@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Cloud,
   CloudCog,
+  FileDown,
   FileJson,
   FileText,
   FolderOpen,
@@ -18,7 +19,6 @@ import {
   Minus,
   Pencil,
   Plus,
-  Printer,
   QrCode,
   Save,
   Trash2,
@@ -102,7 +102,6 @@ type RasterPdfBuildResult = {
   bytes: Uint8Array;
   pageCount: number;
   fileName: string;
-  missingPagesForShimauma: number;
 };
 
 type RasterPdfBuildProgress = (pageIndex: number, totalPages: number) => void;
@@ -394,10 +393,6 @@ function pageSpreadLabel(spread: PageSpread): string {
   return `${(spread.pages[0] ?? 0) + 1}-${(spread.pages[spread.pages.length - 1] ?? 0) + 1}`;
 }
 
-function isShimaumaPresetId(preset: ManuscriptProject["pageSettings"]["preset"]): boolean {
-  return preset === "shimauma-a6" || preset === "shimauma-a5";
-}
-
 function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -405,10 +400,6 @@ function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 const mmToPt = (value: number) => (value * 72) / 25.4;
-
-function missingPagesForShimauma(project: ManuscriptProject, pageCount: number): number {
-  return isShimaumaPresetId(project.pageSettings.preset) && pageCount % 4 !== 0 ? 4 - (pageCount % 4) : 0;
-}
 
 async function nextAnimationFrame(): Promise<void> {
   await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
@@ -522,8 +513,7 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
   return {
     bytes: new Uint8Array(bytes),
     pageCount,
-    fileName: `${sanitizeFileName(snapshot.project.title)}_book.pdf`,
-    missingPagesForShimauma: missingPagesForShimauma(snapshot.project, pageCount)
+    fileName: `${sanitizeFileName(snapshot.project.title)}_book.pdf`
   };
 }
 
@@ -664,6 +654,55 @@ function readCssLengthPx(host: HTMLElement, variableName: string): number {
   const width = probe.offsetWidth || probe.getBoundingClientRect().width;
   probe.remove();
   return Number.isFinite(width) && width > 0 ? width : 0;
+}
+
+const PREVIEW_PAGE_CONTENT_SELECTOR = [
+  "h1",
+  "h2",
+  "h3",
+  "p",
+  "li",
+  "blockquote",
+  "section[data-type='table-of-contents']",
+  "figure",
+  "img"
+].join(",");
+
+function hasPreviewPageContent(element: HTMLElement): boolean {
+  if (element.matches("img,figure,section[data-type='table-of-contents'],[data-type='qr-card'],.qr-card")) {
+    return true;
+  }
+
+  if (element.querySelector("img,figure,[data-type='qr-card'],.qr-card")) {
+    return true;
+  }
+
+  return (element.textContent ?? "").trim().length > 0;
+}
+
+function measureOccupiedPreviewPages(prose: HTMLElement, firstPageLeft: number, visualPagePitch: number): number | null {
+  if (visualPagePitch <= 0) {
+    return null;
+  }
+
+  let lastOccupiedPageIndex = -1;
+  prose.querySelectorAll<HTMLElement>(PREVIEW_PAGE_CONTENT_SELECTOR).forEach((element) => {
+    if (!hasPreviewPageContent(element)) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const pageIndex = Math.floor((rect.right - firstPageLeft - 2) / visualPagePitch);
+    if (pageIndex >= 0) {
+      lastOccupiedPageIndex = Math.max(lastOccupiedPageIndex, pageIndex);
+    }
+  });
+
+  return lastOccupiedPageIndex >= 0 ? lastOccupiedPageIndex + 1 : null;
 }
 
 function googleDriveSetupMessage(): string {
@@ -883,7 +922,7 @@ export function EditorShell() {
     });
   }, [activeChapter, layoutChapterContent, layoutPageSettings]);
   const measuredPageCount = measuredPages?.signature === layoutSignature ? measuredPages.count : null;
-  const pageFrameCount = Math.max(1, Math.min(Math.max(estimatedPages, measuredPageCount ?? 0), MAX_PAGE_FRAMES));
+  const pageFrameCount = Math.max(1, Math.min(measuredPageCount ?? estimatedPages, MAX_PAGE_FRAMES));
   const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount), [pageFrameCount]);
   const clampedVisibleSpreadIndex = Math.max(0, Math.min(visibleSpreadIndex, pageSpreads.length - 1));
   const visibleSpread = pageSpreads[clampedVisibleSpreadIndex] ?? pageSpreads[0] ?? { id: "page-1", pages: [0] };
@@ -1272,9 +1311,10 @@ export function EditorShell() {
         return;
       }
 
-      const actualPages = Math.ceil((prose.scrollWidth + 1) / pagePitch);
-      const nextCount = Math.max(estimatedPages, actualPages);
-      const titleCount = Math.max(1, Math.min(nextCount, MAX_PAGE_FRAMES));
+      const measuredContentPages = measureOccupiedPreviewPages(prose, firstFrameRect.left - spreadStartPageIndex * visualPagePitch, visualPagePitch);
+      const actualPages = measuredContentPages ?? Math.ceil((prose.scrollWidth + 1) / pagePitch);
+      const nextCount = Math.max(1, Math.min(actualPages, MAX_PAGE_FRAMES));
+      const titleCount = nextCount;
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];
       const firstFrameLeft = firstFrameRect.left - spreadStartPageIndex * visualPagePitch;
@@ -1297,13 +1337,13 @@ export function EditorShell() {
       setPageSectionTitles((previous) => (sameStringList(previous, nextTitles) ? previous : nextTitles));
       setHeadingPageNumbers((previous) => (sameNumberList(previous, nextHeadingPageNumbers) ? previous : nextHeadingPageNumbers));
 
-      if (Number.isFinite(nextCount) && nextCount > pageFrameCount) {
-        setMeasuredPages({ signature: layoutSignature, count: Math.min(nextCount, MAX_PAGE_FRAMES) });
+      if (Number.isFinite(nextCount) && nextCount !== measuredPageCount) {
+        setMeasuredPages({ signature: layoutSignature, count: nextCount });
       }
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [estimatedPages, layoutSignature, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
+  }, [layoutSignature, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -1675,17 +1715,13 @@ export function EditorShell() {
 
   const downloadPdfResult = (result: RasterPdfBuildResult) => {
     downloadBlob(new Blob([uint8ArrayToArrayBuffer(result.bytes)], { type: "application/pdf" }), result.fileName);
-    setStatusText(
-      result.missingPagesForShimauma > 0
-        ? `PDFをダウンロードしました。しまうま入稿条件: 総ページ数が4の倍数ではありません（現在${result.pageCount}ページ、あと${result.missingPagesForShimauma}ページで4の倍数）。これは原稿ツールとPDFのページ数ズレではありません。`
-        : "PDFをダウンロードしました"
-    );
+    setStatusText(`PDFを書き出しました（${result.pageCount}ページ）`);
   };
 
   const exportPdf = async () => {
     let exportRoot: HTMLElement | null = null;
     try {
-      setStatusText("原稿ツールのページからPDFを作成中");
+      setStatusText("現在の原稿をPDFとして書き出し中");
       const latestProject = projectWithLatestOutputState(project);
       const latestChapter = latestProject.chapters[0];
       if (!latestChapter) {
@@ -1714,7 +1750,7 @@ export function EditorShell() {
       await nextAnimationFrame();
 
       const result = await buildRasterPdfFromDom(exportRoot, snapshot, (pageIndex, totalPages) => {
-        setStatusText(`PDF作成中: ${pageIndex + 1}/${totalPages}ページ`);
+        setStatusText(`PDF書き出し中: ${pageIndex + 1}/${totalPages}ページ`);
       });
       if (result.pageCount !== exportPageCount) {
         throw new Error(`原稿ツールとPDFのページ数が一致しません。原稿: ${exportPageCount}ページ / PDF: ${result.pageCount}ページ`);
@@ -1732,9 +1768,9 @@ export function EditorShell() {
       });
       downloadPdfResult(result);
     } catch (error) {
-      setStatusText("PDF作成に失敗");
+      setStatusText("PDF書き出しに失敗");
       window.console.error(error);
-      window.alert(error instanceof Error ? error.message : "PDFを作成できませんでした。");
+      window.alert(error instanceof Error ? error.message : "PDFを書き出せませんでした。");
     } finally {
       exportRoot?.remove();
     }
@@ -1971,8 +2007,8 @@ export function EditorShell() {
             <FileJson size={17} />
             JSON
           </button>
-          <button className="command-button" type="button" onClick={exportPdf} title="本用PDF出力">
-            <Printer size={17} />
+          <button className="command-button" type="button" onClick={exportPdf} title="PDF書き出し">
+            <FileDown size={17} />
             PDF
           </button>
           <button className="command-button" type="button" onClick={exportDocx} title="DOCX出力">

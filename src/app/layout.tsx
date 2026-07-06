@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Umbrella Parade 原稿制作ツール",
-  description: "Kindleと印刷用PDFの原稿をページ設定に合わせて編集するビジュアルエディタ"
+  description: "KindleとPDF原稿をページ設定に合わせて編集・書き出しするビジュアルエディタ"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
