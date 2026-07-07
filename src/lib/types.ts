@@ -2,6 +2,7 @@ export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "shimauma-
 export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
 export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight" | "ornate";
 export type TocStyleId = "classic" | "rain" | "antique" | "midnight" | "ornate";
+export type PageNumberPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
 
 export type PageSettings = {
   preset: PagePresetId;
@@ -18,6 +19,7 @@ export type PageSettings = {
   paragraphSpacingMm: number;
   imageMaxHeightMm: number;
   showPageNumber: boolean;
+  pageNumberPosition: PageNumberPosition;
   showBleedGuide: boolean;
   showSafeArea: boolean;
 };

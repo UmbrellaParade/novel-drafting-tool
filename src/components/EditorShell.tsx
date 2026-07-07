@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
-import type { Chapter, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
+import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { blobToDataUrl } from "@/lib/imageAssets";
 import { buildManuscriptFontEmbedCss } from "@/lib/pdfFonts";
@@ -65,6 +65,14 @@ const PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS = 450;
 const PAGE_USER_SCROLL_WINDOW_MS = 900;
 const PDF_EXPORT_DPI = 300;
 const MANGA_PRESETS = new Set<PagePresetId>(["shimauma-a6-manga", "shimauma-a5-manga"]);
+const PAGE_NUMBER_POSITION_OPTIONS: Array<{ value: PageNumberPosition; label: string }> = [
+  { value: "bottom-right", label: "下・右" },
+  { value: "bottom-center", label: "下・中央" },
+  { value: "bottom-left", label: "下・左" },
+  { value: "top-right", label: "上・右" },
+  { value: "top-center", label: "上・中央" },
+  { value: "top-left", label: "上・左" }
+];
 
 type OutlineItem = {
   id: string;
@@ -289,6 +297,15 @@ const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string
 
 function getQrCardTemplateId(value: QrCardTemplateId | undefined): QrCardTemplateId {
   return value && QR_CARD_TEMPLATES[value] ? value : "umbrella";
+}
+
+function pageNumberPositionClass(position: PageNumberPosition): string {
+  const [vertical, horizontal] = position.split("-");
+  return `is-${vertical} is-${horizontal}`;
+}
+
+function pageNumberIsTop(position: PageNumberPosition): boolean {
+  return position.startsWith("top-");
 }
 
 function normalizeQrTextSizePt(value: unknown, fallback: number): number {
@@ -657,11 +674,12 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
     const footer = pageElement.querySelector<HTMLElement>(".pdf-export-page-footer");
     if (footer) {
       footer.replaceChildren();
-      if (pageSettings.showPageNumber) {
-        const span = document.createElement("span");
-        span.textContent = String(pageIndex + 1);
-        footer.append(span);
-      }
+    }
+
+    const pageNumber = pageElement.querySelector<HTMLElement>(".pdf-export-page-number");
+    if (pageNumber) {
+      pageNumber.textContent = pageSettings.showPageNumber ? String(pageIndex + 1) : "";
+      pageNumber.hidden = !pageSettings.showPageNumber;
     }
 
     flow.style.marginLeft = `-${pageIndex * pagePitchMm}mm`;
@@ -740,7 +758,7 @@ function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
 
   for (let pageIndex = 0; pageIndex < 1; pageIndex += 1) {
     const pageElement = document.createElement("section");
-    pageElement.className = "pdf-export-page";
+    pageElement.className = `pdf-export-page ${page.showPageNumber && pageNumberIsTop(page.pageNumberPosition) ? "has-page-number-top" : ""}`.trim();
     pageElement.dataset.pageNumber = String(pageIndex + 1);
 
     const header = document.createElement("header");
@@ -763,12 +781,16 @@ function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
 
     const footer = document.createElement("footer");
     footer.className = "pdf-export-page-footer";
-    if (page.showPageNumber) {
-      const span = document.createElement("span");
-      span.textContent = String(pageIndex + 1);
-      footer.append(span);
-    }
     pageElement.append(footer);
+
+    const pageNumber = document.createElement("span");
+    pageNumber.className = `pdf-export-page-number ${pageNumberPositionClass(page.pageNumberPosition)}`;
+    if (page.showPageNumber) {
+      pageNumber.textContent = String(pageIndex + 1);
+    } else {
+      pageNumber.hidden = true;
+    }
+    pageElement.append(pageNumber);
 
     root.append(pageElement);
   }
@@ -2322,15 +2344,20 @@ export function EditorShell() {
             >
               <div className="page-frame-track" aria-hidden="true">
                 {visibleSpread.pages.map((pageIndex) => (
-                  <section key={pageIndex} className="page-frame" data-page-number={pageIndex + 1}>
+                  <section
+                    key={pageIndex}
+                    className={`page-frame ${project.pageSettings.showPageNumber && pageNumberIsTop(project.pageSettings.pageNumberPosition) ? "has-page-number-top" : ""}`.trim()}
+                    data-page-number={pageIndex + 1}
+                  >
                     <header className="page-frame-header">
                       {pageSectionTitles[pageIndex] ? <span>{pageSectionTitles[pageIndex]}</span> : null}
                     </header>
                     {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
                     {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
-                    <footer className="page-frame-footer">
-                      {project.pageSettings.showPageNumber ? <span>{pageIndex + 1}</span> : null}
-                    </footer>
+                    <footer className="page-frame-footer" />
+                    {project.pageSettings.showPageNumber ? (
+                      <span className={`page-frame-page-number ${pageNumberPositionClass(project.pageSettings.pageNumberPosition)}`}>{pageIndex + 1}</span>
+                    ) : null}
                   </section>
                 ))}
               </div>
@@ -2551,6 +2578,18 @@ function ProjectPanel({
         <label><input type="checkbox" checked={settings.showBleedGuide} onChange={(event) => onPageChange("showBleedGuide", event.target.checked)} /> 塗り足し</label>
         <label><input type="checkbox" checked={settings.showSafeArea} onChange={(event) => onPageChange("showSafeArea", event.target.checked)} /> 安全域</label>
       </div>
+      <label className="field page-number-position-field">
+        <span>ページ番号の位置</span>
+        <select
+          value={settings.pageNumberPosition}
+          disabled={!settings.showPageNumber}
+          onChange={(event) => onPageChange("pageNumberPosition", event.target.value as PageNumberPosition)}
+        >
+          {PAGE_NUMBER_POSITION_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </label>
     </CollapsibleToolPanel>
   );
 }

@@ -864,6 +864,11 @@ h1 {
   top: max(2mm, calc(var(--margin-top) / 2 - 3pt));
 }
 
+.page-frame.has-page-number-top .page-frame-header,
+.pdf-export-page.has-page-number-top .pdf-export-page-header {
+  top: max(5mm, calc(var(--margin-top) / 2 + 2pt));
+}
+
 .page-frame-footer {
   bottom: max(2mm, calc(var(--margin-bottom) / 2 - 3pt));
 }
@@ -874,6 +879,50 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.page-frame-page-number,
+.pdf-export-page-number {
+  position: absolute;
+  z-index: 3;
+  max-width: calc(var(--page-width) - var(--margin-left) - var(--margin-right));
+  overflow: hidden;
+  color: #7a7168;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 7pt;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.page-frame-page-number.is-top,
+.pdf-export-page-number.is-top {
+  top: max(2mm, calc(var(--margin-top) / 2 - 3pt));
+}
+
+.page-frame-page-number.is-bottom,
+.pdf-export-page-number.is-bottom {
+  bottom: max(2mm, calc(var(--margin-bottom) / 2 - 3pt));
+}
+
+.page-frame-page-number.is-left,
+.pdf-export-page-number.is-left {
+  left: var(--margin-left);
+  text-align: left;
+}
+
+.page-frame-page-number.is-center,
+.pdf-export-page-number.is-center {
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+.page-frame-page-number.is-right,
+.pdf-export-page-number.is-right {
+  right: var(--margin-right);
+  text-align: right;
 }
 
 .page-bleed-guide,

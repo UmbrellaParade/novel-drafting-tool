@@ -1,4 +1,4 @@
-import type { ManuscriptProject } from "./types";
+import type { ManuscriptProject, PageNumberPosition } from "./types";
 import { downloadBlob } from "./storage";
 import { sanitizeFileName, stripHtml } from "./defaultProject";
 
@@ -6,6 +6,11 @@ const mmToTwip = (value: number) => Math.round(value * 56.6929133858);
 const PX_PER_MM = 96 / 25.4;
 const DEFAULT_DOCX_IMAGE_WIDTH_PX = 320;
 const DOCX_QR_IMAGE_WIDTH_PX = 96;
+
+function pageNumberPositionParts(position: PageNumberPosition): { vertical: "top" | "bottom"; horizontal: "left" | "center" | "right" } {
+  const [vertical, horizontal] = position.split("-") as ["top" | "bottom", "left" | "center" | "right"];
+  return { vertical, horizontal };
+}
 
 type TocExportEntry = {
   title: string;
@@ -138,6 +143,64 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
     }
   }
 
+  const pageNumberPosition = pageNumberPositionParts(project.pageSettings.pageNumberPosition);
+  const pageNumberAlignment =
+    pageNumberPosition.horizontal === "left"
+      ? docx.AlignmentType.LEFT
+      : pageNumberPosition.horizontal === "center"
+        ? docx.AlignmentType.CENTER
+        : docx.AlignmentType.RIGHT;
+  const createPageNumberParagraph = () =>
+    new docx.Paragraph({
+      alignment: pageNumberAlignment,
+      children: [
+        new docx.TextRun({
+          children: [docx.PageNumber.CURRENT],
+          font: uiFont,
+          size: 16,
+          color: "7A7168"
+        })
+      ]
+    });
+  const headerChildren: InstanceType<typeof docx.Paragraph>[] = [];
+  if (project.pageSettings.showPageNumber && pageNumberPosition.vertical === "top") {
+    headerChildren.push(createPageNumberParagraph());
+  }
+  headerChildren.push(
+    new docx.Paragraph({
+      alignment: docx.AlignmentType.RIGHT,
+      children: [
+        new docx.TextRun({
+          text: project.title,
+          font: uiFont,
+          size: 16,
+          color: "7A7168"
+        })
+      ]
+    })
+  );
+  const footerChildren: InstanceType<typeof docx.Paragraph>[] = [];
+  if (project.pageSettings.showPageNumber && pageNumberPosition.vertical === "bottom") {
+    footerChildren.push(createPageNumberParagraph());
+  } else if (!project.pageSettings.showPageNumber) {
+    footerChildren.push(
+      new docx.Paragraph({
+        alignment: docx.AlignmentType.CENTER,
+        children: [
+          new docx.TextRun({
+            text: project.author,
+            font: uiFont,
+            size: 16,
+            color: "7A7168"
+          })
+        ]
+      })
+    );
+  }
+  if (footerChildren.length === 0) {
+    footerChildren.push(new docx.Paragraph({ children: [] }));
+  }
+
   const document = new docx.Document({
     creator: "Umbrella Parade",
     title: project.title,
@@ -149,45 +212,12 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
       {
         headers: {
           default: new docx.Header({
-            children: [
-              new docx.Paragraph({
-                alignment: docx.AlignmentType.RIGHT,
-                children: [
-                  new docx.TextRun({
-                    text: project.title,
-                    font: uiFont,
-                    size: 16,
-                    color: "7A7168"
-                  })
-                ]
-              })
-            ]
+            children: headerChildren
           })
         },
         footers: {
           default: new docx.Footer({
-            children: [
-              new docx.Paragraph({
-                alignment: docx.AlignmentType.CENTER,
-                children: project.pageSettings.showPageNumber
-                  ? [
-                      new docx.TextRun({
-                        children: [docx.PageNumber.CURRENT],
-                        font: uiFont,
-                        size: 16,
-                        color: "7A7168"
-                      })
-                    ]
-                  : [
-                      new docx.TextRun({
-                        text: project.author,
-                        font: uiFont,
-                        size: 16,
-                        color: "7A7168"
-                      })
-                    ]
-              })
-            ]
+            children: footerChildren
           })
         },
         properties: {

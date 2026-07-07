@@ -1,4 +1,4 @@
-import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId } from "./types";
+import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId } from "./types";
 
 export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
   "noto-serif-jp": {
@@ -29,6 +29,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       paragraphSpacingMm: 1.5,
       imageMaxHeightMm: 120,
       showPageNumber: false,
+      pageNumberPosition: "bottom-right",
       showBleedGuide: false,
       showSafeArea: false
     }
@@ -50,6 +51,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       paragraphSpacingMm: 1,
       imageMaxHeightMm: 74,
       showPageNumber: true,
+      pageNumberPosition: "bottom-right",
       showBleedGuide: true,
       showSafeArea: true
     }
@@ -71,6 +73,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       paragraphSpacingMm: 1.2,
       imageMaxHeightMm: 120,
       showPageNumber: true,
+      pageNumberPosition: "bottom-right",
       showBleedGuide: true,
       showSafeArea: true
     }
@@ -92,6 +95,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       paragraphSpacingMm: 0,
       imageMaxHeightMm: 154,
       showPageNumber: false,
+      pageNumberPosition: "bottom-right",
       showBleedGuide: true,
       showSafeArea: false
     }
@@ -113,6 +117,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       paragraphSpacingMm: 0,
       imageMaxHeightMm: 216,
       showPageNumber: false,
+      pageNumberPosition: "bottom-right",
       showBleedGuide: true,
       showSafeArea: false
     }
@@ -134,6 +139,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       paragraphSpacingMm: 1,
       imageMaxHeightMm: 74,
       showPageNumber: true,
+      pageNumberPosition: "bottom-right",
       showBleedGuide: true,
       showSafeArea: true
     }
@@ -142,6 +148,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 
 const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight", "ornate"]);
 const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnight", "ornate"]);
+const PAGE_NUMBER_POSITIONS = new Set<PageNumberPosition>(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
 const QR_TEXT_SIZE_MIN_PT = 5;
 const QR_TEXT_SIZE_MAX_PT = 24;
 
@@ -278,10 +285,14 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
 export function normalizePageSettings(settings: PageSettings): PageSettings {
   const presetDefaults = PAGE_PRESETS[settings.preset]?.settings ?? PAGE_PRESETS["shimauma-a6"].settings;
   const fontFamily = Object.hasOwn(MANUSCRIPT_FONTS, settings.fontFamily) ? settings.fontFamily : presetDefaults.fontFamily;
+  const pageNumberPosition = PAGE_NUMBER_POSITIONS.has(settings.pageNumberPosition ?? presetDefaults.pageNumberPosition)
+    ? settings.pageNumberPosition ?? presetDefaults.pageNumberPosition
+    : presetDefaults.pageNumberPosition;
   const normalized = {
     ...presetDefaults,
     ...settings,
     fontFamily,
+    pageNumberPosition,
     imageMaxHeightMm: settings.imageMaxHeightMm ?? presetDefaults.imageMaxHeightMm
   };
 
