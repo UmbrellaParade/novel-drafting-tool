@@ -13,6 +13,7 @@ import {
   CloudCog,
   FileDown,
   FileJson,
+  FilePlus,
   FileText,
   FolderOpen,
   ListTree,
@@ -30,6 +31,7 @@ import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, 
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { blobToDataUrl } from "@/lib/imageAssets";
 import { buildManuscriptFontEmbedCss } from "@/lib/pdfFonts";
+import { importDocxAsHtml, importTextAsHtml } from "@/lib/fileImport";
 import {
   clearGoogleDriveSettings,
   connectGoogleDrive,
@@ -1028,6 +1030,8 @@ export function EditorShell() {
   const lastUserPageScrollInputRef = useRef(0);
   const fastEditingRef = useRef(false);
   const editingScrollLockRef = useRef<{ top: number; left: number } | null>(null);
+  // 最後にスクロールをスナップさせた時のページ縮尺。縮尺が変わった時だけ再スナップする
+  const lastAlignedPageStepRef = useRef(0);
   const qrPanelRef = useRef<HTMLElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const pendingChapterContentRef = useRef<string | null>(null);
@@ -1499,6 +1503,17 @@ export function EditorShell() {
       return;
     }
 
+    // スクロール位置の強制スナップは「ズームや画面リサイズでページの縮尺が変わった時」と
+    // 「ページ数が減って現在位置が範囲外になった時」だけに限定する。
+    // 入力停止後のfastEditing解除やページ数の再計測のたびにスナップすると、
+    // ユーザーが見ている位置から視界が勝手に動いてしまう。
+    const stepChanged = Math.abs(pageFit.pageStep - lastAlignedPageStepRef.current) > 0.5;
+    const indexOutOfRange = visibleSpreadIndexRef.current > pageSpreads.length - 1;
+    if (!stepChanged && !indexOutOfRange) {
+      return;
+    }
+
+    lastAlignedPageStepRef.current = pageFit.pageStep;
     const nextIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
     visibleSpreadIndexRef.current = nextIndex;
     alignStageToSpreadIndex(nextIndex);
@@ -1534,6 +1549,12 @@ export function EditorShell() {
       const prose = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
       const firstFrame = stage?.querySelector<HTMLElement>(".page-frame");
       if (!prose || !firstFrame) {
+        return;
+      }
+
+      // スマホ表示ではページ枠が非表示（幅0）になり計測が成立しないためスキップする。
+      // ここで異常値を採用すると目次のページ番号が壊れた状態で保存されてしまう。
+      if (firstFrame.offsetWidth <= 0) {
         return;
       }
 
@@ -1917,23 +1938,64 @@ export function EditorShell() {
     }
   };
 
-  const importJson = async (file: File) => {
+  // 編集途中の内容や編集モードのタイマーを破棄して、原稿の置き換えに備える
+  const prepareForProjectReplace = () => {
+    if (contentCommitTimerRef.current !== null) {
+      window.clearTimeout(contentCommitTimerRef.current);
+      contentCommitTimerRef.current = null;
+    }
+    if (fastEditingTimerRef.current !== null) {
+      window.clearTimeout(fastEditingTimerRef.current);
+      fastEditingTimerRef.current = null;
+    }
+    setFastEditing(false);
+    pendingChapterContentRef.current = null;
+  };
+
+  // 「開く」: JSON（このツールの保存形式）に加えて、Word(.docx)とテキスト(.txt)も開ける。
+  // WordやGoogleドキュメント（docx形式でダウンロード）からの乗り換えを想定した動線。
+  const openManuscriptFile = async (file: File) => {
+    const extension = (file.name.split(".").pop() ?? "").toLowerCase();
     try {
-      const imported = await readJsonFile(file);
-      if (contentCommitTimerRef.current !== null) {
-        window.clearTimeout(contentCommitTimerRef.current);
-        contentCommitTimerRef.current = null;
+      if (extension === "json") {
+        const imported = await readJsonFile(file);
+        prepareForProjectReplace();
+        setProject(normalizeDocumentProject({ ...imported, updatedAt: new Date().toISOString() }));
+        setStatusText("JSONを読み込み");
+        return;
       }
-      if (fastEditingTimerRef.current !== null) {
-        window.clearTimeout(fastEditingTimerRef.current);
-        fastEditingTimerRef.current = null;
+
+      if (extension === "docx" || extension === "txt") {
+        if (!window.confirm(`「${file.name}」を開きます。現在の本文は置き換えられます（ページ設定はそのまま）。よろしいですか？`)) {
+          return;
+        }
+
+        setStatusText(`${file.name} を読み込み中`);
+        const imported = extension === "docx" ? await importDocxAsHtml(file) : await importTextAsHtml(file);
+        prepareForProjectReplace();
+        updateProject((previous) => {
+          // エディタは章IDをkeyに再マウントされるため、必ず新しいIDを振る
+          const documentId = crypto.randomUUID();
+          return {
+            ...previous,
+            title: imported.title,
+            chapters: [
+              {
+                id: documentId,
+                title: DOCUMENT_CHAPTER_TITLE,
+                content: imported.contentHtml
+              }
+            ],
+            activeChapterId: documentId
+          };
+        });
+        setStatusText(extension === "docx" ? "Wordファイルを読み込み" : "テキストファイルを読み込み");
+        return;
       }
-      setFastEditing(false);
-      pendingChapterContentRef.current = null;
-      setProject(normalizeDocumentProject({ ...imported, updatedAt: new Date().toISOString() }));
-      setStatusText("JSONを読み込み");
+
+      window.alert("対応しているのは .json / .docx / .txt です。");
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "JSONを読み込めませんでした。");
+      window.alert(error instanceof Error ? error.message : "ファイルを読み込めませんでした。");
     }
   };
 
@@ -2250,13 +2312,17 @@ export function EditorShell() {
         </div>
         <div className="topbar-actions">
           <span className="save-state">{statusText}</span>
+          <button className="command-button" type="button" onClick={resetProject} title="新規原稿を作成">
+            <FilePlus size={17} />
+            新規
+          </button>
           <button className="command-button" type="button" onClick={manualSave} title="保存">
             <Save size={17} />
             保存
           </button>
-          <button className="command-button" type="button" onClick={() => importInputRef.current?.click()} title="JSON読み込み">
+          <button className="command-button" type="button" onClick={() => importInputRef.current?.click()} title="ファイルを開く（JSON / Word / テキスト）">
             <FolderOpen size={17} />
-            読込
+            開く
           </button>
           <button className="command-button" type="button" onClick={exportJson} title="JSON書き出し">
             <FileJson size={17} />
@@ -2283,11 +2349,11 @@ export function EditorShell() {
           ref={importInputRef}
           className="hidden"
           type="file"
-          accept="application/json,.json"
+          accept=".json,.docx,.txt,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
           onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
-              void importJson(file);
+              void openManuscriptFile(file);
             }
             event.currentTarget.value = "";
           }}

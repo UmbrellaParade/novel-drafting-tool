@@ -2448,8 +2448,106 @@ h1 {
     padding: calc(var(--margin-top) * 0.72) calc(var(--margin-right) * 0.72) calc(var(--margin-bottom) * 0.72) calc(var(--margin-left) * 0.72);
   }
 
-  .manuscript-prose {
+  /* ヘッダー: 1カラムのグリッドに「ブランド→操作ボタン→編集ツール」の順で積む */
+  .brand-lockup,
+  .topbar-editor-tools,
+  .topbar-actions {
+    grid-column: 1 / -1;
+  }
+
+  .brand-lockup {
+    grid-row: 1;
+  }
+
+  .topbar-actions {
+    grid-row: 2;
+  }
+
+  .topbar-editor-tools {
+    grid-row: 3;
+  }
+
+  .topbar-editor-tools {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+  }
+
+  .topbar-actions .command-button {
+    flex: 0 0 auto;
+  }
+
+  .save-state {
+    flex: 0 0 auto;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /*
+   * スマホは「連続スクロールの執筆モード」。
+   * デスクトップのページ分割ビュー（transformによる仮想ページ）は画面が狭いと
+   * ページが数pxに潰れて本文が見えなくなるため、1枚の紙として自然に流す。
+   * ページ割りの確認はPC表示かPDF書き出しで行う。
+   */
+  .page-stage {
+    display: block;
+    height: auto;
+    padding: 8px;
+  }
+
+  .page-viewport {
+    width: 100% !important;
+    min-height: 0 !important;
+  }
+
+  .paged-document {
+    position: static;
+    width: 100%;
+    height: auto;
+    min-height: 62vh;
+    transform: none;
+    overflow: visible;
+    clip-path: none;
+    contain: none;
+    border: 1px solid #d8cdbc;
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(36, 33, 29, 0.12);
+  }
+
+  .page-frame-track,
+  .page-scroll-track,
+  .page-navigation {
+    display: none;
+  }
+
+  .paged-editor-layer {
+    position: static;
+    width: auto;
+    min-height: 60vh;
+    padding: 14px 12px;
+    transform: none;
+    will-change: auto;
+  }
+
+  .paged-editor-layer .manuscript-prose {
+    columns: auto !important;
+    column-width: auto !important;
+    column-gap: normal !important;
+    width: 100% !important;
+    height: auto !important;
     min-height: 58vh;
+    max-height: none;
+    padding-bottom: 40vh; /* キーボード表示時も末尾を編集しやすく */
+    /* 印刷用の文字サイズは小さすぎるので、画面では読みやすい大きさに引き上げる */
+    font-size: max(var(--manuscript-font-size), 15.5px);
   }
 
   .right-rail {

@@ -211,20 +211,81 @@ function hasRequiredScopes(scopeText: string): boolean {
   return REQUIRED_SCOPES.every((scope) => granted.has(scope));
 }
 
+// 既存ファイルの現在の親フォルダを調べる。ファイルが削除済み・アクセス不能なら null。
+async function readExistingFileParents(fileId: string): Promise<string[] | null> {
+  if (!window.gapi) {
+    return null;
+  }
+
+  try {
+    const response = await window.gapi.client.request<{ parents?: string[]; trashed?: boolean }>({
+      path: `/drive/v3/files/${fileId}`,
+      method: "GET",
+      params: { fields: "parents,trashed", supportsAllDrives: true }
+    });
+    if (response.result.trashed) {
+      return null;
+    }
+    return response.result.parents ?? [];
+  } catch {
+    return null;
+  }
+}
+
+let cachedRootFolderId: string | null = null;
+
+async function resolveRootFolderId(): Promise<string> {
+  if (cachedRootFolderId) {
+    return cachedRootFolderId;
+  }
+
+  if (!window.gapi) {
+    throw new Error("Google APIを読み込めませんでした。");
+  }
+
+  const response = await window.gapi.client.request<{ id: string }>({
+    path: "/drive/v3/files/root",
+    method: "GET",
+    params: { fields: "id" }
+  });
+  cachedRootFolderId = response.result.id;
+  return cachedRootFolderId;
+}
+
 async function saveProject(project: ManuscriptProject, folderId = project.drive?.folderId): Promise<{ fileId: string; savedAt: string; folderId?: string }> {
   if (!window.gapi) {
     throw new Error("Google APIを読み込めませんでした。");
   }
 
   const targetFolderId = folderId?.trim() ?? "";
-  const canUpdateExistingFile = (project.drive?.folderId ?? "") === targetFolderId;
-  const existingFileId = canUpdateExistingFile ? project.drive?.fileId : undefined;
+
+  // Drive上の実際のファイル位置を正とする。
+  // 以前は「プロジェクトに記録されたフォルダ」と「選択フォルダ」を比較していたが、
+  // フォルダ選択の時点でプロジェクト側も書き換わるため常に一致してしまい、
+  // 既存ファイルが選択フォルダへ移動されないバグがあった。
+  const existingFileId = project.drive?.fileId;
+  const currentParents = existingFileId ? await readExistingFileParents(existingFileId) : null;
+  const updateExisting = Boolean(existingFileId && currentParents !== null);
+
   const metadata: { name: string; mimeType: string; parents?: string[] } = {
     name: `${sanitizeFileName(project.title)}.json`,
     mimeType: "application/json"
   };
-  if (targetFolderId && !existingFileId) {
+  if (!updateExisting && targetFolderId) {
     metadata.parents = [targetFolderId];
+  }
+
+  // 既存ファイルの更新時、保存先が変わっていればファイルを移動する
+  const moveParams: Record<string, string> = {};
+  if (updateExisting && currentParents) {
+    const effectiveTarget = targetFolderId || (await resolveRootFolderId());
+    if (!currentParents.includes(effectiveTarget)) {
+      moveParams.addParents = effectiveTarget;
+      const removeParents = currentParents.filter((parent) => parent !== effectiveTarget).join(",");
+      if (removeParents) {
+        moveParams.removeParents = removeParents;
+      }
+    }
   }
 
   const boundary = `drafting-tool-${Date.now()}`;
@@ -243,9 +304,9 @@ async function saveProject(project: ManuscriptProject, folderId = project.drive?
   ].join("\r\n");
 
   const response = await window.gapi.client.request<{ id: string }>({
-    path: existingFileId ? `/upload/drive/v3/files/${existingFileId}` : "/upload/drive/v3/files",
-    method: existingFileId ? "PATCH" : "POST",
-    params: { uploadType: "multipart", supportsAllDrives: true },
+    path: updateExisting ? `/upload/drive/v3/files/${existingFileId}` : "/upload/drive/v3/files",
+    method: updateExisting ? "PATCH" : "POST",
+    params: { uploadType: "multipart", supportsAllDrives: true, ...moveParams },
     headers: {
       "Content-Type": `multipart/related; boundary=${boundary}`
     },
