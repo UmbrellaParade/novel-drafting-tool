@@ -1501,6 +1501,10 @@ h1 {
   text-orientation: mixed;
 }
 
+.paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"] {
+  display: block !important;
+}
+
 .paged-document.is-vertical .manuscript-prose img:not(.qr-card-image),
 .pdf-export-document.is-vertical .manuscript-prose img:not(.qr-card-image),
 .paged-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"],
