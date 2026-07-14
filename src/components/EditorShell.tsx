@@ -644,6 +644,13 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
     throw new Error("PDF用ページを作成できませんでした。");
   }
 
+  if (snapshot.project.pageSettings.writingMode === "vertical") {
+    const contentWindow = root.querySelector<HTMLElement>(".pdf-export-content-window");
+    const contentWidth = contentWindow?.getBoundingClientRect().width || contentWindow?.offsetWidth || 0;
+    applyVerticalFlowSpacing(flow, contentWidth);
+    await nextAnimationFrame();
+  }
+
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle(snapshot.project.title);
 
@@ -828,7 +835,7 @@ async function measurePdfExportLayout(snapshot: PdfExportSnapshot): Promise<PdfE
     const contentWidth = contentWindow.getBoundingClientRect().width || contentWindow.offsetWidth;
     const verticalWriting = snapshot.project.pageSettings.writingMode === "vertical";
     if (verticalWriting) {
-      applyVerticalPageBreakSpacing(flow, contentWidth);
+      applyVerticalFlowSpacing(flow, contentWidth);
     }
     const computedColumnGap = Number.parseFloat(window.getComputedStyle(flow).columnGap);
     const columnGap = Number.isFinite(computedColumnGap) ? computedColumnGap : 0;
@@ -907,6 +914,16 @@ const PREVIEW_PAGE_CONTENT_SELECTOR = [
   "img"
 ].join(",");
 
+const VERTICAL_UNBREAKABLE_BLOCK_SELECTOR = [
+  "section[data-type='table-of-contents']",
+  "[data-type='qr-card']",
+  ".qr-card",
+  "[data-resize-container][data-node='image']",
+  "img:not(.qr-card-image)"
+].join(",");
+
+const PAGE_BOUNDARY_EPSILON_PX = 0.75;
+
 function hasPreviewPageContent(element: HTMLElement): boolean {
   if (element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before")) {
     return true;
@@ -946,25 +963,37 @@ function elementChildSelector(element: HTMLElement, root: HTMLElement): string |
   return current === root ? parts.join(" > ") : null;
 }
 
-function applyVerticalPageBreakSpacing(flow: HTMLElement, contentWidth: number): void {
-  const breakTargets = Array.from(
-    flow.querySelectorAll<HTMLElement>(".page-break-before,[data-page-break-before='true']")
+function verticalPageRemainder(offset: number, contentWidth: number): number {
+  const remainder = ((offset % contentWidth) + contentWidth) % contentWidth;
+  if (remainder <= PAGE_BOUNDARY_EPSILON_PX || contentWidth - remainder <= PAGE_BOUNDARY_EPSILON_PX) {
+    return 0;
+  }
+  return remainder;
+}
+
+function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void {
+  const layoutTargets = Array.from(
+    flow.querySelectorAll<HTMLElement>(
+      `.page-break-before,[data-page-break-before='true'],${VERTICAL_UNBREAKABLE_BLOCK_SELECTOR}`
+    )
+  ).filter(
+    (element) => isForcedPageBreakTarget(element) || (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR))
   );
   const contentEditableFlow = flow.isContentEditable;
   let previewStyle: HTMLStyleElement | null = null;
   if (contentEditableFlow) {
     flow.dataset.verticalPageFlow = "preview";
-    previewStyle = document.querySelector<HTMLStyleElement>("style[data-vertical-page-break-rules='preview']");
+    previewStyle = document.querySelector<HTMLStyleElement>("style[data-vertical-flow-rules='preview']");
     if (!previewStyle) {
       previewStyle = document.createElement("style");
-      previewStyle.dataset.verticalPageBreakRules = "preview";
+      previewStyle.dataset.verticalFlowRules = "preview";
       document.head.append(previewStyle);
     }
     previewStyle.textContent = "";
   } else {
-    breakTargets.forEach((element) => element.style.removeProperty("--vertical-page-break-space"));
+    layoutTargets.forEach((element) => element.style.removeProperty("--vertical-page-break-space"));
   }
-  if (contentWidth <= 0 || breakTargets.length === 0) {
+  if (contentWidth <= 0 || layoutTargets.length === 0) {
     return;
   }
 
@@ -974,11 +1003,8 @@ function applyVerticalPageBreakSpacing(flow: HTMLElement, contentWidth: number):
   const flowRight = flowRect.right;
   const previewRules: string[] = [];
 
-  breakTargets.forEach((element) => {
-    const offset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
-    const remainder = offset % contentWidth;
-    const targetBoundary = offset + (remainder < 0.5 ? contentWidth : contentWidth - remainder);
-    let space = targetBoundary - offset;
+  layoutTargets.forEach((element) => {
+    let space = 0;
     let setSpace: (value: number) => void;
     if (previewStyle) {
       const childSelector = elementChildSelector(element, flow);
@@ -995,12 +1021,38 @@ function applyVerticalPageBreakSpacing(flow: HTMLElement, contentWidth: number):
       setSpace = (value) => element.style.setProperty("--vertical-page-break-space", `${value}px`);
     }
 
-    setSpace(space);
-    const alignedOffset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
-    const correction = targetBoundary - alignedOffset;
-    if (Math.abs(correction) > 0.1) {
-      space = Math.max(0, space + correction);
+    const alignToOffset = (targetOffset: number) => {
       setSpace(space);
+      const alignedOffset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
+      const correction = targetOffset - alignedOffset;
+      if (Math.abs(correction) > 0.1) {
+        space = Math.max(0, space + correction);
+        setSpace(space);
+      }
+    };
+
+    if (isForcedPageBreakTarget(element)) {
+      const offset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
+      const remainder = verticalPageRemainder(offset, contentWidth);
+      if (remainder > 0) {
+        space += contentWidth - remainder;
+        alignToOffset(offset + contentWidth - remainder);
+      }
+    }
+
+    if (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR)) {
+      const rect = element.getBoundingClientRect();
+      const offset = Math.max(0, (flowRight - rect.right) / safeScale);
+      const blockWidth = rect.width / safeScale;
+      const remainder = verticalPageRemainder(offset, contentWidth);
+      if (
+        remainder > 0 &&
+        blockWidth <= contentWidth + PAGE_BOUNDARY_EPSILON_PX &&
+        remainder + blockWidth > contentWidth + PAGE_BOUNDARY_EPSILON_PX
+      ) {
+        space += contentWidth - remainder;
+        alignToOffset(offset + contentWidth - remainder);
+      }
     }
   });
 }
@@ -1716,7 +1768,7 @@ export function EditorShell() {
       }
 
       if (verticalWriting) {
-        applyVerticalPageBreakSpacing(prose, contentWidth);
+        applyVerticalFlowSpacing(prose, contentWidth);
       }
       const measuredContentPages = verticalWriting
         ? measureOccupiedVerticalPages(prose, contentWidth)
@@ -2594,15 +2646,17 @@ export function EditorShell() {
                   </section>
                 ))}
               </div>
-              <div className="paged-editor-layer">
-                <TiptapEditor
-                  key={activeChapter.id}
-                  content={activeChapter.content}
-                  onChange={updateActiveChapterContent}
-                  onTypingActivity={markTypingActivity}
-                  onPasteLayoutHints={applyPasteLayoutHints}
-                  onReady={setActiveEditor}
-                />
+              <div className="paged-editor-window">
+                <div className="paged-editor-layer">
+                  <TiptapEditor
+                    key={activeChapter.id}
+                    content={activeChapter.content}
+                    onChange={updateActiveChapterContent}
+                    onTypingActivity={markTypingActivity}
+                    onPasteLayoutHints={applyPasteLayoutHints}
+                    onReady={setActiveEditor}
+                  />
+                </div>
               </div>
             </div>
             <div className="page-scroll-track" aria-hidden="true">

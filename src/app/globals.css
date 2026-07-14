@@ -952,7 +952,26 @@ h1 {
   will-change: transform;
 }
 
+.paged-editor-window {
+  display: contents;
+}
+
+.paged-document.is-vertical .paged-editor-window {
+  position: absolute;
+  top: var(--margin-top);
+  left: var(--margin-left);
+  z-index: 2;
+  display: block;
+  width: var(--content-width);
+  height: var(--content-height);
+  overflow: hidden;
+  overflow: clip;
+}
+
 .paged-document.is-vertical .paged-editor-layer {
+  top: 0;
+  left: 0;
+  z-index: 0;
   width: var(--vertical-flow-width);
   transform: translateX(var(--vertical-visible-page-offset, 0));
 }
@@ -1492,9 +1511,37 @@ h1 {
 .paged-document.is-vertical .manuscript-prose .page-break-before,
 .paged-document.is-vertical .manuscript-prose [data-page-break-before="true"],
 .pdf-export-document.is-vertical .manuscript-prose .page-break-before,
-.pdf-export-document.is-vertical .manuscript-prose [data-page-break-before="true"] {
+.pdf-export-document.is-vertical .manuscript-prose [data-page-break-before="true"],
+.paged-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
+.paged-document.is-vertical .manuscript-prose > [data-type="qr-card"],
+.paged-document.is-vertical .manuscript-prose > .qr-card,
+.paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
+.paged-document.is-vertical .manuscript-prose > img:not(.qr-card-image),
+.pdf-export-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
+.pdf-export-document.is-vertical .manuscript-prose > [data-type="qr-card"],
+.pdf-export-document.is-vertical .manuscript-prose > .qr-card,
+.pdf-export-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
+.pdf-export-document.is-vertical .manuscript-prose > img:not(.qr-card-image) {
   margin-right: var(--vertical-page-break-space, 0px);
+}
+
+.paged-document.is-vertical .manuscript-prose .page-break-before,
+.paged-document.is-vertical .manuscript-prose [data-page-break-before="true"],
+.pdf-export-document.is-vertical .manuscript-prose .page-break-before,
+.pdf-export-document.is-vertical .manuscript-prose [data-page-break-before="true"] {
   break-before: auto;
+}
+
+.paged-document.is-vertical .manuscript-prose p:empty:has(+ .page-break-before),
+.paged-document.is-vertical .manuscript-prose p:empty:has(+ [data-page-break-before="true"]),
+.paged-document.is-vertical .manuscript-prose p:has(> br:only-child):has(+ .page-break-before),
+.paged-document.is-vertical .manuscript-prose p:has(> br:only-child):has(+ [data-page-break-before="true"]),
+.pdf-export-document.is-vertical .manuscript-prose p:empty:has(+ .page-break-before),
+.pdf-export-document.is-vertical .manuscript-prose p:empty:has(+ [data-page-break-before="true"]),
+.pdf-export-document.is-vertical .manuscript-prose p:has(> br:only-child):has(+ .page-break-before),
+.pdf-export-document.is-vertical .manuscript-prose p:has(> br:only-child):has(+ [data-page-break-before="true"]) {
+  display: none;
+  margin: 0;
 }
 
 .paged-document.is-vertical .manuscript-prose .page-break-before::before,
