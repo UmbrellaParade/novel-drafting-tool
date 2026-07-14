@@ -1,4 +1,4 @@
-import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId } from "./types";
+import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId, WritingMode } from "./types";
 
 export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
   "noto-serif-jp": {
@@ -17,6 +17,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     settings: {
       preset: "kindle",
       fontFamily: "noto-serif-jp",
+      writingMode: "horizontal",
       pageWidthMm: 148,
       pageHeightMm: 210,
       marginTopMm: 18,
@@ -39,6 +40,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     settings: {
       preset: "shimauma-a6",
       fontFamily: "noto-serif-jp",
+      writingMode: "horizontal",
       pageWidthMm: 111,
       pageHeightMm: 154,
       marginTopMm: 13,
@@ -61,6 +63,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     settings: {
       preset: "shimauma-a5",
       fontFamily: "noto-serif-jp",
+      writingMode: "horizontal",
       pageWidthMm: 154,
       pageHeightMm: 216,
       marginTopMm: 16,
@@ -83,6 +86,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     settings: {
       preset: "shimauma-a6-manga",
       fontFamily: "noto-serif-jp",
+      writingMode: "horizontal",
       pageWidthMm: 111,
       pageHeightMm: 154,
       marginTopMm: 0,
@@ -105,6 +109,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     settings: {
       preset: "shimauma-a5-manga",
       fontFamily: "noto-serif-jp",
+      writingMode: "horizontal",
       pageWidthMm: 154,
       pageHeightMm: 216,
       marginTopMm: 0,
@@ -127,6 +132,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
     settings: {
       preset: "custom",
       fontFamily: "noto-serif-jp",
+      writingMode: "horizontal",
       pageWidthMm: 105,
       pageHeightMm: 148,
       marginTopMm: 10,
@@ -149,6 +155,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight", "ornate"]);
 const TOC_STYLE_IDS = new Set<TocStyleId>(["plain", "classic", "rain", "antique", "midnight", "ornate"]);
 const PAGE_NUMBER_POSITIONS = new Set<PageNumberPosition>(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
+const WRITING_MODES = new Set<WritingMode>(["horizontal", "vertical"]);
 const QR_TEXT_SIZE_MIN_PT = 5;
 const QR_TEXT_SIZE_MAX_PT = 24;
 const DEFAULT_TOC_LEADER_WIDTH_MM = 12;
@@ -207,7 +214,7 @@ export function applyPreset(settings: PageSettings, preset: PagePresetId): PageS
     return normalizePageSettings({ ...settings, preset: "custom" });
   }
 
-  return normalizePageSettings({ ...PAGE_PRESETS[preset].settings });
+  return normalizePageSettings({ ...PAGE_PRESETS[preset].settings, writingMode: settings.writingMode });
 }
 
 export function normalizeProject(project: ManuscriptProject): ManuscriptProject {
@@ -291,6 +298,9 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
 export function normalizePageSettings(settings: PageSettings): PageSettings {
   const presetDefaults = PAGE_PRESETS[settings.preset]?.settings ?? PAGE_PRESETS["shimauma-a6"].settings;
   const fontFamily = Object.hasOwn(MANUSCRIPT_FONTS, settings.fontFamily) ? settings.fontFamily : presetDefaults.fontFamily;
+  const writingMode = WRITING_MODES.has(settings.writingMode ?? presetDefaults.writingMode)
+    ? settings.writingMode ?? presetDefaults.writingMode
+    : presetDefaults.writingMode;
   const pageNumberPosition = PAGE_NUMBER_POSITIONS.has(settings.pageNumberPosition ?? presetDefaults.pageNumberPosition)
     ? settings.pageNumberPosition ?? presetDefaults.pageNumberPosition
     : presetDefaults.pageNumberPosition;
@@ -298,6 +308,7 @@ export function normalizePageSettings(settings: PageSettings): PageSettings {
     ...presetDefaults,
     ...settings,
     fontFamily,
+    writingMode,
     pageNumberPosition,
     imageMaxHeightMm: settings.imageMaxHeightMm ?? presetDefaults.imageMaxHeightMm
   };

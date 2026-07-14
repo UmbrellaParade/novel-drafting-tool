@@ -236,7 +236,10 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
             },
             pageNumbers: {
               start: 1
-            }
+            },
+            textDirection: project.pageSettings.writingMode === "vertical"
+              ? docx.PageTextDirectionType.TOP_TO_BOTTOM_RIGHT_TO_LEFT
+              : docx.PageTextDirectionType.LEFT_TO_RIGHT_TOP_TO_BOTTOM
           }
         },
         children
@@ -580,6 +583,7 @@ function epubPackageOpf(project: ManuscriptProject, chapters: EpubChapter[], ass
     .map((asset) => `<item id="${asset.id}" href="${asset.href}" media-type="${asset.mediaType}"/>`)
     .join("\n    ");
   const spine = chapters.map((chapter) => `<itemref idref="${chapter.id}"/>`).join("\n    ");
+  const spineDirection = project.pageSettings.writingMode === "vertical" ? ' page-progression-direction="rtl"' : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="ja">
@@ -597,7 +601,7 @@ function epubPackageOpf(project: ManuscriptProject, chapters: EpubChapter[], ass
     ${manifestChapters}
     ${manifestAssets}
   </manifest>
-  <spine>
+  <spine${spineDirection}>
     ${spine}
   </spine>
 </package>`;
@@ -644,6 +648,11 @@ ${chapter.body}
 
 function epubCss(project: ManuscriptProject): string {
   const bodyFont = project.pageSettings.fontFamily === "noto-sans-jp" ? "sans-serif" : "serif";
+  const verticalWritingCss = project.pageSettings.writingMode === "vertical"
+    ? `  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  text-combine-upright: digits 2;`
+    : "";
 
   return `body {
   color: #24211d;
@@ -654,10 +663,12 @@ function epubCss(project: ManuscriptProject): string {
   word-break: normal;
   overflow-wrap: normal;
   hyphens: manual;
+${verticalWritingCss}
 }
 
 p {
-  margin: 0 0 ${project.pageSettings.paragraphSpacingMm}mm;
+  margin: 0;
+  margin-block-end: ${project.pageSettings.paragraphSpacingMm}mm;
 }
 
 h1, h2, h3 {
@@ -702,6 +713,7 @@ img {
   border: 1.4px solid #111111;
   background: #ffffff;
   color: #111111;
+  writing-mode: horizontal-tb;
 }
 
 .toc-title {
@@ -820,6 +832,11 @@ img {
   margin: 1.2em auto;
   padding: 4mm;
   border: 1px solid #37312c;
+  writing-mode: horizontal-tb;
+}
+
+nav {
+  writing-mode: horizontal-tb;
 }
 
 .qr-card-body {

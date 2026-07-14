@@ -3,10 +3,12 @@ export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
 export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight" | "ornate";
 export type TocStyleId = "plain" | "classic" | "rain" | "antique" | "midnight" | "ornate";
 export type PageNumberPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
+export type WritingMode = "horizontal" | "vertical";
 
 export type PageSettings = {
   preset: PagePresetId;
   fontFamily: ManuscriptFontId;
+  writingMode: WritingMode;
   pageWidthMm: number;
   pageHeightMm: number;
   marginTopMm: number;

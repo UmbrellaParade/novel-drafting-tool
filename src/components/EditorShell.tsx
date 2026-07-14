@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
-import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId } from "@/lib/types";
+import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId, WritingMode } from "@/lib/types";
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
 import { blobToDataUrl } from "@/lib/imageAssets";
 import { buildManuscriptFontEmbedCss } from "@/lib/pdfFonts";
@@ -479,10 +479,10 @@ function sameNumberList(left: number[], right: number[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function buildPageSpreads(pageCount: number): PageSpread[] {
+function buildPageSpreads(pageCount: number, writingMode: WritingMode): PageSpread[] {
   const safePageCount = Math.max(1, pageCount);
-  if (safePageCount === 1) {
-    return [{ id: "page-1", pages: [0] }];
+  if (writingMode === "vertical" || safePageCount === 1) {
+    return Array.from({ length: safePageCount }, (_, pageIndex) => ({ id: `page-${pageIndex + 1}`, pages: [pageIndex] }));
   }
 
   const spreads: PageSpread[] = [{ id: "page-1", pages: [0] }];
@@ -659,6 +659,7 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
   }
 
   const pageSettings = snapshot.project.pageSettings;
+  const verticalWriting = pageSettings.writingMode === "vertical";
   const pageWidthPt = mmToPt(snapshot.project.pageSettings.pageWidthMm);
   const pageHeightPt = mmToPt(snapshot.project.pageSettings.pageHeightMm);
   const renderScale = PDF_EXPORT_DPI / 96;
@@ -689,7 +690,9 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
       pageNumber.hidden = !pageSettings.showPageNumber;
     }
 
-    flow.style.marginLeft = `-${pageIndex * pagePitchMm}mm`;
+    flow.style.marginLeft = verticalWriting
+      ? `-${Math.max(0, snapshot.pageCount - pageIndex - 1) * contentWidthMm}mm`
+      : `-${pageIndex * pagePitchMm}mm`;
     onProgress?.(pageIndex, snapshot.pageCount);
     await nextAnimationFrame();
 
@@ -730,7 +733,9 @@ function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): 
   const imageLayout = imageLayoutVarsForPage(page);
   const contentWidthMm = Math.max(1, page.pageWidthMm - page.marginLeftMm - page.marginRightMm);
   const columnGapMm = page.marginLeftMm + page.marginRightMm + PAGE_GAP_MM;
-  const pagedContentWidthMm = contentWidthMm * snapshot.pageCount + columnGapMm * Math.max(0, snapshot.pageCount - 1);
+  const pagedContentWidthMm = page.writingMode === "vertical"
+    ? contentWidthMm * snapshot.pageCount
+    : contentWidthMm * snapshot.pageCount + columnGapMm * Math.max(0, snapshot.pageCount - 1);
   root.style.setProperty("--page-width", `${page.pageWidthMm}mm`);
   root.style.setProperty("--page-height", `${page.pageHeightMm}mm`);
   root.style.setProperty("--margin-top", `${page.marginTopMm}mm`);
@@ -753,12 +758,13 @@ function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): 
   root.style.setProperty("--content-height", "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))");
   root.style.setProperty("--column-gap", "calc(var(--margin-left) + var(--margin-right) + var(--page-gap))");
   root.style.setProperty("--paged-content-width", `${pagedContentWidthMm}mm`);
+  root.style.setProperty("--vertical-flow-width", `${contentWidthMm * snapshot.pageCount}mm`);
 }
 
 function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
   const page = snapshot.project.pageSettings;
   const root = document.createElement("div");
-  root.className = "pdf-export-document";
+  root.className = `pdf-export-document ${page.writingMode === "vertical" ? "is-vertical" : "is-horizontal"}`;
   root.lang = "ja";
   root.setAttribute("aria-hidden", "true");
   setPdfExportStyleVars(root, snapshot);
@@ -820,16 +826,22 @@ async function measurePdfExportLayout(snapshot: PdfExportSnapshot): Promise<PdfE
     }
 
     const contentWidth = contentWindow.getBoundingClientRect().width || contentWindow.offsetWidth;
+    const verticalWriting = snapshot.project.pageSettings.writingMode === "vertical";
+    if (verticalWriting) {
+      applyVerticalPageBreakSpacing(flow, contentWidth);
+    }
     const computedColumnGap = Number.parseFloat(window.getComputedStyle(flow).columnGap);
     const columnGap = Number.isFinite(computedColumnGap) ? computedColumnGap : 0;
-    const pagePitch = contentWidth + columnGap;
+    const pagePitch = verticalWriting ? contentWidth : contentWidth + columnGap;
     if (contentWidth <= 0 || pagePitch <= 0) {
       throw new Error("PDF用ページサイズを測定できませんでした。");
     }
 
-    const pageCount = Math.max(1, Math.min(Math.ceil((flow.scrollWidth + 1) / pagePitch), MAX_PAGE_FRAMES));
+    const measuredVerticalPages = verticalWriting ? measureOccupiedVerticalPages(flow, contentWidth) : null;
+    const pageCount = Math.max(1, Math.min(measuredVerticalPages ?? Math.ceil((flow.scrollWidth + 1) / pagePitch), MAX_PAGE_FRAMES));
     const sectionTitles = Array.from({ length: pageCount }, () => "");
     const firstContentLeft = contentWindow.getBoundingClientRect().left;
+    const firstContentRight = flow.getBoundingClientRect().right;
 
     flow.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
       if (heading.closest("[data-type='table-of-contents']")) {
@@ -841,7 +853,16 @@ async function measurePdfExportLayout(snapshot: PdfExportSnapshot): Promise<PdfE
         return;
       }
 
-      const pageIndex = Math.max(0, Math.min(pageCount - 1, Math.floor((heading.getBoundingClientRect().left - firstContentLeft + 2) / pagePitch)));
+      const headingRect = heading.getBoundingClientRect();
+      const pageIndex = Math.max(
+        0,
+        Math.min(
+          pageCount - 1,
+          verticalWriting
+            ? Math.floor((firstContentRight - headingRect.right + 2) / pagePitch)
+            : Math.floor((headingRect.left - firstContentLeft + 2) / pagePitch)
+        )
+      );
       for (let index = pageIndex; index < sectionTitles.length; index += 1) {
         sectionTitles[index] = title;
       }
@@ -869,7 +890,7 @@ function readCssLengthPx(host: HTMLElement, variableName: string): number {
   probe.style.width = `var(${variableName})`;
   probe.style.height = "0";
   host.appendChild(probe);
-  const width = probe.offsetWidth || probe.getBoundingClientRect().width;
+  const width = probe.getBoundingClientRect().width || probe.offsetWidth;
   probe.remove();
   return Number.isFinite(width) && width > 0 ? width : 0;
 }
@@ -887,6 +908,10 @@ const PREVIEW_PAGE_CONTENT_SELECTOR = [
 ].join(",");
 
 function hasPreviewPageContent(element: HTMLElement): boolean {
+  if (element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before")) {
+    return true;
+  }
+
   if (element.matches("img,figure,section[data-type='table-of-contents'],[data-type='qr-card'],.qr-card")) {
     return true;
   }
@@ -896,6 +921,119 @@ function hasPreviewPageContent(element: HTMLElement): boolean {
   }
 
   return (element.textContent ?? "").trim().length > 0;
+}
+
+function isForcedPageBreakTarget(element: HTMLElement): boolean {
+  return element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before");
+}
+
+function elementChildSelector(element: HTMLElement, root: HTMLElement): string | null {
+  const parts: string[] = [];
+  let current: HTMLElement | null = element;
+  while (current && current !== root) {
+    const parent: HTMLElement | null = current.parentElement;
+    if (!parent) {
+      return null;
+    }
+    const childIndex = Array.from(parent.children).indexOf(current);
+    if (childIndex < 0) {
+      return null;
+    }
+    parts.unshift(`:nth-child(${childIndex + 1})`);
+    current = parent;
+  }
+
+  return current === root ? parts.join(" > ") : null;
+}
+
+function applyVerticalPageBreakSpacing(flow: HTMLElement, contentWidth: number): void {
+  const breakTargets = Array.from(
+    flow.querySelectorAll<HTMLElement>(".page-break-before,[data-page-break-before='true']")
+  );
+  const contentEditableFlow = flow.isContentEditable;
+  let previewStyle: HTMLStyleElement | null = null;
+  if (contentEditableFlow) {
+    flow.dataset.verticalPageFlow = "preview";
+    previewStyle = document.querySelector<HTMLStyleElement>("style[data-vertical-page-break-rules='preview']");
+    if (!previewStyle) {
+      previewStyle = document.createElement("style");
+      previewStyle.dataset.verticalPageBreakRules = "preview";
+      document.head.append(previewStyle);
+    }
+    previewStyle.textContent = "";
+  } else {
+    breakTargets.forEach((element) => element.style.removeProperty("--vertical-page-break-space"));
+  }
+  if (contentWidth <= 0 || breakTargets.length === 0) {
+    return;
+  }
+
+  const flowRect = flow.getBoundingClientRect();
+  const visualScale = flow.offsetWidth > 0 ? flowRect.width / flow.offsetWidth : 1;
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+  const flowRight = flowRect.right;
+  const previewRules: string[] = [];
+
+  breakTargets.forEach((element) => {
+    const offset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
+    const remainder = offset % contentWidth;
+    const targetBoundary = offset + (remainder < 0.5 ? contentWidth : contentWidth - remainder);
+    let space = targetBoundary - offset;
+    let setSpace: (value: number) => void;
+    if (previewStyle) {
+      const childSelector = elementChildSelector(element, flow);
+      if (!childSelector) {
+        return;
+      }
+      const ruleIndex = previewRules.length;
+      previewRules.push("");
+      setSpace = (value) => {
+        previewRules[ruleIndex] = `.paged-document.is-vertical .manuscript-prose[data-vertical-page-flow="preview"] > ${childSelector} { --vertical-page-break-space: ${value}px; }`;
+        previewStyle.textContent = previewRules.join("\n");
+      };
+    } else {
+      setSpace = (value) => element.style.setProperty("--vertical-page-break-space", `${value}px`);
+    }
+
+    setSpace(space);
+    const alignedOffset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
+    const correction = targetBoundary - alignedOffset;
+    if (Math.abs(correction) > 0.1) {
+      space = Math.max(0, space + correction);
+      setSpace(space);
+    }
+  });
+}
+
+function measureOccupiedVerticalPages(prose: HTMLElement, contentWidth: number): number | null {
+  if (contentWidth <= 0) {
+    return null;
+  }
+
+  const proseRect = prose.getBoundingClientRect();
+  const visualScale = prose.offsetWidth > 0 ? proseRect.width / prose.offsetWidth : 1;
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+  const visualContentWidth = contentWidth * safeScale;
+  let leftmostContent = proseRect.right;
+
+  prose.querySelectorAll<HTMLElement>(PREVIEW_PAGE_CONTENT_SELECTOR).forEach((element) => {
+    if (!hasPreviewPageContent(element)) {
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if ((rect.width <= 0 || rect.height <= 0) && !isForcedPageBreakTarget(element)) {
+      return;
+    }
+
+    leftmostContent = Math.min(leftmostContent, rect.left);
+  });
+
+  if (leftmostContent >= proseRect.right) {
+    return null;
+  }
+
+  return Math.max(1, Math.ceil((proseRect.right - leftmostContent + 1) / visualContentWidth));
 }
 
 function measureOccupiedPreviewPages(prose: HTMLElement, firstPageLeft: number, visualPagePitch: number): number | null {
@@ -910,7 +1048,7 @@ function measureOccupiedPreviewPages(prose: HTMLElement, firstPageLeft: number, 
     }
 
     const rect = element.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
+    if ((rect.width <= 0 || rect.height <= 0) && !isForcedPageBreakTarget(element)) {
       return;
     }
 
@@ -1168,7 +1306,9 @@ export function EditorShell() {
       ? measuredPages.count
       : null;
   const pageFrameCount = Math.max(1, Math.min(measuredPageCount ?? estimatedPages, MAX_PAGE_FRAMES));
-  const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount), [pageFrameCount]);
+  const writingMode = layoutPageSettings?.writingMode ?? "horizontal";
+  const verticalWriting = writingMode === "vertical";
+  const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount, writingMode), [pageFrameCount, writingMode]);
   const clampedVisibleSpreadIndex = Math.max(0, Math.min(visibleSpreadIndex, pageSpreads.length - 1));
   const visibleSpread = pageSpreads[clampedVisibleSpreadIndex] ?? pageSpreads[0] ?? { id: "page-1", pages: [0] };
   const spreadStartPageIndex = visibleSpread.pages[0] ?? 0;
@@ -1182,6 +1322,7 @@ export function EditorShell() {
     "--page-step": `${pageFit.pageStep || 1}px`,
     "--visible-page-index": spreadStartPageIndex,
     "--visible-page-offset": `calc(-${spreadStartPageIndex} * (var(--page-width) + var(--page-gap)))`,
+    "--vertical-visible-page-offset": `calc(-${Math.max(0, pageFrameCount - spreadStartPageIndex - 1)} * var(--content-width))`,
     "--spread-width": spreadPageCount > 1 ? "calc(2 * var(--page-width) + var(--page-gap))" : "var(--page-width)",
     width: pageFit.width ? `${pageFit.width}px` : undefined,
     minHeight: pageFit.height ? `${pageFit.height}px` : undefined
@@ -1555,7 +1696,7 @@ export function EditorShell() {
       const stage = pageStageRef.current;
       const prose = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
       const firstFrame = stage?.querySelector<HTMLElement>(".page-frame");
-      if (!prose || !firstFrame) {
+      if (!stage || !prose || !firstFrame) {
         return;
       }
 
@@ -1569,23 +1710,41 @@ export function EditorShell() {
       const pagePitch = firstFrame.offsetWidth + pageGap;
       const firstFrameRect = firstFrame.getBoundingClientRect();
       const visualPagePitch = pagePitch * pageFit.scale;
-      if (pagePitch <= 0 || visualPagePitch <= 0) {
+      const contentWidth = readCssLengthPx(stage, "--content-width");
+      if (pagePitch <= 0 || visualPagePitch <= 0 || (verticalWriting && contentWidth <= 0)) {
         return;
       }
 
-      const measuredContentPages = measureOccupiedPreviewPages(prose, firstFrameRect.left - spreadStartPageIndex * visualPagePitch, visualPagePitch);
-      const actualPages = measuredContentPages ?? Math.ceil((prose.scrollWidth + 1) / pagePitch);
+      if (verticalWriting) {
+        applyVerticalPageBreakSpacing(prose, contentWidth);
+      }
+      const measuredContentPages = verticalWriting
+        ? measureOccupiedVerticalPages(prose, contentWidth)
+        : measureOccupiedPreviewPages(prose, firstFrameRect.left - spreadStartPageIndex * visualPagePitch, visualPagePitch);
+      const actualPages = measuredContentPages ?? Math.ceil((prose.scrollWidth + 1) / (verticalWriting ? contentWidth : pagePitch));
       const nextCount = Math.max(1, Math.min(actualPages, MAX_PAGE_FRAMES));
       const titleCount = nextCount;
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];
       const firstFrameLeft = firstFrameRect.left - spreadStartPageIndex * visualPagePitch;
+      const proseRect = prose.getBoundingClientRect();
+      const proseScale = prose.offsetWidth > 0 ? proseRect.width / prose.offsetWidth : pageFit.scale;
+      const verticalPagePitch = contentWidth * (Number.isFinite(proseScale) && proseScale > 0 ? proseScale : pageFit.scale);
       prose.querySelectorAll<HTMLElement>("h1").forEach((heading) => {
         if (heading.closest("[data-type='table-of-contents']")) {
           return;
         }
 
-        const pageIndex = Math.max(0, Math.min(titleCount - 1, Math.floor((heading.getBoundingClientRect().left - firstFrameLeft + 2) / visualPagePitch)));
+        const headingRect = heading.getBoundingClientRect();
+        const pageIndex = Math.max(
+          0,
+          Math.min(
+            titleCount - 1,
+            verticalWriting
+              ? Math.floor((proseRect.right - headingRect.right + 2) / verticalPagePitch)
+              : Math.floor((headingRect.left - firstFrameLeft + 2) / visualPagePitch)
+          )
+        );
         nextHeadingPageNumbers.push(pageIndex + 1);
         const title = heading.textContent?.trim();
         if (!title) {
@@ -1610,7 +1769,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [activeChapter, fastEditing, layoutChapterContent, layoutContentRevision, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex]);
+  }, [activeChapter, fastEditing, layoutChapterContent, layoutContentRevision, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex, verticalWriting]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -1721,7 +1880,8 @@ export function EditorShell() {
     "--content-height": "calc(var(--page-height) - var(--margin-top) - var(--margin-bottom))",
     "--column-gap": "calc(var(--margin-left) + var(--margin-right) + var(--page-gap))",
     "--paged-track-width": `calc(${pageFrameCount} * var(--page-width) + ${pageFrameCount - 1} * var(--page-gap))`,
-    "--paged-content-width": `calc(${pageFrameCount} * (var(--page-width) - var(--margin-left) - var(--margin-right)) + ${pageFrameCount - 1} * (var(--margin-left) + var(--margin-right) + var(--page-gap)))`
+    "--paged-content-width": `calc(${pageFrameCount} * (var(--page-width) - var(--margin-left) - var(--margin-right)) + ${pageFrameCount - 1} * (var(--margin-left) + var(--margin-right) + var(--page-gap)))`,
+    "--vertical-flow-width": `calc(${pageFrameCount} * (var(--page-width) - var(--margin-left) - var(--margin-right)))`
   } as React.CSSProperties;
 
   const jumpToHeading = (index: number) => {
@@ -2409,7 +2569,7 @@ export function EditorShell() {
         <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`}>
           <div className="page-viewport" style={pageViewportStyle}>
             <div
-              className={`paged-document ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
+              className={`paged-document ${verticalWriting ? "is-vertical" : "is-horizontal"} ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
               data-estimated-pages={estimatedPages}
               data-rendered-pages={pageFrameCount}
               data-visible-page={spreadStartPageIndex + 1}
@@ -2577,8 +2737,9 @@ function ProjectPanel({
   const lineAdvanceMm = Math.max(0.1, fontSizeMm * settings.lineHeight);
   const textWidthMm = Math.max(0, settings.pageWidthMm - settings.marginLeftMm - settings.marginRightMm);
   const textHeightMm = Math.max(0, settings.pageHeightMm - settings.marginTopMm - settings.marginBottomMm);
-  const charsPerLine = Math.max(1, Math.floor(textWidthMm / Math.max(0.1, fontSizeMm)));
-  const linesPerPage = Math.max(1, Math.floor(textHeightMm / lineAdvanceMm));
+  const verticalWriting = settings.writingMode === "vertical";
+  const charsPerLine = Math.max(1, Math.floor((verticalWriting ? textHeightMm : textWidthMm) / Math.max(0.1, fontSizeMm)));
+  const linesPerPage = Math.max(1, Math.floor((verticalWriting ? textWidthMm : textHeightMm) / lineAdvanceMm));
   const charsPerPage = charsPerLine * linesPerPage;
   const updateProjectText = (key: "title" | "subtitle" | "author", value: string) => {
     onProjectChange((previous) => ({ ...previous, [key]: value }));
@@ -2616,6 +2777,23 @@ function ProjectPanel({
         </select>
       </label>
 
+      <div className="segmented" aria-label="本文の組み方向">
+        <button
+          className={settings.writingMode === "horizontal" ? "is-active" : ""}
+          type="button"
+          onClick={() => onPageChange("writingMode", "horizontal")}
+        >
+          横書き
+        </button>
+        <button
+          className={settings.writingMode === "vertical" ? "is-active" : ""}
+          type="button"
+          onClick={() => onPageChange("writingMode", "vertical")}
+        >
+          縦書き
+        </button>
+      </div>
+
       <div className="segmented" aria-label="ページ設定プリセット">
         {(Object.entries(PAGE_PRESETS) as Array<[PagePresetId, (typeof PAGE_PRESETS)[PagePresetId]]>).map(([preset, data]) => (
           <button key={preset} className={settings.preset === preset ? "is-active" : ""} type="button" onClick={() => onPreset(preset)}>
@@ -2639,9 +2817,9 @@ function ProjectPanel({
       </div>
       <div className="settings-readout">
         <span>本文枠 {textWidthMm.toFixed(1)}×{textHeightMm.toFixed(1)}mm</span>
-        <span>1行 約{charsPerLine}字</span>
-        <span>行送り {lineAdvanceMm.toFixed(2)}mm</span>
-        <span>約{linesPerPage}行/頁</span>
+        <span>1{verticalWriting ? "列" : "行"} 約{charsPerLine}字</span>
+        <span>{verticalWriting ? "列" : "行"}送り {lineAdvanceMm.toFixed(2)}mm</span>
+        <span>約{linesPerPage}{verticalWriting ? "列" : "行"}/頁</span>
         <span>約{charsPerPage.toLocaleString("ja-JP")}字/頁</span>
         <span>改行後 +{settings.paragraphSpacingMm.toFixed(1)}mm</span>
       </div>
