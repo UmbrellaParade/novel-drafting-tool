@@ -1472,6 +1472,10 @@ h1 {
   margin-block-end: var(--paragraph-spacing);
 }
 
+.paged-document.is-vertical .manuscript-prose p > br.ProseMirror-trailingBreak:only-child {
+  display: none;
+}
+
 .paged-document.is-vertical .manuscript-prose h1,
 .paged-document.is-vertical .manuscript-prose h2,
 .paged-document.is-vertical .manuscript-prose h3,
