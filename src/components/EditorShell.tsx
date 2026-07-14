@@ -1065,16 +1065,12 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
       };
     }
 
-    const alignToOffset = (targetOffset: number, preserveTotalSpacing = false) => {
+    const alignToOffset = (targetOffset: number) => {
       setSpacing(beforeSpace, afterSpace);
       const alignedOffset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
       const correction = targetOffset - alignedOffset;
       if (Math.abs(correction) > 0.1) {
-        const correctedBefore = Math.max(0, beforeSpace + correction);
-        if (preserveTotalSpacing) {
-          afterSpace = Math.max(0, afterSpace - (correctedBefore - beforeSpace));
-        }
-        beforeSpace = correctedBefore;
+        beforeSpace = Math.max(0, beforeSpace + correction);
         setSpacing(beforeSpace, afterSpace);
       }
     };
@@ -1092,7 +1088,7 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
         const leadingInset = availableSpace / 2;
         beforeSpace = pageStartOffset - offset + leadingInset;
         afterSpace = availableSpace - leadingInset;
-        alignToOffset(pageStartOffset + leadingInset, true);
+        alignToOffset(pageStartOffset + leadingInset);
         return;
       }
     }
