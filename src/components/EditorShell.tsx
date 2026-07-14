@@ -796,6 +796,9 @@ function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
     const flow = document.createElement("div");
     flow.className = "pdf-export-flow manuscript-prose";
     flow.innerHTML = snapshot.chapter.content;
+    if (page.writingMode === "vertical") {
+      decorateVerticalPunctuation(flow);
+    }
     contentWindow.append(flow);
     pageElement.append(contentWindow);
 
@@ -940,6 +943,40 @@ function hasPreviewPageContent(element: HTMLElement): boolean {
   return (element.textContent ?? "").trim().length > 0;
 }
 
+function decorateVerticalPunctuation(root: HTMLElement): void {
+  const textNodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode as Text);
+  }
+
+  textNodes.forEach((textNode) => {
+    const value = textNode.nodeValue ?? "";
+    const matches = Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g));
+    if (matches.length === 0) {
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    matches.forEach((match) => {
+      const start = match.index ?? 0;
+      if (start > offset) {
+        fragment.append(document.createTextNode(value.slice(offset, start)));
+      }
+      const span = document.createElement("span");
+      span.className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
+      span.textContent = match[0];
+      fragment.append(span);
+      offset = start + match[0].length;
+    });
+    if (offset < value.length) {
+      fragment.append(document.createTextNode(value.slice(offset)));
+    }
+    textNode.replaceWith(fragment);
+  });
+}
+
 function isForcedPageBreakTarget(element: HTMLElement): boolean {
   return element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before");
 }
@@ -991,7 +1028,10 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
     }
     previewStyle.textContent = "";
   } else {
-    layoutTargets.forEach((element) => element.style.removeProperty("--vertical-page-break-space"));
+    layoutTargets.forEach((element) => {
+      element.style.removeProperty("--vertical-page-break-space");
+      element.style.removeProperty("--vertical-page-after-space");
+    });
   }
   if (contentWidth <= 0 || layoutTargets.length === 0) {
     return;
@@ -1004,8 +1044,9 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
   const previewRules: string[] = [];
 
   layoutTargets.forEach((element) => {
-    let space = 0;
-    let setSpace: (value: number) => void;
+    let beforeSpace = 0;
+    let afterSpace = 0;
+    let setSpacing: (before: number, after: number) => void;
     if (previewStyle) {
       const childSelector = elementChildSelector(element, flow);
       if (!childSelector) {
@@ -1013,44 +1054,53 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
       }
       const ruleIndex = previewRules.length;
       previewRules.push("");
-      setSpace = (value) => {
-        previewRules[ruleIndex] = `.paged-document.is-vertical .manuscript-prose[data-vertical-page-flow="preview"] > ${childSelector} { --vertical-page-break-space: ${value}px; }`;
+      setSpacing = (before, after) => {
+        previewRules[ruleIndex] = `.paged-document.is-vertical .manuscript-prose[data-vertical-page-flow="preview"] > ${childSelector} { --vertical-page-break-space: ${before}px; --vertical-page-after-space: ${after}px; }`;
         previewStyle.textContent = previewRules.join("\n");
       };
     } else {
-      setSpace = (value) => element.style.setProperty("--vertical-page-break-space", `${value}px`);
+      setSpacing = (before, after) => {
+        element.style.setProperty("--vertical-page-break-space", `${before}px`);
+        element.style.setProperty("--vertical-page-after-space", `${after}px`);
+      };
     }
 
-    const alignToOffset = (targetOffset: number) => {
-      setSpace(space);
+    const alignToOffset = (targetOffset: number, preserveTotalSpacing = false) => {
+      setSpacing(beforeSpace, afterSpace);
       const alignedOffset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
       const correction = targetOffset - alignedOffset;
       if (Math.abs(correction) > 0.1) {
-        space = Math.max(0, space + correction);
-        setSpace(space);
+        const correctedBefore = Math.max(0, beforeSpace + correction);
+        if (preserveTotalSpacing) {
+          afterSpace = Math.max(0, afterSpace - (correctedBefore - beforeSpace));
+        }
+        beforeSpace = correctedBefore;
+        setSpacing(beforeSpace, afterSpace);
       }
     };
 
-    if (isForcedPageBreakTarget(element)) {
-      const offset = Math.max(0, (flowRight - element.getBoundingClientRect().right) / safeScale);
-      const remainder = verticalPageRemainder(offset, contentWidth);
-      if (remainder > 0) {
-        space += contentWidth - remainder;
-        alignToOffset(offset + contentWidth - remainder);
+    setSpacing(0, 0);
+    const rect = element.getBoundingClientRect();
+    const offset = Math.max(0, (flowRight - rect.right) / safeScale);
+
+    if (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR)) {
+      const blockWidth = rect.width / safeScale;
+      if (blockWidth <= contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
+        const remainder = verticalPageRemainder(offset, contentWidth);
+        const pageStartOffset = offset + (remainder > 0 ? contentWidth - remainder : 0);
+        const availableSpace = Math.max(0, contentWidth - blockWidth);
+        const leadingInset = availableSpace / 2;
+        beforeSpace = pageStartOffset - offset + leadingInset;
+        afterSpace = availableSpace - leadingInset;
+        alignToOffset(pageStartOffset + leadingInset, true);
+        return;
       }
     }
 
-    if (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR)) {
-      const rect = element.getBoundingClientRect();
-      const offset = Math.max(0, (flowRight - rect.right) / safeScale);
-      const blockWidth = rect.width / safeScale;
+    if (isForcedPageBreakTarget(element)) {
       const remainder = verticalPageRemainder(offset, contentWidth);
-      if (
-        remainder > 0 &&
-        blockWidth <= contentWidth + PAGE_BOUNDARY_EPSILON_PX &&
-        remainder + blockWidth > contentWidth + PAGE_BOUNDARY_EPSILON_PX
-      ) {
-        space += contentWidth - remainder;
+      if (remainder > 0) {
+        beforeSpace = contentWidth - remainder;
         alignToOffset(offset + contentWidth - remainder);
       }
     }

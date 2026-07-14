@@ -1,4 +1,6 @@
 import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 function readFontSize(element: HTMLElement): string | null {
   return element.style.fontSize || element.getAttribute("data-font-size") || null;
@@ -208,6 +210,36 @@ export const BlockLineHeightExtension = Extension.create({
           }
         }
       }
+    ];
+  }
+});
+
+export const VerticalPunctuationExtension = Extension.create({
+  name: "verticalPunctuation",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations: (state) => {
+            const decorations: Decoration[] = [];
+
+            state.doc.descendants((node, position) => {
+              if (!node.isText || !node.text) {
+                return;
+              }
+
+              for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)) {
+                const start = position + (match.index ?? 0);
+                const className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
+                decorations.push(Decoration.inline(start, start + match[0].length, { class: className }));
+              }
+            });
+
+            return DecorationSet.create(state.doc, decorations);
+          }
+        }
+      })
     ];
   }
 });

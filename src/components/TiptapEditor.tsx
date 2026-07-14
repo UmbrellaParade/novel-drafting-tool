@@ -24,7 +24,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, BlockLineHeightExtension, FontSizeMark, ImageAssetIdExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, FontSizeMark, ImageAssetIdExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
 import { internImageBlob, internImageDataUrl } from "@/lib/imageAssets";
 
 type TiptapEditorProps = {
@@ -143,6 +143,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       FontSizeMark,
       BlockFontSizeExtension,
       BlockLineHeightExtension,
+      VerticalPunctuationExtension,
       ImageAssetIdExtension,
       Image.configure({
         allowBase64: true,
