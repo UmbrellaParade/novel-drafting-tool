@@ -147,16 +147,18 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 };
 
 const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight", "ornate"]);
-const TOC_STYLE_IDS = new Set<TocStyleId>(["classic", "rain", "antique", "midnight", "ornate"]);
+const TOC_STYLE_IDS = new Set<TocStyleId>(["plain", "classic", "rain", "antique", "midnight", "ornate"]);
 const PAGE_NUMBER_POSITIONS = new Set<PageNumberPosition>(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
 const QR_TEXT_SIZE_MIN_PT = 5;
 const QR_TEXT_SIZE_MAX_PT = 24;
+const DEFAULT_TOC_LEADER_WIDTH_MM = 12;
 
 export const DEFAULT_TOC_SETTINGS: TocSettings = {
   title: "目次",
   subtitle: "",
   style: "classic",
-  titleGapPt: 18
+  titleGapPt: 18,
+  leaderWidthMm: DEFAULT_TOC_LEADER_WIDTH_MM
 };
 
 const sampleContent = `
@@ -272,13 +274,17 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
   const titleGapPt = typeof settings?.titleGapPt === "number" && Number.isFinite(settings.titleGapPt) && settings.titleGapPt >= 0
     ? Math.max(0, Math.min(48, Number(settings.titleGapPt.toFixed(1))))
     : DEFAULT_TOC_SETTINGS.titleGapPt;
+  const leaderWidthMm = typeof settings?.leaderWidthMm === "number" && Number.isFinite(settings.leaderWidthMm) && settings.leaderWidthMm >= 0
+    ? Math.max(0, Math.min(40, Number(settings.leaderWidthMm.toFixed(1))))
+    : DEFAULT_TOC_SETTINGS.leaderWidthMm;
 
   return {
     title: settings?.title?.trim() || DEFAULT_TOC_SETTINGS.title,
     subtitle: "",
     style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style,
     ...(fontSizePt ? { fontSizePt } : {}),
-    titleGapPt
+    titleGapPt,
+    leaderWidthMm
   };
 }
 

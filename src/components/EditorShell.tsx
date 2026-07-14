@@ -260,6 +260,7 @@ const QR_TEXT_SIZE_MAX_PT = 24;
 const DEFAULT_QR_LABEL_FONT_SIZE_PT = 8;
 const DEFAULT_QR_TITLE_FONT_SIZE_PT = 9;
 const DEFAULT_QR_DESCRIPTION_FONT_SIZE_PT = 7;
+const DEFAULT_TOC_LEADER_WIDTH_MM = 12;
 
 const EMPTY_QR_DRAFT: QrDraft = {
   name: "",
@@ -275,6 +276,10 @@ const EMPTY_DRIVE_SETTINGS: GoogleDriveSettings = { clientId: "", apiKey: "" };
 const QR_DRAFT_STORAGE_KEY = "novel-drafting-tool:last-qr-draft";
 
 const TOC_STYLE_OPTIONS: Record<TocStyleId, { label: string; description: string }> = {
+  plain: {
+    label: "枠なし",
+    description: "枠や装飾を外したシンプルな目次"
+  },
   classic: {
     label: "細二重罫",
     description: "白黒印刷向けの端正な二重枠"
@@ -940,6 +945,7 @@ function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
     style: settings.style,
     fontSizePt: settings.fontSizePt ?? null,
     titleGapPt: settings.titleGapPt ?? null,
+    leaderWidthMm: settings.leaderWidthMm ?? DEFAULT_TOC_LEADER_WIDTH_MM,
     items: tocItemsJson(entries)
   };
 }
@@ -989,6 +995,7 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           node.attrs.style === nextAttrs.style &&
           node.attrs.fontSizePt === nextAttrs.fontSizePt &&
           node.attrs.titleGapPt === nextAttrs.titleGapPt &&
+          node.attrs.leaderWidthMm === nextAttrs.leaderWidthMm &&
           node.attrs.items === nextAttrs.items;
         if (!isSame) {
           tr.setNodeMarkup(position, undefined, nextAttrs, node.marks);
@@ -2681,6 +2688,7 @@ function TableOfContentsPanel({
 }) {
   const tocFontSizePt = settings.fontSizePt ?? 9;
   const tocTitleGapPt = settings.titleGapPt ?? 18;
+  const tocLeaderWidthMm = settings.leaderWidthMm ?? DEFAULT_TOC_LEADER_WIDTH_MM;
   const updateTocFontSize = (nextSize: number) => {
     const clampedSize = Math.max(6, Math.min(16, Number(nextSize.toFixed(1))));
     onSettingChange("fontSizePt", clampedSize);
@@ -2688,6 +2696,10 @@ function TableOfContentsPanel({
   const updateTocTitleGap = (nextGap: number) => {
     const clampedGap = Math.max(0, Math.min(48, Number(nextGap.toFixed(1))));
     onSettingChange("titleGapPt", clampedGap);
+  };
+  const updateTocLeaderWidth = (nextWidth: number) => {
+    const clampedWidth = Math.max(0, Math.min(40, Number(nextWidth.toFixed(1))));
+    onSettingChange("leaderWidthMm", clampedWidth);
   };
 
   return (
@@ -2741,6 +2753,26 @@ function TableOfContentsPanel({
               aria-label="タイトル下の余白pt"
             />
             <button type="button" onClick={() => updateTocTitleGap(tocTitleGapPt + 1)} aria-label="タイトル下の余白を広くする">
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+        <div className="toc-form-field wide">
+          <span>点線の長さ：{tocLeaderWidthMm}mm</span>
+          <div className="toc-size-stepper">
+            <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm - 1)} aria-label="点線を短くする">
+              <Minus size={14} />
+            </button>
+            <input
+              type="number"
+              min={0}
+              max={40}
+              step={1}
+              value={tocLeaderWidthMm}
+              onChange={(event) => updateTocLeaderWidth(Number(event.target.value))}
+              aria-label="点線の長さmm"
+            />
+            <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm + 1)} aria-label="点線を長くする">
               <Plus size={14} />
             </button>
           </div>

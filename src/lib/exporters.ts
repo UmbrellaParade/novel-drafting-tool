@@ -730,32 +730,39 @@ img {
 }
 
 .toc-entry {
-  display: table;
+  display: flex;
+  align-items: baseline;
+  gap: 0.55em;
   width: 100%;
   margin: 0.35em 0;
 }
 
-.toc-entry-title,
-.toc-entry-leader,
-.toc-entry-page {
-  display: table-cell;
-  vertical-align: baseline;
-}
-
 .toc-entry-title {
-  width: auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .toc-entry-leader {
-  width: 100%;
+  flex: 0 1 var(--toc-leader-width, 2.8em);
+  width: var(--toc-leader-width, 2.8em);
+  min-width: 0;
+  margin-left: auto;
   border-bottom: 1px dotted currentColor;
   opacity: 0.7;
 }
 
 .toc-entry-page {
+  flex: 0 0 auto;
   min-width: 2.5em;
   color: currentColor;
   text-align: right;
+}
+
+.manuscript-toc-plain {
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .manuscript-toc-classic {
@@ -1085,6 +1092,16 @@ function hasPageBreakBefore(element: HTMLElement): boolean {
   return element.dataset.pageBreakBefore === "true" || element.classList.contains("page-break-before");
 }
 
+function tocLeaderText(element: HTMLElement): string {
+  const leaderWidthMm = Number.parseFloat(element.dataset.leaderWidthMm ?? "");
+  if (!Number.isFinite(leaderWidthMm) || leaderWidthMm < 0) {
+    return " .... ";
+  }
+
+  const dotCount = Math.max(0, Math.min(12, Math.round(leaderWidthMm / 3)));
+  return dotCount > 0 ? ` ${".".repeat(dotCount)} ` : " ";
+}
+
 function parseDocxBlocks(html: string): DocxBlock[] {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -1111,9 +1128,10 @@ function parseDocxBlocks(html: string): DocxBlock[] {
 
     if (element.matches("section[data-type='table-of-contents']")) {
       const title = element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次";
+      const leaderText = tocLeaderText(element);
       blocks.push({ kind: "heading", text: title });
       parseTocEntries(element).forEach((item) => {
-        blocks.push({ kind: "paragraph", text: `${item.title} .... ${item.page ?? ""}`.trim() });
+        blocks.push({ kind: "paragraph", text: `${item.title}${leaderText}${item.page ?? ""}`.trim() });
       });
       return;
     }

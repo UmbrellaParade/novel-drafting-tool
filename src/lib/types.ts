@@ -1,7 +1,7 @@
 export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "shimauma-a6-manga" | "shimauma-a5-manga" | "custom";
 export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
 export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight" | "ornate";
-export type TocStyleId = "classic" | "rain" | "antique" | "midnight" | "ornate";
+export type TocStyleId = "plain" | "classic" | "rain" | "antique" | "midnight" | "ornate";
 export type PageNumberPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
 
 export type PageSettings = {
@@ -57,6 +57,8 @@ export type TocSettings = {
   fontSizePt?: number;
   /** 目次タイトルと項目一覧の間隔（pt）。 */
   titleGapPt?: number;
+  /** 目次項目とページ番号の間に出す点線の長さ（mm）。 */
+  leaderWidthMm?: number;
 };
 
 export type ManuscriptProject = {

@@ -140,7 +140,7 @@ function tocItemsFromElement(element: HTMLElement): TocNodeItem[] {
 }
 
 function tocStyle(value: unknown): string {
-  return value === "rain" || value === "antique" || value === "midnight" || value === "ornate" || value === "classic" ? value : "classic";
+  return value === "plain" || value === "rain" || value === "antique" || value === "midnight" || value === "ornate" || value === "classic" ? value : "classic";
 }
 
 function tocItemsAttribute(items: unknown): string {
@@ -301,6 +301,17 @@ export const TableOfContentsNode = Node.create({
           return { "data-title-gap-pt": String(attributes.titleGapPt) };
         }
       },
+      leaderWidthMm: {
+        default: null,
+        parseHTML: (element) => {
+          const v = (element as HTMLElement).dataset.leaderWidthMm;
+          return v ? Number.parseFloat(v) : null;
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.leaderWidthMm && attributes.leaderWidthMm !== 0) return {};
+          return { "data-leader-width-mm": String(attributes.leaderWidthMm) };
+        }
+      },
       items: {
         default: "[]",
         parseHTML: (element) => (element as HTMLElement).dataset.items ?? "[]",
@@ -324,6 +335,7 @@ export const TableOfContentsNode = Node.create({
             style: tocStyle(element.dataset.style),
             fontSizePt: fontSizePtRaw ? Number.parseFloat(fontSizePtRaw) : null,
             titleGapPt: element.dataset.titleGapPt ? Number.parseFloat(element.dataset.titleGapPt) : null,
+            leaderWidthMm: element.dataset.leaderWidthMm ? Number.parseFloat(element.dataset.leaderWidthMm) : null,
             items: JSON.stringify(tocItemsFromElement(element))
           };
         }
@@ -340,9 +352,13 @@ export const TableOfContentsNode = Node.create({
     const titleGapPt = typeof node.attrs.titleGapPt === "number" && node.attrs.titleGapPt >= 0
       ? node.attrs.titleGapPt
       : null;
+    const leaderWidthMm = typeof node.attrs.leaderWidthMm === "number" && node.attrs.leaderWidthMm >= 0
+      ? node.attrs.leaderWidthMm
+      : null;
     const styleRules = [
       fontSizePt ? `font-size: ${fontSizePt}pt` : "",
-      titleGapPt !== null ? `--toc-title-gap: ${titleGapPt}pt` : ""
+      titleGapPt !== null ? `--toc-title-gap: ${titleGapPt}pt` : "",
+      leaderWidthMm !== null ? `--toc-leader-width: ${leaderWidthMm}mm` : ""
     ].filter(Boolean);
     const blockStyle = styleRules.length ? styleRules.join("; ") : undefined;
 
@@ -355,6 +371,7 @@ export const TableOfContentsNode = Node.create({
         "data-style": style,
         ...(fontSizePt ? { "data-font-size-pt": String(fontSizePt) } : {}),
         ...(titleGapPt !== null ? { "data-title-gap-pt": String(titleGapPt) } : {}),
+        ...(leaderWidthMm !== null ? { "data-leader-width-mm": String(leaderWidthMm) } : {}),
         ...(blockStyle ? { style: blockStyle } : {}),
         class: `manuscript-toc manuscript-toc-${style}`
       }),
