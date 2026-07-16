@@ -919,6 +919,7 @@ const PREVIEW_PAGE_CONTENT_SELECTOR = [
 
 const VERTICAL_UNBREAKABLE_BLOCK_SELECTOR = [
   "section[data-type='table-of-contents']",
+  "section[data-type='column-block']",
   "[data-type='qr-card']",
   ".qr-card",
   "[data-resize-container][data-node='image']",
@@ -1131,7 +1132,8 @@ function measureOccupiedVerticalPages(prose: HTMLElement, contentWidth: number):
     return null;
   }
 
-  return Math.max(1, Math.ceil((proseRect.right - leftmostContent + 1) / visualContentWidth));
+  const occupiedWidth = Math.max(0, proseRect.right - leftmostContent - PAGE_BOUNDARY_EPSILON_PX);
+  return Math.max(1, Math.ceil(occupiedWidth / visualContentWidth));
 }
 
 function measureOccupiedPreviewPages(prose: HTMLElement, firstPageLeft: number, visualPagePitch: number): number | null {

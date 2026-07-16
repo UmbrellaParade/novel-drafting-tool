@@ -149,7 +149,8 @@ h1 {
 .topbar-editor-tools .editor-toolbar,
 .topbar-editor-tools .image-size-controls,
 .topbar-editor-tools .text-size-controls,
-.topbar-editor-tools .ruby-controls {
+.topbar-editor-tools .ruby-controls,
+.topbar-editor-tools .column-controls {
   flex-wrap: nowrap;
   flex: 0 0 auto;
   overflow-x: auto;
@@ -1451,6 +1452,78 @@ h1 {
   overflow-anchor: none;
 }
 
+.column-controls {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid #d8cdbc;
+  border-radius: 8px;
+  background: #fffdf8;
+  box-shadow: 0 8px 20px rgba(36, 33, 29, 0.08);
+}
+
+.column-controls-label,
+.column-gap-label,
+.column-gap-value {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.column-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #d8cdbc;
+  border-radius: 7px;
+  background: #f4ede3;
+}
+
+.column-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #fbf7ef;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.column-controls > *,
+.column-mode-switch > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.column-controls button:hover,
+.column-controls button.is-active {
+  border-color: var(--rain);
+  background: #eaf3f0;
+  color: #1f5c54;
+}
+
+.column-gap-value {
+  min-width: 35px;
+  text-align: center;
+}
+
+.column-controls .column-clear-button:hover {
+  border-color: var(--danger);
+  background: #fbeeee;
+  color: var(--danger);
+}
+
 .paged-document.is-vertical .manuscript-prose,
 .pdf-export-document.is-vertical .manuscript-prose {
   width: var(--vertical-flow-width);
@@ -1496,9 +1569,11 @@ h1 {
 }
 
 .paged-document.is-vertical .manuscript-prose .manuscript-toc,
+.paged-document.is-vertical .manuscript-prose .manuscript-column-block,
 .paged-document.is-vertical .manuscript-prose .qr-card,
 .paged-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"],
 .pdf-export-document.is-vertical .manuscript-prose .manuscript-toc,
+.pdf-export-document.is-vertical .manuscript-prose .manuscript-column-block,
 .pdf-export-document.is-vertical .manuscript-prose .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"] {
   writing-mode: horizontal-tb;
@@ -1521,11 +1596,13 @@ h1 {
 .pdf-export-document.is-vertical .manuscript-prose .page-break-before,
 .pdf-export-document.is-vertical .manuscript-prose [data-page-break-before="true"],
 .paged-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
+.paged-document.is-vertical .manuscript-prose > section[data-type="column-block"],
 .paged-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .paged-document.is-vertical .manuscript-prose > .qr-card,
 .paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
 .paged-document.is-vertical .manuscript-prose > img:not(.qr-card-image),
 .pdf-export-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
+.pdf-export-document.is-vertical .manuscript-prose > section[data-type="column-block"],
 .pdf-export-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .pdf-export-document.is-vertical .manuscript-prose > .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
@@ -1534,11 +1611,13 @@ h1 {
 }
 
 .paged-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
+.paged-document.is-vertical .manuscript-prose > section[data-type="column-block"],
 .paged-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .paged-document.is-vertical .manuscript-prose > .qr-card,
 .paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
 .paged-document.is-vertical .manuscript-prose > img:not(.qr-card-image),
 .pdf-export-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
+.pdf-export-document.is-vertical .manuscript-prose > section[data-type="column-block"],
 .pdf-export-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .pdf-export-document.is-vertical .manuscript-prose > .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
@@ -1620,6 +1699,38 @@ h1 {
 
 .manuscript-prose h3 {
   font-size: 1.14em;
+}
+
+.manuscript-column-block {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 0 var(--paragraph-spacing);
+  column-count: var(--manuscript-column-count, 2);
+  column-gap: var(--manuscript-column-gap, 4mm);
+  column-fill: balance;
+  break-inside: avoid-column;
+  page-break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+.paged-document .manuscript-column-block {
+  outline: 1px dashed rgba(58, 130, 120, 0.5);
+  outline-offset: 1.5mm;
+}
+
+.paged-document .manuscript-column-block:hover,
+.paged-document .manuscript-column-block.ProseMirror-selectednode {
+  outline-color: rgba(58, 130, 120, 0.95);
+}
+
+.paged-document.is-vertical .manuscript-column-block,
+.pdf-export-document.is-vertical .manuscript-column-block {
+  width: var(--content-width);
+  max-width: var(--content-width);
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 }
 
 .manuscript-toc {
@@ -2650,6 +2761,31 @@ h1 {
   .topbar-editor-tools {
     min-width: 0;
     width: 100%;
+  }
+
+  .topbar-editor-tools:has(.column-controls) {
+    flex-wrap: wrap;
+    overflow-x: hidden;
+  }
+
+  .topbar-editor-tools:has(.column-controls) .editor-toolbar,
+  .topbar-editor-tools:has(.column-controls) .column-controls,
+  .topbar-editor-tools:has(.column-controls) .image-size-controls,
+  .topbar-editor-tools:has(.column-controls) .text-size-controls,
+  .topbar-editor-tools:has(.column-controls) .ruby-controls {
+    flex: 0 0 100%;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .topbar-editor-tools:has(.column-controls) .column-controls {
+    justify-content: flex-start;
+  }
+
+  .topbar-editor-tools:has(.column-controls) .image-size-controls > *,
+  .topbar-editor-tools:has(.column-controls) .text-size-controls > *,
+  .topbar-editor-tools:has(.column-controls) .ruby-controls > * {
+    flex-shrink: 0;
   }
 
   .topbar-actions {

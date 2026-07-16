@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "re
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TextAlign from "@tiptap/extension-text-align";
-import { NodeSelection } from "@tiptap/pm/state";
+import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -12,9 +13,14 @@ import {
   AlignLeft,
   AlignRight,
   Check,
+  Columns2,
+  Columns3,
   Copy,
   Heading1,
   ImagePlus,
+  Minus,
+  PanelTopClose,
+  Plus,
   QrCode,
   Redo2,
   RefreshCw,
@@ -24,7 +30,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, BlockLineHeightExtension, FontSizeMark, ImageAssetIdExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, ImageAssetIdExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
 import { internImageBlob, internImageDataUrl } from "@/lib/imageAssets";
 
 type TiptapEditorProps = {
@@ -54,6 +60,8 @@ type ToolbarState = {
   hasQrCardSelection: boolean;
   selectedQrCardWidth: number | null;
   selectedQrCardHeight: number | null;
+  activeColumnCount: 0 | 2 | 3;
+  activeColumnGapMm: number;
 };
 
 type ImageReplacementTarget = {
@@ -144,6 +152,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       BlockFontSizeExtension,
       BlockLineHeightExtension,
       VerticalPunctuationExtension,
+      ColumnBlockNode,
       ImageAssetIdExtension,
       Image.configure({
         allowBase64: true,
@@ -272,14 +281,18 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const imageReplaceTargetRef = useRef<ImageReplacementTarget | null>(null);
   const qrCardSelectionPositionRef = useRef<number | null>(null);
   const rubyReadingInputRef = useRef<HTMLInputElement | null>(null);
+  const columnBlockActiveRef = useRef(false);
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
     hasImageSelection: false,
     selectedImageWidth: null,
     hasQrCardSelection: false,
     selectedQrCardWidth: null,
-    selectedQrCardHeight: null
+    selectedQrCardHeight: null,
+    activeColumnCount: 0,
+    activeColumnGapMm: 4
   });
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
+  const [columnPanelOpen, setColumnPanelOpen] = useState(false);
   const [rubyDraft, setRubyDraft] = useState({ base: "", rt: "" });
   const [textSizePt, setTextSizePt] = useState(9);
   const [lineHeightValue, setLineHeightValue] = useState(1.75);
@@ -295,7 +308,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         selectedImageWidth: null,
         hasQrCardSelection: false,
         selectedQrCardWidth: null,
-        selectedQrCardHeight: null
+        selectedQrCardHeight: null,
+        activeColumnCount: 0,
+        activeColumnGapMm: 4
       });
       return;
     }
@@ -306,14 +321,24 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       const hasImageSelection = editor.isActive("image") && Boolean(imageAttributes.src);
       const qrCardAttributes = editor.getAttributes("qrCard");
       const hasQrCardSelection = editor.isActive("qrCard");
+      const columnAttributes = editor.getAttributes("columnBlock");
+      const hasColumnBlock = editor.isActive("columnBlock");
+      const activeColumnCount: ToolbarState["activeColumnCount"] = hasColumnBlock && Number(columnAttributes.columns) === 3 ? 3 : hasColumnBlock ? 2 : 0;
+      const rawColumnGapMm = Number(columnAttributes.gapMm);
+      const activeColumnGapMm = hasColumnBlock && Number.isFinite(rawColumnGapMm)
+        ? Math.max(0, Math.min(12, rawColumnGapMm))
+        : 4;
       imageSelectionTargetRef.current = hasImageSelection ? readSelectedImageTarget(editor) : null;
       qrCardSelectionPositionRef.current = hasQrCardSelection ? selectedNodePosition(editor, "qrCard") : null;
+      columnBlockActiveRef.current = hasColumnBlock;
       const nextState = {
         hasImageSelection,
         selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null,
         hasQrCardSelection,
         selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null,
-        selectedQrCardHeight: hasQrCardSelection ? parseImageDimension(qrCardAttributes.height) : null
+        selectedQrCardHeight: hasQrCardSelection ? parseImageDimension(qrCardAttributes.height) : null,
+        activeColumnCount,
+        activeColumnGapMm
       };
       setToolbarState((previous) => (sameToolbarState(previous, nextState) ? previous : nextState));
     };
@@ -329,7 +354,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       });
     };
     const scheduleSelectedMediaRefresh = () => {
-      if (imageSelectionTargetRef.current || qrCardSelectionPositionRef.current !== null) {
+      if (imageSelectionTargetRef.current || qrCardSelectionPositionRef.current !== null || columnBlockActiveRef.current || editor.isActive("columnBlock")) {
         scheduleRefreshToolbarState();
       }
     };
@@ -920,6 +945,96 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     });
   };
 
+  const setColumnLayout = (columns: 2 | 3) => {
+    if (!editor) {
+      return;
+    }
+
+    const applied = withStablePageStageScroll(editor, () => {
+      const chain = editor.chain().focus();
+      return editor.isActive("columnBlock")
+        ? chain.updateAttributes("columnBlock", { columns }).run()
+        : chain
+            .wrapIn("columnBlock", { columns, gapMm: 4 })
+            .command(({ tr }) => {
+              const { $from } = tr.selection;
+              let textPosition: number | null = null;
+              for (let depth = $from.depth; depth > 0; depth -= 1) {
+                if ($from.node(depth).type.name !== "columnBlock") {
+                  continue;
+                }
+
+                textPosition = Math.min(tr.doc.content.size, $from.start(depth) + 1);
+                break;
+              }
+              if (textPosition === null) {
+                const from = Math.max(0, Math.min(tr.doc.content.size, tr.selection.from));
+                const to = Math.max(from, Math.min(tr.doc.content.size, tr.selection.to));
+                tr.doc.nodesBetween(from, to, (node, position) => {
+                  if (textPosition !== null || node.type.name !== "columnBlock") {
+                    return textPosition === null;
+                  }
+                  textPosition = Math.min(tr.doc.content.size, position + 2);
+                  return false;
+                });
+              }
+              if (textPosition !== null) {
+                tr.setSelection(TextSelection.near(tr.doc.resolve(textPosition), 1));
+              }
+              return true;
+            })
+            .run();
+    });
+
+    if (!applied) {
+      window.alert("カラムにする歌詞や段落を選択してください。");
+    }
+  };
+
+  const setColumnGapMm = (gapMm: number) => {
+    if (!editor || !editor.isActive("columnBlock")) {
+      return;
+    }
+
+    const nextGapMm = Math.max(0, Math.min(12, Math.round(gapMm)));
+    withStablePageStageScroll(editor, () => editor.chain().focus().updateAttributes("columnBlock", { gapMm: nextGapMm }).run());
+  };
+
+  const clearColumnLayout = () => {
+    if (!editor || !editor.isActive("columnBlock")) {
+      return;
+    }
+
+    withStablePageStageScroll(editor, () => editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        const { $from } = state.selection;
+        for (let depth = $from.depth; depth > 0; depth -= 1) {
+          const columnBlock = $from.node(depth);
+          if (columnBlock.type.name !== "columnBlock") {
+            continue;
+          }
+
+          const position = $from.before(depth);
+          const children: ProseMirrorNode[] = [];
+          columnBlock.forEach((child, _offset, index) => {
+            if (index === 0 && columnBlock.attrs.pageBreakBefore) {
+              children.push(child.type.create({ ...child.attrs, pageBreakBefore: true }, child.content, child.marks));
+              return;
+            }
+            children.push(child);
+          });
+          tr.replaceWith(position, position + columnBlock.nodeSize, Fragment.fromArray(children));
+          const textPosition = Math.min(tr.doc.content.size, position + 1);
+          tr.setSelection(TextSelection.near(tr.doc.resolve(textPosition), 1));
+          return true;
+        }
+        return false;
+      })
+      .run());
+  };
+
   const pageWidth = editor ? readPageWidthPx(editor) : 420;
   const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
@@ -956,6 +1071,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <ToolButton label="右揃え" active={editor?.isActive({ textAlign: "right" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("right").run()}>
           <AlignRight size={18} />
         </ToolButton>
+        <ToolButton label="ページ内カラム" active={columnPanelOpen || toolbarState.activeColumnCount > 0} disabled={disabled} onClick={() => setColumnPanelOpen((open) => !open)}>
+          <Columns2 size={18} />
+        </ToolButton>
         <ToolButton label="画像" disabled={disabled} onClick={() => imageInputRef.current?.click()}>
           <ImagePlus size={18} />
         </ToolButton>
@@ -966,6 +1084,51 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
           <ScissorsLineDashed size={18} />
         </ToolButton>
       </div>
+      {columnPanelOpen ? (
+        <div className="column-controls" aria-label="ページ内カラム設定">
+          <span className="column-controls-label">カラム</span>
+          <div className="column-mode-switch" role="group" aria-label="カラム数">
+            <button
+              className={toolbarState.activeColumnCount === 2 ? "is-active" : ""}
+              type="button"
+              onMouseDown={preserveEditorSelection}
+              onClick={() => setColumnLayout(2)}
+              aria-label="2カラム"
+              title="2カラム"
+            >
+              <Columns2 size={16} />
+              2列
+            </button>
+            <button
+              className={toolbarState.activeColumnCount === 3 ? "is-active" : ""}
+              type="button"
+              onMouseDown={preserveEditorSelection}
+              onClick={() => setColumnLayout(3)}
+              aria-label="3カラム"
+              title="3カラム"
+            >
+              <Columns3 size={16} />
+              3列
+            </button>
+          </div>
+          {toolbarState.activeColumnCount > 0 ? (
+            <>
+              <span className="column-gap-label">間隔</span>
+              <button type="button" onMouseDown={preserveEditorSelection} onClick={() => setColumnGapMm(toolbarState.activeColumnGapMm - 1)} aria-label="カラム間隔を狭くする" title="カラム間隔を狭くする">
+                <Minus size={15} />
+              </button>
+              <output className="column-gap-value" aria-label="カラム間隔">{toolbarState.activeColumnGapMm}mm</output>
+              <button type="button" onMouseDown={preserveEditorSelection} onClick={() => setColumnGapMm(toolbarState.activeColumnGapMm + 1)} aria-label="カラム間隔を広くする" title="カラム間隔を広くする">
+                <Plus size={15} />
+              </button>
+              <button className="column-clear-button" type="button" onMouseDown={preserveEditorSelection} onClick={clearColumnLayout} aria-label="カラム解除" title="カラム解除">
+                <PanelTopClose size={16} />
+                解除
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
       {rubyPanelOpen ? (
         <div className="ruby-controls" aria-label="ルビ設定">
           <label>
@@ -1170,7 +1333,9 @@ function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
     left.selectedImageWidth === right.selectedImageWidth &&
     left.hasQrCardSelection === right.hasQrCardSelection &&
     left.selectedQrCardWidth === right.selectedQrCardWidth &&
-    left.selectedQrCardHeight === right.selectedQrCardHeight
+    left.selectedQrCardHeight === right.selectedQrCardHeight &&
+    left.activeColumnCount === right.activeColumnCount &&
+    left.activeColumnGapMm === right.activeColumnGapMm
   );
 }
 

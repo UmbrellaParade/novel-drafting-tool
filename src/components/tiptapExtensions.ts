@@ -6,6 +6,15 @@ function readFontSize(element: HTMLElement): string | null {
   return element.style.fontSize || element.getAttribute("data-font-size") || null;
 }
 
+function manuscriptColumnCount(value: unknown): 2 | 3 {
+  return Number(value) === 3 ? 3 : 2;
+}
+
+function manuscriptColumnGapMm(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.parseFloat(String(value));
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(12, parsed)) : 4;
+}
+
 function readLineHeight(element: HTMLElement): string | null {
   return element.style.lineHeight || element.getAttribute("data-line-height") || null;
 }
@@ -271,13 +280,56 @@ export const ImageAssetIdExtension = Extension.create({
   }
 });
 
+export const ColumnBlockNode = Node.create({
+  name: "columnBlock",
+  group: "block",
+  content: "block+",
+  defining: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      columns: {
+        default: 2,
+        parseHTML: (element) => manuscriptColumnCount((element as HTMLElement).dataset.columns),
+        renderHTML: (attributes) => ({ "data-columns": String(manuscriptColumnCount(attributes.columns)) })
+      },
+      gapMm: {
+        default: 4,
+        parseHTML: (element) => manuscriptColumnGapMm((element as HTMLElement).dataset.gapMm),
+        renderHTML: (attributes) => ({ "data-gap-mm": String(manuscriptColumnGapMm(attributes.gapMm)) })
+      }
+    };
+  },
+
+  parseHTML() {
+    return [{ tag: "section[data-type='column-block']" }];
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const columns = manuscriptColumnCount(node.attrs.columns);
+    const gapMm = manuscriptColumnGapMm(node.attrs.gapMm);
+    return [
+      "section",
+      mergeAttributes(HTMLAttributes, {
+        "data-type": "column-block",
+        "data-columns": String(columns),
+        "data-gap-mm": String(gapMm),
+        class: `manuscript-column-block manuscript-column-block-${columns}`,
+        style: `--manuscript-column-count: ${columns}; --manuscript-column-gap: ${gapMm}mm`
+      }),
+      0
+    ];
+  }
+});
+
 export const PageBreakBeforeExtension = Extension.create({
   name: "pageBreakBefore",
 
   addGlobalAttributes() {
     return [
       {
-        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard", "tableOfContents"],
+        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard", "tableOfContents", "columnBlock"],
         attributes: {
           pageBreakBefore: {
             default: false,
