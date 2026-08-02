@@ -526,6 +526,17 @@ async function buildEpubChapter(title: string, html: string, chapterNumber: numb
     });
   });
 
+  template.content.querySelectorAll<HTMLAnchorElement>("a[data-toc-target-index]").forEach((link) => {
+    const targetIndex = Number.parseInt(link.dataset.tocTargetIndex ?? "", 10);
+    const targetHeading = Number.isFinite(targetIndex) ? headings[targetIndex] : null;
+    if (targetHeading?.id) {
+      link.setAttribute("href", `#${targetHeading.id}`);
+    } else {
+      link.removeAttribute("href");
+    }
+    link.removeAttribute("data-toc-target-index");
+  });
+
   const serializer = new XMLSerializer();
   const body = [...template.content.childNodes].map((node) => serializer.serializeToString(node)).join("\n");
 
@@ -752,6 +763,11 @@ img {
 .toc-entry-title {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.toc-entry-link {
+  color: inherit;
+  text-decoration: none;
 }
 
 .toc-entry-leader {
@@ -1119,6 +1135,10 @@ function tocLeaderText(element: HTMLElement): string {
   return dotCount > 0 ? ` ${".".repeat(dotCount)} ` : " ";
 }
 
+function tocShowsPageNumbers(element: HTMLElement): boolean {
+  return element.dataset.showPageNumbers !== "false";
+}
+
 function parseDocxBlocks(html: string): DocxBlock[] {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -1145,10 +1165,11 @@ function parseDocxBlocks(html: string): DocxBlock[] {
 
     if (element.matches("section[data-type='table-of-contents']")) {
       const title = element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次";
-      const leaderText = tocLeaderText(element);
+      const showPageNumbers = tocShowsPageNumbers(element);
+      const leaderText = showPageNumbers ? tocLeaderText(element) : "";
       blocks.push({ kind: "heading", text: title });
       parseTocEntries(element).forEach((item) => {
-        blocks.push({ kind: "paragraph", text: `${item.title}${leaderText}${item.page ?? ""}`.trim() });
+        blocks.push({ kind: "paragraph", text: showPageNumbers ? `${item.title}${leaderText}${item.page ?? ""}`.trim() : item.title });
       });
       return;
     }

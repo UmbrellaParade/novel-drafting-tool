@@ -53,17 +53,25 @@ export async function saveProjectToBrowser(project: ManuscriptProject): Promise<
   const persistable = toPersistableProject(project);
   try {
     await withTimeout(saveProjectToIndexedDb(persistable), INDEXED_DB_TIMEOUT_MS);
+    saveProjectBackupToLocalStorage(persistable);
     localStorage.setItem(`${STORAGE_KEY}:backend`, "indexeddb");
   } catch (error) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
-    } catch {
+    if (!saveProjectBackupToLocalStorage(persistable)) {
       throw new Error(
         error instanceof Error
           ? `ブラウザ保存に失敗しました。画像が大きい場合はJSONで退避してください。(${error.message})`
           : "ブラウザ保存に失敗しました。画像が大きい場合はJSONで退避してください。"
       );
     }
+  }
+}
+
+export function saveProjectBackupToLocalStorage(project: ManuscriptProject): boolean {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersistableProject(project)));
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -93,25 +101,33 @@ export async function loadProjectFromBrowser(): Promise<ManuscriptProject | null
 }
 
 async function loadStoredProject(): Promise<ManuscriptProject | null> {
+  let indexedProject: ManuscriptProject | null = null;
   try {
-    const indexedProject = await withTimeout(loadProjectFromIndexedDb(), INDEXED_DB_TIMEOUT_MS);
-    if (indexedProject) {
-      return indexedProject;
-    }
+    indexedProject = await withTimeout(loadProjectFromIndexedDb(), INDEXED_DB_TIMEOUT_MS);
   } catch {
     // Fall back to the legacy localStorage copy below.
   }
 
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return null;
+  let localProject: ManuscriptProject | null = null;
+  try {
+    localProject = raw ? JSON.parse(raw) as ManuscriptProject : null;
+  } catch {
+    localProject = null;
   }
 
-  try {
-    return JSON.parse(raw) as ManuscriptProject;
-  } catch {
-    return null;
+  if (!indexedProject) {
+    return localProject;
   }
+  if (!localProject) {
+    return indexedProject;
+  }
+
+  const indexedUpdatedAt = Date.parse(indexedProject.updatedAt);
+  const localUpdatedAt = Date.parse(localProject.updatedAt);
+  return Number.isFinite(localUpdatedAt) && (!Number.isFinite(indexedUpdatedAt) || localUpdatedAt > indexedUpdatedAt)
+    ? localProject
+    : indexedProject;
 }
 
 async function saveProjectToIndexedDb(project: ManuscriptProject): Promise<void> {

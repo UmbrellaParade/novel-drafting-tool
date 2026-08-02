@@ -164,6 +164,8 @@ export const DEFAULT_TOC_SETTINGS: TocSettings = {
   title: "目次",
   subtitle: "",
   style: "classic",
+  showPageNumbers: true,
+  enableLinks: false,
   titleGapPt: 18,
   leaderWidthMm: DEFAULT_TOC_LEADER_WIDTH_MM
 };
@@ -289,6 +291,8 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
     title: settings?.title?.trim() || DEFAULT_TOC_SETTINGS.title,
     subtitle: "",
     style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style,
+    showPageNumbers: typeof settings?.showPageNumbers === "boolean" ? settings.showPageNumbers : DEFAULT_TOC_SETTINGS.showPageNumbers,
+    enableLinks: typeof settings?.enableLinks === "boolean" ? settings.enableLinks : DEFAULT_TOC_SETTINGS.enableLinks,
     ...(fontSizePt ? { fontSizePt } : {}),
     titleGapPt,
     leaderWidthMm

@@ -55,6 +55,10 @@ export type TocSettings = {
   title: string;
   subtitle: string;
   style: TocStyleId;
+  /** 目次項目に紙面上のページ番号を表示する。 */
+  showPageNumbers: boolean;
+  /** 目次項目から対応するH1見出しへ移動できるリンクを付ける。 */
+  enableLinks: boolean;
   /** 目次本文のフォントサイズ（pt）。省略時は原稿フォントサイズに準じる */
   fontSizePt?: number;
   /** 目次タイトルと項目一覧の間隔（pt）。 */

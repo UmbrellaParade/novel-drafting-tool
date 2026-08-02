@@ -158,6 +158,19 @@ function tocItemsAttribute(items: unknown): string {
   return JSON.stringify(readTocItems(items));
 }
 
+function tocBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return fallback;
+}
+
 export const FontSizeMark = Mark.create({
   name: "fontSize",
 
@@ -363,6 +376,16 @@ export const TableOfContentsNode = Node.create({
       title: { default: "目次" },
       subtitle: { default: "" },
       style: { default: "classic" },
+      showPageNumbers: {
+        default: true,
+        parseHTML: (element) => tocBoolean((element as HTMLElement).dataset.showPageNumbers, true),
+        renderHTML: (attributes) => ({ "data-show-page-numbers": String(tocBoolean(attributes.showPageNumbers, true)) })
+      },
+      enableLinks: {
+        default: false,
+        parseHTML: (element) => tocBoolean((element as HTMLElement).dataset.enableLinks, false),
+        renderHTML: (attributes) => ({ "data-enable-links": String(tocBoolean(attributes.enableLinks, false)) })
+      },
       fontSizePt: {
         default: null,
         parseHTML: (element) => {
@@ -417,6 +440,8 @@ export const TableOfContentsNode = Node.create({
             title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
             subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
             style: tocStyle(element.dataset.style),
+            showPageNumbers: tocBoolean(element.dataset.showPageNumbers, true),
+            enableLinks: tocBoolean(element.dataset.enableLinks, false),
             fontSizePt: fontSizePtRaw ? Number.parseFloat(fontSizePtRaw) : null,
             titleGapPt: element.dataset.titleGapPt ? Number.parseFloat(element.dataset.titleGapPt) : null,
             leaderWidthMm: element.dataset.leaderWidthMm ? Number.parseFloat(element.dataset.leaderWidthMm) : null,
@@ -430,6 +455,8 @@ export const TableOfContentsNode = Node.create({
   renderHTML({ node, HTMLAttributes }) {
     const style = tocStyle(node.attrs.style);
     const items = readTocItems(node.attrs.items);
+    const showPageNumbers = tocBoolean(node.attrs.showPageNumbers, true);
+    const enableLinks = tocBoolean(node.attrs.enableLinks, false);
     const fontSizePt = typeof node.attrs.fontSizePt === "number" && node.attrs.fontSizePt > 0
       ? node.attrs.fontSizePt
       : null;
@@ -453,30 +480,42 @@ export const TableOfContentsNode = Node.create({
         "data-title": node.attrs.title,
         "data-subtitle": "",
         "data-style": style,
+        "data-show-page-numbers": String(showPageNumbers),
+        "data-enable-links": String(enableLinks),
         ...(fontSizePt ? { "data-font-size-pt": String(fontSizePt) } : {}),
         ...(titleGapPt !== null ? { "data-title-gap-pt": String(titleGapPt) } : {}),
         ...(leaderWidthMm !== null ? { "data-leader-width-mm": String(leaderWidthMm) } : {}),
         ...(blockStyle ? { style: blockStyle } : {}),
-        class: `manuscript-toc manuscript-toc-${style}`
+        class: `manuscript-toc manuscript-toc-${style}${showPageNumbers ? "" : " manuscript-toc-without-pages"}${enableLinks ? " manuscript-toc-with-links" : ""}`
       }),
       ["div", { class: "toc-title" }, node.attrs.title || "目次"],
       [
         "ol",
         { class: "toc-list" },
-        ...items.map((item) => [
-          "li",
-          { class: "toc-entry" },
-          ["span", { class: "toc-entry-title" }, item.title],
-          ["span", { class: "toc-entry-leader" }, ""],
-          ["span", { class: "toc-entry-page" }, item.page === null ? "…" : String(item.page)]
-        ])
+        ...items.map((item, index) => {
+          const title = enableLinks
+            ? ["a", { class: "toc-entry-title toc-entry-link", href: `#toc-heading-${index + 1}`, "data-toc-target-index": String(index) }, item.title]
+            : ["span", { class: "toc-entry-title" }, item.title];
+          return [
+            "li",
+            { class: "toc-entry" },
+            title,
+            ...(showPageNumbers
+              ? [
+                  ["span", { class: "toc-entry-leader" }, ""],
+                  ["span", { class: "toc-entry-page" }, item.page === null ? "…" : String(item.page)]
+                ]
+              : [])
+          ];
+        })
       ]
     ];
   },
 
   renderText({ node }) {
     const items = readTocItems(node.attrs.items);
-    return [node.attrs.title || "目次", ...items.map((item) => `${item.title} ${item.page ?? ""}`)].join("\n");
+    const showPageNumbers = tocBoolean(node.attrs.showPageNumbers, true);
+    return [node.attrs.title || "目次", ...items.map((item) => showPageNumbers ? `${item.title} ${item.page ?? ""}`.trim() : item.title)].join("\n");
   }
 });
 

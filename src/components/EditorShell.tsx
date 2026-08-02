@@ -28,7 +28,7 @@ import {
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId, WritingMode } from "@/lib/types";
-import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectToBrowser } from "@/lib/storage";
+import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectBackupToLocalStorage, saveProjectToBrowser } from "@/lib/storage";
 import { blobToDataUrl } from "@/lib/imageAssets";
 import { buildManuscriptFontEmbedCss } from "@/lib/pdfFonts";
 import { importDocxAsHtml, importTextAsHtml } from "@/lib/fileImport";
@@ -1181,6 +1181,8 @@ function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
     title: settings.title.trim() || "目次",
     subtitle: "",
     style: settings.style,
+    showPageNumbers: settings.showPageNumbers,
+    enableLinks: settings.enableLinks,
     fontSizePt: settings.fontSizePt ?? null,
     titleGapPt: settings.titleGapPt ?? null,
     leaderWidthMm: settings.leaderWidthMm ?? DEFAULT_TOC_LEADER_WIDTH_MM,
@@ -1231,6 +1233,8 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           node.attrs.title === nextAttrs.title &&
           node.attrs.subtitle === nextAttrs.subtitle &&
           node.attrs.style === nextAttrs.style &&
+          node.attrs.showPageNumbers === nextAttrs.showPageNumbers &&
+          node.attrs.enableLinks === nextAttrs.enableLinks &&
           node.attrs.fontSizePt === nextAttrs.fontSizePt &&
           node.attrs.titleGapPt === nextAttrs.titleGapPt &&
           node.attrs.leaderWidthMm === nextAttrs.leaderWidthMm &&
@@ -1383,7 +1387,7 @@ export function EditorShell() {
       chapters: layoutChapters.map((chapter, index) => (index === 0 ? { ...chapter, content: layoutChapterContent } : chapter)),
       activeChapterId: activeChapter.id,
       qrLinks: [],
-      tocSettings: { title: "目次", subtitle: "", style: "classic" },
+      tocSettings: { title: "目次", subtitle: "", style: "classic", showPageNumbers: true, enableLinks: false },
       updatedAt: ""
     };
   }, [activeChapter, layoutChapterContent, layoutChapters, layoutPageSettings]);
@@ -1525,12 +1529,15 @@ export function EditorShell() {
     (source: ManuscriptProject) => {
       const latestProject = projectWithLatestContent(source);
       const pendingPageSettings = pendingPageSettingsRef.current;
-      if (Object.keys(pendingPageSettings).length === 0) {
-        return latestProject;
+      const hasLatestContent = latestProject.chapters[0]?.content !== source.chapters[0]?.content;
+      const hasPendingPageSettings = Object.keys(pendingPageSettings).length > 0;
+      if (!hasLatestContent && !hasPendingPageSettings) {
+        return source;
       }
 
       return normalizeDocumentProject({
         ...latestProject,
+        updatedAt: new Date().toISOString(),
         pageSettings: {
           ...latestProject.pageSettings,
           ...pendingPageSettings
@@ -1540,15 +1547,22 @@ export function EditorShell() {
     [projectWithLatestContent]
   );
 
-  const flushPendingChapterContent = useCallback(() => {
+  const flushPendingProjectState = useCallback(() => {
     const pendingContent = readLatestEditorContent();
-    if (pendingContent === null || (pendingChapterContentRef.current === null && project?.chapters[0]?.content === pendingContent)) {
+    const pendingPageSettings = pendingPageSettingsRef.current;
+    const hasPendingContent = pendingContent !== null && (pendingChapterContentRef.current !== null || project?.chapters[0]?.content !== pendingContent);
+    const hasPendingPageSettings = Object.keys(pendingPageSettings).length > 0;
+    if (!hasPendingContent && !hasPendingPageSettings) {
       return;
     }
 
     if (contentCommitTimerRef.current !== null) {
       window.clearTimeout(contentCommitTimerRef.current);
       contentCommitTimerRef.current = null;
+    }
+    if (pageSettingTimerRef.current !== null) {
+      window.clearTimeout(pageSettingTimerRef.current);
+      pageSettingTimerRef.current = null;
     }
     if (fastEditingTimerRef.current !== null) {
       window.clearTimeout(fastEditingTimerRef.current);
@@ -1558,11 +1572,37 @@ export function EditorShell() {
     editingScrollLockRef.current = null;
     setFastEditing(false);
     pendingChapterContentRef.current = null;
+    pendingPageSettingsRef.current = {};
     updateProject((previous) => ({
       ...previous,
-      chapters: previous.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: pendingContent } : chapter))
+      pageSettings: hasPendingPageSettings ? { ...previous.pageSettings, ...pendingPageSettings } : previous.pageSettings,
+      chapters: hasPendingContent && pendingContent !== null
+        ? previous.chapters.map((chapter, index) => (index === 0 ? { ...chapter, content: pendingContent } : chapter))
+        : previous.chapters
     }));
   }, [project, readLatestEditorContent, updateProject]);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    const backupLatestProject = () => {
+      saveProjectBackupToLocalStorage(projectWithLatestOutputState(project));
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        backupLatestProject();
+      }
+    };
+
+    window.addEventListener("pagehide", backupLatestProject);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pagehide", backupLatestProject);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [project, projectWithLatestOutputState]);
 
   const updateActiveChapterContent = useCallback(
     (content: string) => {
@@ -1998,6 +2038,25 @@ export function EditorShell() {
     });
   };
 
+  const handlePageStageClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+
+    const tocLink = event.target.closest<HTMLAnchorElement>("a[data-toc-target-index]");
+    if (!tocLink || !event.currentTarget.contains(tocLink)) {
+      return;
+    }
+
+    const targetIndex = Number.parseInt(tocLink.dataset.tocTargetIndex ?? "", 10);
+    if (!Number.isFinite(targetIndex)) {
+      return;
+    }
+
+    event.preventDefault();
+    jumpToHeading(targetIndex);
+  };
+
   const handlePreset = (preset: PagePresetId) => {
     updateProject((previous) => ({
       ...previous,
@@ -2184,9 +2243,9 @@ export function EditorShell() {
 
   const exportJson = async () => {
     try {
-      const latestProject = projectWithLatestContent(project);
+      const latestProject = projectWithLatestOutputState(project);
       await exportProjectJson(latestProject);
-      flushPendingChapterContent();
+      flushPendingProjectState();
       setStatusText("JSONを書き出し");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "JSONを書き出せませんでした。");
@@ -2195,9 +2254,9 @@ export function EditorShell() {
 
   const manualSave = async () => {
     try {
-      const latestProject = projectWithLatestContent(project);
+      const latestProject = projectWithLatestOutputState(project);
       await saveProjectToBrowser(latestProject);
-      flushPendingChapterContent();
+      flushPendingProjectState();
       setStatusText(`ブラウザ保存 ${new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}`);
     } catch (error) {
       setStatusText("ブラウザ保存に失敗");
@@ -2273,12 +2332,12 @@ export function EditorShell() {
         return;
       }
 
-      const latestProject = projectWithLatestContent(project);
+      const latestProject = projectWithLatestOutputState(project);
       const client = await ensureDriveClient();
       const result = await client.saveProject(latestProject, latestProject.drive?.folderId);
       const savedFolderId = result.folderId ?? latestProject.drive?.folderId ?? "";
       const savedFolderName = savedFolderId ? latestProject.drive?.folderName : undefined;
-      flushPendingChapterContent();
+      flushPendingProjectState();
       updateProject((previous) => ({
         ...previous,
         drive: {
@@ -2337,7 +2396,7 @@ export function EditorShell() {
         throw new Error(`原稿ツールとPDFのページ数が一致しません。原稿: ${exportPageCount}ページ / PDF: ${result.pageCount}ページ`);
       }
 
-      flushPendingChapterContent();
+      flushPendingProjectState();
       setPageSectionTitles((previous) => (sameStringList(previous, measuredLayout.sectionTitles) ? previous : measuredLayout.sectionTitles));
       if (latestChapter.content === layoutChapterContent && latestProject.pageSettings === layoutPageSettings) {
         setMeasuredPages({
@@ -2359,9 +2418,9 @@ export function EditorShell() {
 
   const exportDocx = async () => {
     try {
-      const latestProject = projectWithLatestContent(project);
+      const latestProject = projectWithLatestOutputState(project);
       await exportProjectDocx(latestProject);
-      flushPendingChapterContent();
+      flushPendingProjectState();
       setStatusText("DOCXを書き出し");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "DOCXを書き出せませんでした。");
@@ -2370,9 +2429,9 @@ export function EditorShell() {
 
   const exportEpub = async () => {
     try {
-      const latestProject = projectWithLatestContent(project);
+      const latestProject = projectWithLatestOutputState(project);
       await exportProjectEpub(latestProject);
-      flushPendingChapterContent();
+      flushPendingProjectState();
       setStatusText("EPUBを書き出し");
     } catch (error) {
       window.console.error(error);
@@ -2666,7 +2725,7 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`}>
+        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`} onClick={handlePageStageClick}>
           <div className="page-viewport" style={pageViewportStyle}>
             <div
               className={`paged-document ${verticalWriting ? "is-vertical" : "is-horizontal"} ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
@@ -2997,6 +3056,24 @@ function TableOfContentsPanel({
             ))}
           </select>
         </label>
+        <div className="toc-option-row">
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.showPageNumbers}
+              onChange={(event) => onSettingChange("showPageNumbers", event.target.checked)}
+            />
+            ページ番号
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.enableLinks}
+              onChange={(event) => onSettingChange("enableLinks", event.target.checked)}
+            />
+            章へのリンク
+          </label>
+        </div>
         <div className="toc-form-field wide">
           <span>目次の文字サイズ：{tocFontSizePt}pt</span>
           <div className="toc-size-stepper">
@@ -3037,26 +3114,28 @@ function TableOfContentsPanel({
             </button>
           </div>
         </div>
-        <div className="toc-form-field wide">
-          <span>点線の長さ：{tocLeaderWidthMm}mm</span>
-          <div className="toc-size-stepper">
-            <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm - 1)} aria-label="点線を短くする">
-              <Minus size={14} />
-            </button>
-            <input
-              type="number"
-              min={0}
-              max={40}
-              step={1}
-              value={tocLeaderWidthMm}
-              onChange={(event) => updateTocLeaderWidth(Number(event.target.value))}
-              aria-label="点線の長さmm"
-            />
-            <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm + 1)} aria-label="点線を長くする">
-              <Plus size={14} />
-            </button>
+        {settings.showPageNumbers ? (
+          <div className="toc-form-field wide">
+            <span>点線の長さ：{tocLeaderWidthMm}mm</span>
+            <div className="toc-size-stepper">
+              <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm - 1)} aria-label="点線を短くする">
+                <Minus size={14} />
+              </button>
+              <input
+                type="number"
+                min={0}
+                max={40}
+                step={1}
+                value={tocLeaderWidthMm}
+                onChange={(event) => updateTocLeaderWidth(Number(event.target.value))}
+                aria-label="点線の長さmm"
+              />
+              <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm + 1)} aria-label="点線を長くする">
+                <Plus size={14} />
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
       <div className="toc-actions">
         <button type="button" disabled={!entries.length} onClick={onInsert}>
@@ -3073,7 +3152,7 @@ function TableOfContentsPanel({
             <button key={entry.id} className="toc-preview-item" type="button" onClick={() => onJump(entry.index)}>
               <FileText size={15} />
               <span>{entry.title}</span>
-              <strong>{entry.page ?? "…"}</strong>
+              {settings.showPageNumbers ? <strong>{entry.page ?? "…"}</strong> : null}
             </button>
           ))}
         </div>
