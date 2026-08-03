@@ -766,8 +766,10 @@ img {
 }
 
 .toc-entry-link {
-  color: inherit;
-  text-decoration: none;
+  color: #0b57d0;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
 }
 
 .toc-entry-leader {
