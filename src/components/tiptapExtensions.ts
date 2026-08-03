@@ -494,7 +494,7 @@ export const TableOfContentsNode = Node.create({
         { class: "toc-list" },
         ...items.map((item, index) => {
           const title = enableLinks
-            ? ["a", { class: "toc-entry-title toc-entry-link", href: `#toc-heading-${index + 1}`, "data-toc-target-index": String(index) }, item.title]
+            ? ["a", { class: "toc-entry-title toc-entry-link", role: "link", tabindex: "0", "data-toc-target-index": String(index) }, item.title]
             : ["span", { class: "toc-entry-title" }, item.title];
           return [
             "li",

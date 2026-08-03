@@ -2038,26 +2038,6 @@ export function EditorShell() {
     });
   };
 
-  const handlePageStageClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!(event.target instanceof Element)) {
-      return;
-    }
-
-    const tocLink = event.target.closest<HTMLAnchorElement>("a[data-toc-target-index]");
-    if (!tocLink || !event.currentTarget.contains(tocLink)) {
-      return;
-    }
-
-    const targetIndex = Number.parseInt(tocLink.dataset.tocTargetIndex ?? "", 10);
-    if (!Number.isFinite(targetIndex)) {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    jumpToHeading(targetIndex);
-  };
-
   const handlePreset = (preset: PagePresetId) => {
     updateProject((previous) => ({
       ...previous,
@@ -2726,7 +2706,7 @@ export function EditorShell() {
           </div>
           <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
         </div>
-        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`} onClickCapture={handlePageStageClick}>
+        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`}>
           <div className="page-viewport" style={pageViewportStyle}>
             <div
               className={`paged-document ${verticalWriting ? "is-vertical" : "is-horizontal"} ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
@@ -2762,6 +2742,7 @@ export function EditorShell() {
                     onChange={updateActiveChapterContent}
                     onTypingActivity={markTypingActivity}
                     onPasteLayoutHints={applyPasteLayoutHints}
+                    onTableOfContentsLink={jumpToHeading}
                     onReady={setActiveEditor}
                   />
                 </div>

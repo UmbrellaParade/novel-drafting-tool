@@ -38,6 +38,7 @@ type TiptapEditorProps = {
   onChange: (content: string) => void;
   onTypingActivity?: () => void;
   onPasteLayoutHints?: (hints: PasteLayoutHints) => void;
+  onTableOfContentsLink?: (headingIndex: number) => void;
   onReady?: (editor: Editor | null) => void;
 };
 
@@ -93,12 +94,13 @@ function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
 }
 
-export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayoutHints, onReady }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayoutHints, onTableOfContentsLink, onReady }: TiptapEditorProps) {
   const editorRef = useRef<Editor | null>(null);
   // onChangeをrefで保持することで、useEditor内クロージャが古い参照を持たないようにする
   const onChangeRef = useRef(onChange);
   const onTypingActivityRef = useRef(onTypingActivity);
   const onPasteLayoutHintsRef = useRef(onPasteLayoutHints);
+  const onTableOfContentsLinkRef = useRef(onTableOfContentsLink);
   const lastDirectTypingActivityRef = useRef(0);
   // getHTML()のdebounce用タイマー（画像リサイズ中の連続シリアライズを防止）
   const onUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -115,6 +117,10 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   useEffect(() => {
     onPasteLayoutHintsRef.current = onPasteLayoutHints;
   }, [onPasteLayoutHints]);
+
+  useEffect(() => {
+    onTableOfContentsLinkRef.current = onTableOfContentsLink;
+  }, [onTableOfContentsLink]);
 
   const clearScheduledHtmlCommit = () => {
     if (onUpdateTimerRef.current !== null) {
@@ -190,6 +196,19 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         spellcheck: "false"
       },
       handleKeyDown: (_view, event) => {
+        const tocLink = event.target instanceof Element
+          ? event.target.closest<HTMLAnchorElement>("a[data-toc-target-index]")
+          : null;
+        if (tocLink && (event.key === "Enter" || event.key === " ")) {
+          const targetIndex = Number.parseInt(tocLink.dataset.tocTargetIndex ?? "", 10);
+          if (Number.isFinite(targetIndex)) {
+            event.preventDefault();
+            event.stopPropagation();
+            onTableOfContentsLinkRef.current?.(targetIndex);
+            return true;
+          }
+        }
+
         const isEditingKey =
           event.key.length === 1 ||
           event.key === "Backspace" ||
@@ -201,6 +220,24 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
           onTypingActivity?.();
         }
         return false;
+      },
+      handleClick: (_view, _position, event) => {
+        const tocLink = event.target instanceof Element
+          ? event.target.closest<HTMLAnchorElement>("a[data-toc-target-index]")
+          : null;
+        if (!tocLink) {
+          return false;
+        }
+
+        const targetIndex = Number.parseInt(tocLink.dataset.tocTargetIndex ?? "", 10);
+        if (!Number.isFinite(targetIndex)) {
+          return false;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        onTableOfContentsLinkRef.current?.(targetIndex);
+        return true;
       },
       handleScrollToSelection: () => true,
       handlePaste: (_view, event) => {

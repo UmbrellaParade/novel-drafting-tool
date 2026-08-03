@@ -67,6 +67,12 @@ type DocxModule = typeof import("docx");
 type DocxParagraph = InstanceType<DocxModule["Paragraph"]>;
 type DocxImageRun = InstanceType<DocxModule["ImageRun"]>;
 
+const INTERNAL_DOCUMENT_CHAPTER_TITLE = "本文";
+
+function isInternalDocumentChapterTitle(title: string): boolean {
+  return title.trim() === INTERNAL_DOCUMENT_CHAPTER_TITLE;
+}
+
 export async function exportProjectDocx(project: ManuscriptProject): Promise<void> {
   const docx = await import("docx");
   const children: InstanceType<typeof docx.Paragraph>[] = [];
@@ -82,18 +88,21 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
       children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
     }
 
-    children.push(
-      new docx.Paragraph({
-        children: [
-          new docx.TextRun({
-            text: chapter.title,
-            font: bodyFont,
-            size: Math.round(project.pageSettings.fontSizePt * 2.6)
-          })
-        ],
-        heading: docx.HeadingLevel.HEADING_1
-      })
-    );
+    const includeChapterTitle = chapter.title.trim().length > 0 && !isInternalDocumentChapterTitle(chapter.title);
+    if (includeChapterTitle) {
+      children.push(
+        new docx.Paragraph({
+          children: [
+            new docx.TextRun({
+              text: chapter.title,
+              font: bodyFont,
+              size: Math.round(project.pageSettings.fontSizePt * 2.6)
+            })
+          ],
+          heading: docx.HeadingLevel.HEADING_1
+        })
+      );
+    }
 
     for (const block of parseDocxBlocks(chapter.content)) {
       if (block.kind === "pageBreak") {
@@ -132,7 +141,11 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
               size: Math.round(project.pageSettings.fontSizePt * 2)
             })
           ],
-          heading: block.kind === "heading" ? docx.HeadingLevel.HEADING_2 : undefined,
+          heading: block.kind === "heading"
+            ? includeChapterTitle
+              ? docx.HeadingLevel.HEADING_2
+              : docx.HeadingLevel.HEADING_1
+            : undefined,
           spacing: {
             after: paragraphAfterTwips,
             line: lineSpacingTwips,
@@ -445,7 +458,7 @@ export async function exportProjectEpub(project: ManuscriptProject): Promise<voi
   const chapters: EpubChapter[] = [];
 
   for (const [chapterIndex, chapter] of project.chapters.entries()) {
-    chapters.push(await buildEpubChapter(chapter.title, chapter.content, chapterIndex + 1, assetState));
+    chapters.push(await buildEpubChapter(chapter.title, chapter.content, chapterIndex + 1, assetState, project.title));
   }
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -472,7 +485,13 @@ export async function exportProjectEpub(project: ManuscriptProject): Promise<voi
 }
 
 
-async function buildEpubChapter(title: string, html: string, chapterNumber: number, assetState: EpubAssetState): Promise<EpubChapter> {
+async function buildEpubChapter(
+  title: string,
+  html: string,
+  chapterNumber: number,
+  assetState: EpubAssetState,
+  navigationFallbackTitle: string
+): Promise<EpubChapter> {
   const href = `chapter-${chapterNumber}.xhtml`;
   const template = document.createElement("template");
   template.innerHTML = html.trim() || "<p></p>";
@@ -511,10 +530,17 @@ async function buildEpubChapter(title: string, html: string, chapterNumber: numb
   const navItems: EpubNavItem[] = [];
   const headings = [...template.content.querySelectorAll<HTMLElement>("h1")].filter((heading) => !heading.closest("[data-type='table-of-contents']"));
   if (headings.length === 0) {
-    const heading = document.createElement("h1");
-    heading.textContent = title;
-    template.content.prepend(heading);
-    headings.push(heading);
+    if (isInternalDocumentChapterTitle(title)) {
+      navItems.push({
+        title: navigationFallbackTitle.trim() || "原稿",
+        href
+      });
+    } else {
+      const heading = document.createElement("h1");
+      heading.textContent = title;
+      template.content.prepend(heading);
+      headings.push(heading);
+    }
   }
 
   headings.forEach((heading, headingIndex) => {
@@ -534,6 +560,8 @@ async function buildEpubChapter(title: string, html: string, chapterNumber: numb
     } else {
       link.removeAttribute("href");
     }
+    link.removeAttribute("role");
+    link.removeAttribute("tabindex");
     link.removeAttribute("data-toc-target-index");
   });
 
