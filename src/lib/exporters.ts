@@ -48,8 +48,20 @@ type ZipEntry = {
   data: Uint8Array;
 };
 
+type DocxTextSegment = {
+  text: string;
+  fontSizePt?: number;
+};
+
 type DocxBlock =
-  | { kind: "paragraph" | "heading"; text: string }
+  | { kind: "paragraph" | "heading" | "tocHeading"; segments: DocxTextSegment[] }
+  | {
+      kind: "tocEntry";
+      title: string;
+      suffix: string;
+      targetIndex: number;
+      enableLink: boolean;
+    }
   | { kind: "pageBreak"; text: "" }
   | { kind: "image"; src: string; alt: string; widthPx?: number; heightPx?: number }
   | {
@@ -82,8 +94,17 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
   const paragraphAfterTwips = mmToTwip(project.pageSettings.paragraphSpacingMm);
   const contentWidthPx = Math.round(Math.max(20, project.pageSettings.pageWidthMm - project.pageSettings.marginLeftMm - project.pageSettings.marginRightMm) * PX_PER_MM);
   const maxImageHeightPx = Math.round(Math.max(30, project.pageSettings.imageMaxHeightMm) * PX_PER_MM);
+  const parsedChapters = project.chapters.map((chapter) => ({
+    chapter,
+    blocks: parseDocxBlocks(chapter.content)
+  }));
+  const headingCount = parsedChapters.reduce(
+    (count, { blocks }) => count + blocks.filter((block) => block.kind === "heading").length,
+    0
+  );
+  let headingIndex = 0;
 
-  for (const [chapterIndex, chapter] of project.chapters.entries()) {
+  for (const [chapterIndex, { chapter, blocks }] of parsedChapters.entries()) {
     if (chapterIndex > 0) {
       children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
     }
@@ -96,7 +117,8 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
             new docx.TextRun({
               text: chapter.title,
               font: bodyFont,
-              size: Math.round(project.pageSettings.fontSizePt * 2.6)
+              size: Math.round(project.pageSettings.fontSizePt * 2.6),
+              color: "000000"
             })
           ],
           heading: docx.HeadingLevel.HEADING_1
@@ -104,7 +126,7 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
       );
     }
 
-    for (const block of parseDocxBlocks(chapter.content)) {
+    for (const block of blocks) {
       if (block.kind === "pageBreak") {
         children.push(new docx.Paragraph({ children: [new docx.PageBreak()] }));
         continue;
@@ -132,16 +154,71 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
         continue;
       }
 
+      if (block.kind === "tocEntry") {
+        const titleRunOptions = {
+          text: block.title,
+          font: bodyFont,
+          size: Math.round(project.pageSettings.fontSizePt * 2)
+        };
+        const title = block.enableLink && block.targetIndex < headingCount
+          ? new docx.InternalHyperlink({
+              anchor: docxHeadingBookmarkId(block.targetIndex),
+              children: [
+                new docx.TextRun({
+                  ...titleRunOptions,
+                  color: "0563C1",
+                  underline: {
+                    type: docx.UnderlineType.SINGLE,
+                    color: "0563C1"
+                  }
+                })
+              ]
+            })
+          : new docx.TextRun({
+              ...titleRunOptions,
+              color: "000000"
+            });
+        children.push(
+          new docx.Paragraph({
+            children: [
+              title,
+              ...(block.suffix
+                ? [
+                    new docx.TextRun({
+                      text: block.suffix,
+                      font: bodyFont,
+                      size: Math.round(project.pageSettings.fontSizePt * 2),
+                      color: "000000"
+                    })
+                  ]
+                : [])
+            ],
+            spacing: {
+              after: paragraphAfterTwips,
+              line: lineSpacingTwips,
+              lineRule: docx.LineRuleType.AT_LEAST
+            }
+          })
+        );
+        continue;
+      }
+
+      const textRuns = createDocxTextRuns(docx, block.segments, {
+        font: bodyFont,
+        defaultFontSizePt: project.pageSettings.fontSizePt,
+        color: "000000"
+      });
+      const textChildren = block.kind === "heading"
+        ? new docx.Bookmark({
+            id: docxHeadingBookmarkId(headingIndex++),
+            children: textRuns
+          })
+        : textRuns;
+
       children.push(
         new docx.Paragraph({
-          children: [
-            new docx.TextRun({
-              text: block.text,
-              font: bodyFont,
-              size: Math.round(project.pageSettings.fontSizePt * 2)
-            })
-          ],
-          heading: block.kind === "heading"
+          children: Array.isArray(textChildren) ? textChildren : [textChildren],
+          heading: block.kind === "heading" || block.kind === "tocHeading"
             ? includeChapterTitle
               ? docx.HeadingLevel.HEADING_2
               : docx.HeadingLevel.HEADING_1
@@ -456,9 +533,13 @@ function readImageIntrinsicSize(src: string): Promise<{ width: number; height: n
 export async function exportProjectEpub(project: ManuscriptProject): Promise<void> {
   const assetState: EpubAssetState = { nextIndex: 1, assets: [], sourceMap: new Map() };
   const chapters: EpubChapter[] = [];
+  const contentWidthPx = Math.max(
+    1,
+    (project.pageSettings.pageWidthMm - project.pageSettings.marginLeftMm - project.pageSettings.marginRightMm) * PX_PER_MM
+  );
 
   for (const [chapterIndex, chapter] of project.chapters.entries()) {
-    chapters.push(await buildEpubChapter(chapter.title, chapter.content, chapterIndex + 1, assetState, project.title));
+    chapters.push(await buildEpubChapter(chapter.title, chapter.content, chapterIndex + 1, assetState, project.title, contentWidthPx));
   }
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -490,7 +571,8 @@ async function buildEpubChapter(
   html: string,
   chapterNumber: number,
   assetState: EpubAssetState,
-  navigationFallbackTitle: string
+  navigationFallbackTitle: string,
+  contentWidthPx: number
 ): Promise<EpubChapter> {
   const href = `chapter-${chapterNumber}.xhtml`;
   const template = document.createElement("template");
@@ -517,6 +599,10 @@ async function buildEpubChapter(
     if (asset) {
       image.setAttribute("src", asset.href);
       image.removeAttribute("data-src");
+    }
+
+    if (!image.closest("figure[data-type='qr-card']")) {
+      normalizeEpubImageSize(image, contentWidthPx);
     }
   }
 
@@ -960,6 +1046,79 @@ nav {
 }`;
 }
 
+function normalizeEpubImageSize(image: HTMLImageElement, contentWidthPx: number): void {
+  const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
+  const requestedWidthPx = readEpubRequestedWidthPx(wrapper) ?? readEpubRequestedWidthPx(image);
+  if (!requestedWidthPx || !Number.isFinite(contentWidthPx) || contentWidthPx <= 0) {
+    image.style.maxWidth = "100%";
+    image.style.height = "auto";
+    image.removeAttribute("height");
+    return;
+  }
+
+  const widthPercent = Math.max(5, Math.min(100, (requestedWidthPx / contentWidthPx) * 100));
+  const formattedWidth = `${Number(widthPercent.toFixed(2))}%`;
+
+  if (wrapper) {
+    wrapper.style.width = formattedWidth;
+    wrapper.style.maxWidth = "100%";
+    wrapper.style.height = "auto";
+    wrapper.removeAttribute("width");
+    wrapper.removeAttribute("height");
+    wrapper.removeAttribute("data-width");
+    wrapper.removeAttribute("data-height");
+    image.style.width = "100%";
+  } else {
+    image.style.width = formattedWidth;
+  }
+
+  image.style.maxWidth = "100%";
+  image.style.height = "auto";
+  image.removeAttribute("width");
+  image.removeAttribute("height");
+  image.removeAttribute("data-width");
+  image.removeAttribute("data-height");
+}
+
+function readEpubRequestedWidthPx(element: HTMLElement | null): number | undefined {
+  if (!element) {
+    return undefined;
+  }
+
+  const values = [element.dataset.width, element.getAttribute("width"), element.style.width];
+  for (const value of values) {
+    if (!value || value.trim().endsWith("%")) {
+      continue;
+    }
+    const parsed = parseCssDimensionPx(value);
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function docxHeadingBookmarkId(index: number): string {
+  return `manuscript_heading_${index + 1}`;
+}
+
+function createDocxTextRuns(
+  docx: DocxModule,
+  segments: DocxTextSegment[],
+  options: { font: string; defaultFontSizePt: number; color: string }
+): InstanceType<DocxModule["TextRun"]>[] {
+  const source = segments.length > 0 ? segments : [{ text: "" }];
+  return source.map((segment) =>
+    new docx.TextRun({
+      text: segment.text,
+      font: options.font,
+      size: Math.round((segment.fontSizePt ?? options.defaultFontSizePt) * 2),
+      color: options.color
+    })
+  );
+}
+
 function normalizeImageMimeType(mimeType: string): string {
   const normalized = mimeType.toLowerCase().split(";")[0].trim();
   return normalized || "image/png";
@@ -1169,6 +1328,10 @@ function tocShowsPageNumbers(element: HTMLElement): boolean {
   return element.dataset.showPageNumbers !== "false";
 }
 
+function tocLinksEnabled(element: HTMLElement): boolean {
+  return element.dataset.enableLinks === "true";
+}
+
 function parseDocxBlocks(html: string): DocxBlock[] {
   const template = document.createElement("template");
   template.innerHTML = html;
@@ -1196,10 +1359,17 @@ function parseDocxBlocks(html: string): DocxBlock[] {
     if (element.matches("section[data-type='table-of-contents']")) {
       const title = element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次";
       const showPageNumbers = tocShowsPageNumbers(element);
+      const enableLinks = tocLinksEnabled(element);
       const leaderText = showPageNumbers ? tocLeaderText(element) : "";
-      blocks.push({ kind: "heading", text: title });
-      parseTocEntries(element).forEach((item) => {
-        blocks.push({ kind: "paragraph", text: showPageNumbers ? `${item.title}${leaderText}${item.page ?? ""}`.trim() : item.title });
+      blocks.push({ kind: "tocHeading", segments: [{ text: title }] });
+      parseTocEntries(element).forEach((item, targetIndex) => {
+        blocks.push({
+          kind: "tocEntry",
+          title: item.title,
+          suffix: showPageNumbers ? `${leaderText}${item.page ?? ""}` : "",
+          targetIndex,
+          enableLink: enableLinks
+        });
       });
       return;
     }
@@ -1229,22 +1399,84 @@ function parseDocxBlocks(html: string): DocxBlock[] {
       return;
     }
 
-    const text = stripHtml(element.outerHTML);
-    if (!text) {
+    const segments = readDocxTextSegments(element);
+    if (!segments.some((segment) => segment.text)) {
       return;
     }
 
     blocks.push({
       kind: element.matches("h1,h2,h3") ? "heading" : "paragraph",
-      text
+      segments
     });
   });
 
   if (blocks.length === 0) {
-    blocks.push({ kind: "paragraph", text: stripHtml(html) });
+    blocks.push({ kind: "paragraph", segments: [{ text: stripHtml(html) }] });
   }
 
   return blocks;
+}
+
+function readDocxTextSegments(element: HTMLElement): DocxTextSegment[] {
+  const segments: DocxTextSegment[] = [];
+
+  const visit = (node: Node, inheritedFontSizePt?: number) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent ?? "";
+      if (!text) {
+        return;
+      }
+      const previous = segments.at(-1);
+      if (previous && previous.fontSizePt === inheritedFontSizePt) {
+        previous.text += text;
+      } else {
+        segments.push({ text, fontSizePt: inheritedFontSizePt });
+      }
+      return;
+    }
+
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+
+    if (node.matches("br")) {
+      segments.push({ text: "\n", fontSizePt: inheritedFontSizePt });
+      return;
+    }
+
+    const fontSizePt = readDocxFontSizePt(node) ?? inheritedFontSizePt;
+    node.childNodes.forEach((child) => visit(child, fontSizePt));
+  };
+
+  visit(element);
+  return segments;
+}
+
+function readDocxFontSizePt(element: HTMLElement): number | undefined {
+  const value = element.style.fontSize || element.dataset.fontSize;
+  if (!value) {
+    return undefined;
+  }
+
+  const numeric = Number.parseFloat(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return undefined;
+  }
+
+  if (value.endsWith("px")) {
+    return numeric * 0.75;
+  }
+  if (value.endsWith("mm")) {
+    return numeric * (72 / 25.4);
+  }
+  if (value.endsWith("cm")) {
+    return numeric * (720 / 25.4);
+  }
+  if (value.endsWith("in")) {
+    return numeric * 72;
+  }
+
+  return numeric;
 }
 
 function readDocxImageBlock(image: HTMLImageElement): Extract<DocxBlock, { kind: "image" }> | null {
