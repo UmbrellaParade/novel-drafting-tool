@@ -1702,13 +1702,17 @@ function readAvailableImageHeightForCurrentPage(editor: Editor, image: HTMLImage
   }
 
   const safeRect = safeGuide.getBoundingClientRect();
+  // Page previews are transform-scaled, while stored image widths use unscaled layout pixels.
+  const visualScale = safeGuide.offsetHeight > 0 ? safeRect.height / safeGuide.offsetHeight : 1;
+  const safeVisualScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+  const toLayoutPx = (visualPx: number) => visualPx / safeVisualScale;
   const contentAfterBottom = readFollowingContentBottomInPage(editor, block, blockRect, safeRect);
   if (contentAfterBottom !== null) {
-    const currentBlockHeight = Math.max(1, blockRect.height);
-    return Math.max(64, currentBlockHeight + safeRect.bottom - contentAfterBottom - fitPadding);
+    const currentBlockHeight = Math.max(1, toLayoutPx(blockRect.height));
+    return Math.max(64, currentBlockHeight + toLayoutPx(safeRect.bottom - contentAfterBottom) - fitPadding);
   }
 
-  return Math.max(64, safeRect.bottom - blockRect.top - fitPadding);
+  return Math.max(64, toLayoutPx(safeRect.bottom - blockRect.top) - fitPadding);
 }
 
 function readImageFitPaddingPx(editor: Editor): number {
