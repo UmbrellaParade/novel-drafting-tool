@@ -6,6 +6,8 @@ const mmToTwip = (value: number) => Math.round(value * 56.6929133858);
 const PX_PER_MM = 96 / 25.4;
 const DEFAULT_DOCX_IMAGE_WIDTH_PX = 320;
 const DOCX_QR_IMAGE_WIDTH_PX = 96;
+const DOCX_PNG_OPTIMIZE_MIN_BYTES = 200_000;
+const DOCX_JPEG_QUALITY = 0.92;
 
 function pageNumberPositionParts(position: PageNumberPosition): { vertical: "top" | "bottom"; horizontal: "left" | "center" | "right" } {
   const [vertical, horizontal] = position.split("-") as ["top" | "bottom", "left" | "center" | "right"];
@@ -398,7 +400,8 @@ async function createDocxQrCardParagraph(
       requestedHeightPx: block.heightPx,
       maxWidthPx: options.maxWidthPx,
       maxHeightPx: options.maxHeightPx,
-      alt: block.title
+      alt: block.title,
+      preserveOriginal: true
     });
 
     if (image) {
@@ -454,15 +457,11 @@ async function createDocxImageRun(
     maxWidthPx: number;
     maxHeightPx: number;
     alt: string;
+    preserveOriginal?: boolean;
   }
 ): Promise<DocxImageRun | null> {
   try {
-    const { bytes, mimeType } = await loadImageBytes(src);
-    const imageType = docxImageTypeForMimeType(mimeType);
-    if (!imageType) {
-      return null;
-    }
-
+    const loaded = await loadImageBytes(src);
     const intrinsic = await readImageIntrinsicSize(src);
     const fallbackRatio = 0.75;
     const ratio = intrinsic && intrinsic.width > 0 && intrinsic.height > 0 ? intrinsic.height / intrinsic.width : fallbackRatio;
@@ -473,6 +472,16 @@ async function createDocxImageRun(
 
     if (height >= options.maxHeightPx && ratio > 0) {
       width = Math.max(24, Math.min(width, Math.round(height / ratio)));
+    }
+
+    const optimized = options.preserveOriginal
+      ? null
+      : await optimizeDocxPngAsJpeg(src, loaded.bytes, loaded.mimeType);
+    const bytes = optimized?.bytes ?? loaded.bytes;
+    const mimeType = optimized?.mimeType ?? loaded.mimeType;
+    const imageType = docxImageTypeForMimeType(mimeType);
+    if (!imageType) {
+      return null;
     }
 
     return new docx.ImageRun({
@@ -491,6 +500,65 @@ async function createDocxImageRun(
   } catch {
     return null;
   }
+}
+
+async function optimizeDocxPngAsJpeg(
+  src: string,
+  originalBytes: Uint8Array,
+  mimeType: string
+): Promise<{ bytes: Uint8Array; mimeType: "image/jpeg" } | null> {
+  if (
+    typeof document === "undefined" ||
+    typeof Image === "undefined" ||
+    !normalizeImageMimeType(mimeType).includes("png") ||
+    originalBytes.byteLength < DOCX_PNG_OPTIMIZE_MIN_BYTES
+  ) {
+    return null;
+  }
+
+  try {
+    const image = await loadBrowserImage(src);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return null;
+    }
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/jpeg", DOCX_JPEG_QUALITY);
+    });
+    if (!blob || blob.size >= originalBytes.byteLength) {
+      return null;
+    }
+
+    return {
+      bytes: new Uint8Array(await blob.arrayBuffer()),
+      mimeType: "image/jpeg"
+    };
+  } catch {
+    return null;
+  }
+}
+
+function loadBrowserImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const timeout = window.setTimeout(() => reject(new Error("Image load timed out")), 5000);
+    image.onload = () => {
+      window.clearTimeout(timeout);
+      resolve(image);
+    };
+    image.onerror = () => {
+      window.clearTimeout(timeout);
+      reject(new Error("Image load failed"));
+    };
+    image.src = src;
+  });
 }
 
 function docxImageTypeForMimeType(mimeType: string): "jpg" | "png" | "gif" | "bmp" | null {
