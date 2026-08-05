@@ -1111,12 +1111,14 @@ nav {
 
 .vertical-ellipsis {
   white-space: nowrap;
-  text-orientation: sideways;
+  text-orientation: mixed;
+  font-feature-settings: "vert" 1;
 }
 
 .vertical-dash {
   white-space: nowrap;
-  text-orientation: sideways;
+  text-orientation: mixed;
+  font-feature-settings: "vert" 1;
 }
 
 .vertical-tate-chu-yoko {
