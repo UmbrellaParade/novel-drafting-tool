@@ -165,14 +165,18 @@ function tocItemsAttribute(items: unknown): string {
 
 function verticalTextOutput(value: string): DOMOutputSpec {
   const matches = [
-    ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]+/g)).map((match) => ({
+    ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]/g)).map((match) => ({
       index: match.index ?? 0,
       text: match[0],
       className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
     })),
     ...Array.from(value.matchAll(/\d+/g))
       .filter((match) => match[0].length <= 2)
-      .map((match) => ({ index: match.index ?? 0, text: match[0], className: "vertical-tate-chu-yoko" })),
+      .map((match) => ({
+        index: match.index ?? 0,
+        text: match[0],
+        className: "vertical-tate-chu-yoko vertical-tate-chu-yoko-number"
+      })),
     ...Array.from(value.matchAll(/[!?！？]{2}/g)).map((match) => ({
       index: match.index ?? 0,
       text: match[0],
@@ -388,7 +392,7 @@ export const VerticalPunctuationExtension = Extension.create({
                 return;
               }
 
-              for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]+/g)) {
+              for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]/g)) {
                 const start = position + (match.index ?? 0);
                 const className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
                 decorations.push(Decoration.inline(start, start + match[0].length, { class: className }));
@@ -399,7 +403,9 @@ export const VerticalPunctuationExtension = Extension.create({
                   continue;
                 }
                 const start = position + (match.index ?? 0);
-                decorations.push(Decoration.inline(start, start + match[0].length, { class: "vertical-tate-chu-yoko" }));
+                decorations.push(Decoration.inline(start, start + match[0].length, {
+                  class: "vertical-tate-chu-yoko vertical-tate-chu-yoko-number"
+                }));
               }
 
               for (const match of node.text.matchAll(/[!?！？]{2}/g)) {
@@ -521,13 +527,36 @@ export const ColumnBlockNode = Node.create({
   }
 });
 
+export const HorizontalWritingBlockNode = Node.create({
+  name: "horizontalWritingBlock",
+  group: "block",
+  content: "block+",
+  defining: true,
+  selectable: true,
+
+  parseHTML() {
+    return [{ tag: "section[data-type='horizontal-writing-block']" }];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "section",
+      mergeAttributes(HTMLAttributes, {
+        "data-type": "horizontal-writing-block",
+        class: "horizontal-writing-block"
+      }),
+      0
+    ];
+  }
+});
+
 export const PageBreakBeforeExtension = Extension.create({
   name: "pageBreakBefore",
 
   addGlobalAttributes() {
     return [
       {
-        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard", "tableOfContents", "columnBlock"],
+        types: ["paragraph", "heading", "blockquote", "bulletList", "orderedList", "image", "qrCard", "tableOfContents", "columnBlock", "horizontalWritingBlock"],
         attributes: {
           pageBreakBefore: {
             default: false,

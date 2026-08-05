@@ -1614,9 +1614,11 @@ h1 {
 }
 
 .paged-document.is-vertical .manuscript-prose .manuscript-column-block,
+.paged-document.is-vertical .manuscript-prose .horizontal-writing-block,
 .paged-document.is-vertical .manuscript-prose .qr-card,
 .paged-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"],
 .pdf-export-document.is-vertical .manuscript-prose .manuscript-column-block,
+.pdf-export-document.is-vertical .manuscript-prose .horizontal-writing-block,
 .pdf-export-document.is-vertical .manuscript-prose .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"] {
   writing-mode: horizontal-tb;
@@ -1652,12 +1654,14 @@ h1 {
 
 .paged-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
 .paged-document.is-vertical .manuscript-prose > section[data-type="column-block"],
+.paged-document.is-vertical .manuscript-prose > section[data-type="horizontal-writing-block"],
 .paged-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .paged-document.is-vertical .manuscript-prose > .qr-card,
 .paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
 .paged-document.is-vertical .manuscript-prose > img:not(.qr-card-image),
 .pdf-export-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
 .pdf-export-document.is-vertical .manuscript-prose > section[data-type="column-block"],
+.pdf-export-document.is-vertical .manuscript-prose > section[data-type="horizontal-writing-block"],
 .pdf-export-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .pdf-export-document.is-vertical .manuscript-prose > .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
@@ -1667,12 +1671,14 @@ h1 {
 
 .paged-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
 .paged-document.is-vertical .manuscript-prose > section[data-type="column-block"],
+.paged-document.is-vertical .manuscript-prose > section[data-type="horizontal-writing-block"],
 .paged-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .paged-document.is-vertical .manuscript-prose > .qr-card,
 .paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
 .paged-document.is-vertical .manuscript-prose > img:not(.qr-card-image),
 .pdf-export-document.is-vertical .manuscript-prose > section[data-type="table-of-contents"],
 .pdf-export-document.is-vertical .manuscript-prose > section[data-type="column-block"],
+.pdf-export-document.is-vertical .manuscript-prose > section[data-type="horizontal-writing-block"],
 .pdf-export-document.is-vertical .manuscript-prose > [data-type="qr-card"],
 .pdf-export-document.is-vertical .manuscript-prose > .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"],
@@ -1704,19 +1710,22 @@ h1 {
   visibility: hidden;
   font-feature-settings: normal;
   line-height: 1;
+  vertical-align: middle;
 }
 
 .paged-document.is-vertical .manuscript-prose .vertical-dash::after,
 .pdf-export-document.is-vertical .manuscript-prose .vertical-dash::after {
-  content: "";
+  content: "︱";
   position: absolute;
-  top: 0.05em;
-  bottom: 0.05em;
-  left: calc(50% - 0.045em);
-  width: 0.09em;
-  min-width: 1px;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   visibility: visible;
-  background: currentColor;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  font-feature-settings: normal;
+  line-height: 1;
 }
 
 .paged-document.is-vertical .manuscript-prose > p,
@@ -1730,6 +1739,51 @@ h1 {
   -webkit-text-combine: horizontal;
   text-orientation: mixed;
   letter-spacing: 0;
+}
+
+.paged-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko-number,
+.pdf-export-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko-number {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  writing-mode: horizontal-tb;
+  text-combine-upright: none;
+  -webkit-text-combine: none;
+  font-feature-settings: normal;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.paged-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-dash,
+.pdf-export-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-dash {
+  display: inline;
+  position: static;
+  inline-size: auto;
+  block-size: auto;
+  visibility: visible;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
+.paged-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-dash::after,
+.pdf-export-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-dash::after {
+  content: none;
+}
+
+.paged-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-tate-chu-yoko,
+.pdf-export-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-tate-chu-yoko {
+  display: inline;
+  width: auto;
+  height: auto;
+  writing-mode: horizontal-tb;
+  text-combine-upright: none;
+  -webkit-text-combine: none;
+  line-height: inherit;
+  vertical-align: baseline;
 }
 
 .paged-document.is-vertical .manuscript-prose .page-break-before,
@@ -1813,6 +1867,36 @@ h1 {
   break-inside: avoid-column;
   page-break-inside: avoid;
   -webkit-column-break-inside: avoid;
+}
+
+.horizontal-writing-block {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 0 var(--paragraph-spacing);
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  text-combine-upright: none;
+}
+
+.paged-document .horizontal-writing-block {
+  outline: 1px dashed rgba(58, 130, 120, 0.5);
+  outline-offset: 1.5mm;
+}
+
+.paged-document .horizontal-writing-block:hover,
+.paged-document .horizontal-writing-block.ProseMirror-selectednode {
+  outline-color: rgba(58, 130, 120, 0.95);
+}
+
+.paged-document.is-vertical .horizontal-writing-block,
+.pdf-export-document.is-vertical .horizontal-writing-block {
+  width: var(--content-width);
+  min-width: var(--content-width);
+  max-width: var(--content-width);
+  min-height: var(--content-height);
+  margin: 0;
 }
 
 .paged-document .manuscript-column-block {

@@ -753,19 +753,23 @@ function decorateVerticalEpubText(root: DocumentFragment): void {
   }
 
   textNodes.forEach((textNode) => {
-    if (textNode.parentElement?.closest(".vertical-ellipsis, .vertical-dash, .vertical-tate-chu-yoko")) {
+    if (textNode.parentElement?.closest(".vertical-ellipsis, .vertical-dash, .vertical-tate-chu-yoko, [data-type='horizontal-writing-block']")) {
       return;
     }
     const value = textNode.nodeValue ?? "";
     const matches = [
-      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]+/g)).map((match) => ({
+      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]/g)).map((match) => ({
         index: match.index ?? 0,
         text: match[0],
         className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
       })),
       ...Array.from(value.matchAll(/\d+/g))
         .filter((match) => match[0].length <= 2)
-        .map((match) => ({ index: match.index ?? 0, text: match[0], className: "vertical-tate-chu-yoko" })),
+        .map((match) => ({
+          index: match.index ?? 0,
+          text: match[0],
+          className: "vertical-tate-chu-yoko vertical-tate-chu-yoko-number"
+        })),
       ...Array.from(value.matchAll(/[!?！？]{2}/g)).map((match) => ({
         index: match.index ?? 0,
         text: match[0],
@@ -927,19 +931,22 @@ function epubCss(project: ManuscriptProject): string {
   block-size: 1em;
   visibility: hidden;
   font-feature-settings: normal;
-  line-height: 1;`
+  line-height: 1;
+  vertical-align: middle;`
     : "";
   const verticalDashMarkerCss = project.pageSettings.writingMode === "vertical"
     ? `.vertical-dash::after {
-  content: "";
+  content: "︱";
   position: absolute;
-  top: 0.05em;
-  bottom: 0.05em;
-  left: calc(50% - 0.045em);
-  width: 0.09em;
-  min-width: 1px;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   visibility: visible;
-  background: currentColor;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  font-feature-settings: normal;
+  line-height: 1;
 }`
     : "";
 
@@ -992,6 +999,20 @@ img {
 [data-page-break-before="true"] {
   break-before: page;
   page-break-before: always;
+}
+
+.horizontal-writing-block {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  text-combine-upright: none;
+  break-before: page;
+  break-after: page;
+  page-break-before: always;
+  page-break-after: always;
 }
 
 .manuscript-toc {
@@ -1155,6 +1176,22 @@ ${verticalDashMarkerCss}
   -webkit-text-combine: horizontal;
   text-orientation: mixed;
   letter-spacing: 0;
+}
+
+.vertical-tate-chu-yoko-number {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  writing-mode: horizontal-tb;
+  text-combine-upright: none;
+  -webkit-text-combine: none;
+  font-feature-settings: normal;
+  line-height: 1;
+  text-align: center;
+  vertical-align: middle;
 }
 
 .qr-card-body {

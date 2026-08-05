@@ -994,6 +994,7 @@ const PREVIEW_PAGE_CONTENT_SELECTOR = [
   "li",
   "blockquote",
   "section[data-type='table-of-contents']",
+  "section[data-type='horizontal-writing-block']",
   "figure",
   "img"
 ].join(",");
@@ -1001,6 +1002,7 @@ const PREVIEW_PAGE_CONTENT_SELECTOR = [
 const VERTICAL_UNBREAKABLE_BLOCK_SELECTOR = [
   "section[data-type='table-of-contents']",
   "section[data-type='column-block']",
+  "section[data-type='horizontal-writing-block']",
   "[data-type='qr-card']",
   ".qr-card",
   "[data-resize-container][data-node='image']",
@@ -1073,19 +1075,23 @@ function decorateVerticalPunctuation(root: HTMLElement): void {
   }
 
   textNodes.forEach((textNode) => {
-    if (textNode.parentElement?.closest(".vertical-ellipsis, .vertical-dash, .vertical-tate-chu-yoko")) {
+    if (textNode.parentElement?.closest(".vertical-ellipsis, .vertical-dash, .vertical-tate-chu-yoko, [data-type='horizontal-writing-block']")) {
       return;
     }
     const value = textNode.nodeValue ?? "";
     const matches = [
-      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]+/g)).map((match) => ({
+      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]/g)).map((match) => ({
         index: match.index ?? 0,
         text: match[0],
         className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
       })),
       ...Array.from(value.matchAll(/\d+/g))
         .filter((match) => match[0].length <= 2)
-        .map((match) => ({ index: match.index ?? 0, text: match[0], className: "vertical-tate-chu-yoko" })),
+        .map((match) => ({
+          index: match.index ?? 0,
+          text: match[0],
+          className: "vertical-tate-chu-yoko vertical-tate-chu-yoko-number"
+        })),
       ...Array.from(value.matchAll(/[!?！？]{2}/g)).map((match) => ({
         index: match.index ?? 0,
         text: match[0],
@@ -2903,7 +2909,11 @@ export function EditorShell() {
           </div>
         </div>
         <div className="topbar-editor-tools">
-          <TiptapToolbar editor={activeEditor} onOpenQrLibrary={openQrLibrary} />
+          <TiptapToolbar
+            editor={activeEditor}
+            verticalWriting={project.pageSettings.writingMode === "vertical"}
+            onOpenQrLibrary={openQrLibrary}
+          />
         </div>
         <div className="topbar-actions">
           <span className="save-state">{statusText}</span>

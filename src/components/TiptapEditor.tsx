@@ -26,13 +26,14 @@ import {
   QrCode,
   Redo2,
   RefreshCw,
+  Rows3,
   Scan,
   ScissorsLineDashed,
   Trash2,
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, ImageAssetIdExtension, ImageDimensionSyncExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, HorizontalWritingBlockNode, ImageAssetIdExtension, ImageDimensionSyncExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
 import { internImageBlob, internImageDataUrl } from "@/lib/imageAssets";
 
 type TiptapEditorProps = {
@@ -46,6 +47,7 @@ type TiptapEditorProps = {
 
 type TiptapToolbarProps = {
   editor: Editor | null;
+  verticalWriting?: boolean;
   onOpenQrLibrary?: () => void;
 };
 
@@ -68,6 +70,7 @@ type ToolbarState = {
   selectedQrCardHeight: number | null;
   activeColumnCount: 0 | 2 | 3;
   activeColumnGapMm: number;
+  hasHorizontalWritingBlock: boolean;
 };
 
 type ImageReplacementTarget = {
@@ -188,6 +191,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       BlockLineHeightExtension,
       VerticalPunctuationExtension,
       ColumnBlockNode,
+      HorizontalWritingBlockNode,
       ImageAssetIdExtension,
       ImageDimensionSyncExtension,
       Image.configure({
@@ -342,7 +346,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   );
 }
 
-export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
+export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary }: TiptapToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageSelectionTargetRef = useRef<ImageReplacementTarget | null>(null);
   const imageReplaceTargetRef = useRef<ImageReplacementTarget | null>(null);
@@ -359,7 +363,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     selectedQrCardWidth: null,
     selectedQrCardHeight: null,
     activeColumnCount: 0,
-    activeColumnGapMm: 4
+    activeColumnGapMm: 4,
+    hasHorizontalWritingBlock: false
   });
   const [rubyPanelOpen, setRubyPanelOpen] = useState(false);
   const [columnPanelOpen, setColumnPanelOpen] = useState(false);
@@ -383,7 +388,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         selectedQrCardWidth: null,
         selectedQrCardHeight: null,
         activeColumnCount: 0,
-        activeColumnGapMm: 4
+        activeColumnGapMm: 4,
+        hasHorizontalWritingBlock: false
       });
       return;
     }
@@ -402,6 +408,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       const hasQrCardSelection = editor.isActive("qrCard");
       const columnAttributes = editor.getAttributes("columnBlock");
       const hasColumnBlock = editor.isActive("columnBlock");
+      const hasHorizontalWritingBlock = editor.isActive("horizontalWritingBlock");
       const verticalPageCenterBlocks = selectedVerticalPageCenterBlocks(editor);
       const activeColumnCount: ToolbarState["activeColumnCount"] = hasColumnBlock && Number(columnAttributes.columns) === 3 ? 3 : hasColumnBlock ? 2 : 0;
       const rawColumnGapMm = Number(columnAttributes.gapMm);
@@ -421,7 +428,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null,
         selectedQrCardHeight: hasQrCardSelection ? parseImageDimension(qrCardAttributes.height) : null,
         activeColumnCount,
-        activeColumnGapMm
+        activeColumnGapMm,
+        hasHorizontalWritingBlock
       };
       const updateToolbarState = () => {
         setToolbarState((previous) => (sameToolbarState(previous, nextState) ? previous : nextState));
@@ -443,7 +451,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       });
     };
     const scheduleSelectedMediaRefresh = () => {
-      if (imageSelectionTargetRef.current || qrCardSelectionPositionRef.current !== null || columnBlockActiveRef.current || editor.isActive("columnBlock")) {
+      if (imageSelectionTargetRef.current || qrCardSelectionPositionRef.current !== null || columnBlockActiveRef.current || editor.isActive("columnBlock") || editor.isActive("horizontalWritingBlock")) {
         scheduleRefreshToolbarState();
       }
     };
@@ -1181,6 +1189,70 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       .run());
   };
 
+  const toggleHorizontalWritingBlock = () => {
+    if (!editor) {
+      return;
+    }
+
+    const currentlyHorizontal = editor.isActive("horizontalWritingBlock");
+    const applied = withStablePageStageScroll(editor, () => {
+      if (!currentlyHorizontal) {
+        return editor.chain().focus().wrapIn("horizontalWritingBlock").run();
+      }
+
+      return editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          let horizontalBlock: ProseMirrorNode | null = null;
+          let position: number | null = null;
+
+          if (state.selection instanceof NodeSelection && state.selection.node.type.name === "horizontalWritingBlock") {
+            horizontalBlock = state.selection.node;
+            position = state.selection.from;
+          } else {
+            const { $from } = state.selection;
+            for (let depth = $from.depth; depth > 0; depth -= 1) {
+              const node = $from.node(depth);
+              if (node.type.name !== "horizontalWritingBlock") {
+                continue;
+              }
+              horizontalBlock = node;
+              position = $from.before(depth);
+              break;
+            }
+          }
+
+          if (!horizontalBlock || position === null) {
+            return false;
+          }
+
+          const children: ProseMirrorNode[] = [];
+          horizontalBlock.forEach((child, _offset, index) => {
+            if (index === 0 && horizontalBlock?.attrs.pageBreakBefore) {
+              children.push(child.type.create({ ...child.attrs, pageBreakBefore: true }, child.content, child.marks));
+              return;
+            }
+            children.push(child);
+          });
+          tr.replaceWith(position, position + horizontalBlock.nodeSize, Fragment.fromArray(children));
+          tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(tr.doc.content.size, position + 1)), 1));
+          return true;
+        })
+        .run();
+    });
+
+    if (!applied) {
+      window.alert("横組みにする段落を選択してください。");
+      return;
+    }
+
+    setToolbarState((previous) => ({
+      ...previous,
+      hasHorizontalWritingBlock: !currentlyHorizontal
+    }));
+  };
+
   const pageWidth = editor ? readPageWidthPx(editor) : 420;
   const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
@@ -1225,6 +1297,16 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         >
           <Focus size={18} />
         </ToolButton>
+        {verticalWriting ? (
+          <ToolButton
+            label="選択段落を横組み"
+            active={toolbarState.hasHorizontalWritingBlock}
+            disabled={disabled}
+            onClick={toggleHorizontalWritingBlock}
+          >
+            <Rows3 size={18} />
+          </ToolButton>
+        ) : null}
         <ToolButton label="ページ内カラム" active={columnPanelOpen || toolbarState.activeColumnCount > 0} disabled={disabled} onClick={() => setColumnPanelOpen((open) => !open)}>
           <Columns2 size={18} />
         </ToolButton>
@@ -1505,7 +1587,8 @@ function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
     left.selectedQrCardWidth === right.selectedQrCardWidth &&
     left.selectedQrCardHeight === right.selectedQrCardHeight &&
     left.activeColumnCount === right.activeColumnCount &&
-    left.activeColumnGapMm === right.activeColumnGapMm
+    left.activeColumnGapMm === right.activeColumnGapMm &&
+    left.hasHorizontalWritingBlock === right.hasHorizontalWritingBlock
   );
 }
 
