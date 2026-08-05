@@ -922,6 +922,9 @@ function epubCss(project: ManuscriptProject): string {
     : "";
   const verticalDashCss = project.pageSettings.writingMode === "vertical"
     ? `  display: inline-block;
+  writing-mode: horizontal-tb;
+  font-feature-settings: normal;
+  line-height: 1;
   transform: rotate(90deg);
   transform-origin: center;`
     : "";

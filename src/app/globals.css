@@ -1698,6 +1698,9 @@ h1 {
 .paged-document.is-vertical .manuscript-prose .vertical-dash,
 .pdf-export-document.is-vertical .manuscript-prose .vertical-dash {
   display: inline-block;
+  writing-mode: horizontal-tb;
+  font-feature-settings: normal;
+  line-height: 1;
   transform: rotate(90deg);
   transform-origin: center;
 }
