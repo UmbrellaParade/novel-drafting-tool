@@ -696,36 +696,34 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const imageWidths: Array<{ position: number; width: number }> = [];
+    const imagePositions: number[] = [];
     editor.state.doc.descendants((node, position) => {
       if (node.type.name !== "image") {
         return;
       }
 
-      const image = renderedImageAtPosition(editor, position);
-      imageWidths.push({ position, width: Math.round(readMaximumImageWidth(editor, image)) });
+      imagePositions.push(position);
     });
 
-    if (imageWidths.length === 0) {
+    if (imagePositions.length === 0) {
       window.alert("本文内に画像がありません。");
       return;
     }
 
-    withStablePageStageScroll(editor, () =>
-      editor
-        .chain()
-        .focus()
-        .command(({ state, tr }) => {
-          imageWidths.forEach(({ position, width }) => {
-            const node = state.doc.nodeAt(position);
-            if (node?.type.name === "image") {
-              tr.setNodeMarkup(position, undefined, { ...node.attrs, width, height: null }, node.marks);
-            }
-          });
-          return true;
-        })
-        .run()
-    );
+    withStablePageStageScroll(editor, () => {
+      imagePositions.sort((left, right) => right - left).forEach((position) => {
+        const node = editor.state.doc.nodeAt(position);
+        if (node?.type.name !== "image") {
+          return;
+        }
+
+        const image = renderedImageAtPosition(editor, position);
+        const width = Math.round(readMaximumImageWidth(editor, image));
+        editor.view.dispatch(
+          editor.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, width, height: null }, node.marks)
+        );
+      });
+    });
   };
 
   const matchPreviousImageSize = () => {
@@ -1732,7 +1730,69 @@ function readMaximumImageWidth(editor: Editor, image: HTMLImageElement | null): 
   const textHeight = readTextHeightPx(editor);
   const fitPadding = readImageFitPaddingPx(editor);
   const aspectRatio = readImageAspectRatio(image);
-  return Math.max(48, Math.min(textWidth, (textHeight - fitPadding * 2) * aspectRatio));
+  const fullPageWidth = Math.min(textWidth, (textHeight - fitPadding * 2) * aspectRatio);
+  const remainingPageWidth = readHorizontalImageWidthWithFollowingContent(
+    editor,
+    image,
+    aspectRatio,
+    fitPadding
+  );
+  return Math.max(48, Math.min(fullPageWidth, remainingPageWidth ?? fullPageWidth));
+}
+
+function readHorizontalImageWidthWithFollowingContent(
+  editor: Editor,
+  image: HTMLImageElement | null,
+  aspectRatio: number,
+  fitPadding: number
+): number | null {
+  if (!image || getComputedStyle(editor.view.dom).writingMode !== "horizontal-tb") {
+    return null;
+  }
+
+  let imageBlock: HTMLElement = image;
+  while (imageBlock.parentElement && imageBlock.parentElement !== editor.view.dom) {
+    imageBlock = imageBlock.parentElement;
+  }
+  if (imageBlock.parentElement !== editor.view.dom) {
+    return null;
+  }
+
+  const guide = editor.view.dom.closest(".page-stage")?.querySelector<HTMLElement>(".page-safe-guide");
+  if (!guide || guide.offsetHeight <= 0) {
+    return null;
+  }
+
+  const guideRect = guide.getBoundingClientRect();
+  const visualScale = guideRect.height / guide.offsetHeight;
+  if (!Number.isFinite(visualScale) || visualScale <= 0) {
+    return null;
+  }
+
+  const imageRect = image.getBoundingClientRect();
+  const blockRect = imageBlock.getBoundingClientRect();
+  let followingBottom = blockRect.bottom;
+  let sibling = imageBlock.nextElementSibling;
+  while (sibling) {
+    for (const rect of Array.from(sibling.getClientRects())) {
+      const overlapsImageColumn = rect.right > blockRect.left + 0.5 && rect.left < blockRect.right - 0.5;
+      const followsImage = rect.bottom > blockRect.bottom + 0.5;
+      const isOnCurrentPage = rect.top < guideRect.bottom + 0.5 && rect.bottom > guideRect.top - 0.5;
+      if (overlapsImageColumn && followsImage && isOnCurrentPage) {
+        followingBottom = Math.max(followingBottom, Math.min(rect.bottom, guideRect.bottom));
+      }
+    }
+    sibling = sibling.nextElementSibling;
+  }
+
+  const followingContentHeight = Math.max(0, followingBottom - blockRect.bottom);
+  const availableImageHeight =
+    (guideRect.bottom - imageRect.top - followingContentHeight) / visualScale - fitPadding;
+  if (!Number.isFinite(availableImageHeight) || availableImageHeight <= 0) {
+    return null;
+  }
+
+  return availableImageHeight * aspectRatio;
 }
 
 function readImageAspectRatio(image: HTMLImageElement | null): number {

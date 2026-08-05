@@ -1623,6 +1623,12 @@ h1 {
   text-orientation: mixed;
 }
 
+.paged-document.is-vertical .manuscript-prose .qr-card,
+.pdf-export-document.is-vertical .manuscript-prose .qr-card {
+  align-self: center;
+  max-width: min(var(--content-width), var(--page-width));
+}
+
 .paged-document.is-vertical .manuscript-prose > [data-resize-container][data-node="image"] {
   display: block !important;
 }
@@ -1682,8 +1688,15 @@ h1 {
 }
 
 .paged-document.is-vertical .manuscript-prose .vertical-ellipsis,
-.pdf-export-document.is-vertical .manuscript-prose .vertical-ellipsis {
+.paged-document.is-vertical .manuscript-prose .vertical-dash,
+.pdf-export-document.is-vertical .manuscript-prose .vertical-ellipsis,
+.pdf-export-document.is-vertical .manuscript-prose .vertical-dash {
   white-space: nowrap;
+}
+
+.paged-document.is-vertical .manuscript-prose > p,
+.pdf-export-document.is-vertical .manuscript-prose > p {
+  display: var(--vertical-flow-display, block);
 }
 
 .paged-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko,

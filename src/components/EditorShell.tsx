@@ -1032,6 +1032,32 @@ function hasPreviewPageContent(element: HTMLElement): boolean {
   return (element.textContent ?? "").trim().length > 0;
 }
 
+function isEmptyParagraphBeforeVerticalBreak(element: HTMLElement): boolean {
+  if (!element.matches("p") || (element.textContent ?? "").trim().length > 0) {
+    return false;
+  }
+
+  return !element.querySelector("img,figure,section,[data-type='page-break'],[data-type='qr-card']");
+}
+
+function emptyParagraphsBeforeVerticalBreak(layoutTargets: HTMLElement[]): Set<HTMLElement> {
+  const collapsed = new Set<HTMLElement>();
+  layoutTargets.forEach((target, targetIndex) => {
+    if (!isForcedPageBreakTarget(target)) {
+      return;
+    }
+
+    for (let index = targetIndex - 1; index >= 0; index -= 1) {
+      const candidate = layoutTargets[index];
+      if (!isEmptyParagraphBeforeVerticalBreak(candidate)) {
+        break;
+      }
+      collapsed.add(candidate);
+    }
+  });
+  return collapsed;
+}
+
 function decorateVerticalPunctuation(root: HTMLElement): void {
   const textNodes: Text[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -1045,7 +1071,7 @@ function decorateVerticalPunctuation(root: HTMLElement): void {
     }
     const value = textNode.nodeValue ?? "";
     const matches = [
-      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)).map((match) => ({
+      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]+/g)).map((match) => ({
         index: match.index ?? 0,
         text: match[0],
         className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
@@ -1121,6 +1147,7 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
   const layoutTargets = Array.from(flow.children).filter(
     (element): element is HTMLElement => element instanceof HTMLElement
   );
+  const collapsedBeforeBreak = emptyParagraphsBeforeVerticalBreak(layoutTargets);
   const contentEditableFlow = flow.isContentEditable;
   let previewStyle: HTMLStyleElement | null = null;
   let previewVariableHost: HTMLElement | null = null;
@@ -1149,6 +1176,10 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
     layoutTargets.forEach((element) => {
       element.style.removeProperty("--vertical-page-break-space");
       element.style.removeProperty("--vertical-page-after-space");
+      element.style.removeProperty("--vertical-flow-display");
+      if (collapsedBeforeBreak.has(element)) {
+        element.style.setProperty("--vertical-flow-display", "none");
+      }
     });
   }
   if (contentWidth <= 0 || layoutTargets.length === 0) {
@@ -1168,7 +1199,8 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
       previewRules.push(
         `.paged-document.is-vertical .manuscript-prose[data-vertical-page-flow="preview"] > ${childSelector} { ` +
         `--vertical-page-break-space: var(--vertical-flow-before-${ruleIndex}, 0px); ` +
-        `--vertical-page-after-space: var(--vertical-flow-after-${ruleIndex}, 0px); }`
+        `--vertical-page-after-space: var(--vertical-flow-after-${ruleIndex}, 0px);` +
+        `${collapsedBeforeBreak.has(element) ? " display: none;" : ""} }`
       );
     });
     previewStyle.textContent = previewRules.join("\n");

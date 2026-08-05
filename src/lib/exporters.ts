@@ -757,7 +757,7 @@ function decorateVerticalEpubText(root: DocumentFragment): void {
     }
     const value = textNode.nodeValue ?? "";
     const matches = [
-      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)).map((match) => ({
+      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]+/g)).map((match) => ({
         index: match.index ?? 0,
         text: match[0],
         className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
@@ -1115,6 +1115,7 @@ nav {
 }
 
 .vertical-dash {
+  white-space: nowrap;
   text-orientation: sideways;
 }
 

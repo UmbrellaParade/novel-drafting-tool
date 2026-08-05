@@ -165,7 +165,7 @@ function tocItemsAttribute(items: unknown): string {
 
 function verticalTextOutput(value: string): DOMOutputSpec {
   const matches = [
-    ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)).map((match) => ({
+    ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]+/g)).map((match) => ({
       index: match.index ?? 0,
       text: match[0],
       className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
@@ -388,7 +388,7 @@ export const VerticalPunctuationExtension = Extension.create({
                 return;
               }
 
-              for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)) {
+              for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]+/g)) {
                 const start = position + (match.index ?? 0);
                 const className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
                 decorations.push(Decoration.inline(start, start + match[0].length, { class: className }));
