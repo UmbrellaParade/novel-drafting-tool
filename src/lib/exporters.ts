@@ -922,11 +922,25 @@ function epubCss(project: ManuscriptProject): string {
     : "";
   const verticalDashCss = project.pageSettings.writingMode === "vertical"
     ? `  display: inline-block;
-  writing-mode: horizontal-tb;
+  position: relative;
+  inline-size: 1em;
+  block-size: 1em;
+  visibility: hidden;
   font-feature-settings: normal;
-  line-height: 1;
-  transform: rotate(90deg);
-  transform-origin: center;`
+  line-height: 1;`
+    : "";
+  const verticalDashMarkerCss = project.pageSettings.writingMode === "vertical"
+    ? `.vertical-dash::after {
+  content: "";
+  position: absolute;
+  top: 0.05em;
+  bottom: 0.05em;
+  left: calc(50% - 0.045em);
+  width: 0.09em;
+  min-width: 1px;
+  visibility: visible;
+  background: currentColor;
+}`
     : "";
 
   return `body {
@@ -1134,6 +1148,7 @@ nav {
   font-feature-settings: "vert" 1;
 ${verticalDashCss}
 }
+${verticalDashMarkerCss}
 
 .vertical-tate-chu-yoko {
   text-combine-upright: all;
