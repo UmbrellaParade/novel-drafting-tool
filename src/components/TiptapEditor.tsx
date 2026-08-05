@@ -8,6 +8,7 @@ import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { flushSync } from "react-dom";
 import {
   AlignCenter,
   AlignLeft,
@@ -30,7 +31,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, ImageAssetIdExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, ImageAssetIdExtension, ImageDimensionSyncExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
 import { internImageBlob, internImageDataUrl } from "@/lib/imageAssets";
 
 type TiptapEditorProps = {
@@ -160,6 +161,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       VerticalPunctuationExtension,
       ColumnBlockNode,
       ImageAssetIdExtension,
+      ImageDimensionSyncExtension,
       Image.configure({
         allowBase64: true,
         inline: false,
@@ -354,8 +356,14 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
 
     let frameHandle: number | null = null;
     const refreshToolbarState = () => {
-      const imageAttributes = editor.getAttributes("image");
+      const imagePosition = selectedImagePosition(editor);
+      const selectedImageNode = imagePosition === null ? null : editor.state.doc.nodeAt(imagePosition);
+      const imageAttributes = selectedImageNode?.type.name === "image" ? selectedImageNode.attrs : editor.getAttributes("image");
       const hasImageSelection = editor.isActive("image") && Boolean(imageAttributes.src);
+      const selectedImage = hasImageSelection ? selectedRenderedImage(editor) : null;
+      const selectedImageWidth = hasImageSelection
+        ? (selectedImage ? readRenderedImageWidth(selectedImage) : null) ?? parseImageDimension(imageAttributes.width)
+        : null;
       const qrCardAttributes = editor.getAttributes("qrCard");
       const hasQrCardSelection = editor.isActive("qrCard");
       const columnAttributes = editor.getAttributes("columnBlock");
@@ -370,14 +378,20 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       columnBlockActiveRef.current = hasColumnBlock;
       const nextState = {
         hasImageSelection,
-        selectedImageWidth: hasImageSelection ? parseImageDimension(imageAttributes.width) : null,
+        selectedImageWidth,
         hasQrCardSelection,
         selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null,
         selectedQrCardHeight: hasQrCardSelection ? parseImageDimension(qrCardAttributes.height) : null,
         activeColumnCount,
         activeColumnGapMm
       };
-      setToolbarState((previous) => (sameToolbarState(previous, nextState) ? previous : nextState));
+      const updateToolbarState = () => {
+        setToolbarState((previous) => (sameToolbarState(previous, nextState) ? previous : nextState));
+        if (!imageWidthInputFocusedRef.current) {
+          setImageWidthDraft(nextState.hasImageSelection && nextState.selectedImageWidth ? String(nextState.selectedImageWidth) : "");
+        }
+      };
+      updateToolbarState();
     };
 
     const scheduleRefreshToolbarState = () => {
@@ -387,7 +401,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
 
       frameHandle = window.requestAnimationFrame(() => {
         frameHandle = null;
-        refreshToolbarState();
+        flushSync(refreshToolbarState);
       });
     };
     const scheduleSelectedMediaRefresh = () => {
@@ -395,12 +409,20 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         scheduleRefreshToolbarState();
       }
     };
+    const refreshAfterImageDimensionSync = () => {
+      if (frameHandle !== null) {
+        window.cancelAnimationFrame(frameHandle);
+        frameHandle = null;
+      }
+      flushSync(refreshToolbarState);
+    };
 
     refreshToolbarState();
     editor.on("selectionUpdate", scheduleRefreshToolbarState);
     editor.on("update", scheduleSelectedMediaRefresh);
     editor.on("focus", scheduleRefreshToolbarState);
     editor.on("blur", scheduleRefreshToolbarState);
+    editor.view.dom.addEventListener("manuscript:image-dimensions-synced", refreshAfterImageDimensionSync);
 
     return () => {
       if (frameHandle !== null) {
@@ -410,16 +432,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       editor.off("update", scheduleSelectedMediaRefresh);
       editor.off("focus", scheduleRefreshToolbarState);
       editor.off("blur", scheduleRefreshToolbarState);
+      editor.view.dom.removeEventListener("manuscript:image-dimensions-synced", refreshAfterImageDimensionSync);
     };
   }, [editor]);
-
-  useEffect(() => {
-    if (imageWidthInputFocusedRef.current) {
-      return;
-    }
-
-    setImageWidthDraft(toolbarState.hasImageSelection && toolbarState.selectedImageWidth ? String(toolbarState.selectedImageWidth) : "");
-  }, [toolbarState.hasImageSelection, toolbarState.selectedImageWidth]);
 
   const openRubyPanel = () => {
     if (!editor) {
@@ -621,7 +636,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     imageReplaceTargetRef.current = imageSelectionTargetRef.current ?? readSelectedImageTarget(editor);
   };
 
-  const setImageWidth = (width: number, options: { respectCurrentPage?: boolean } = {}): number | null => {
+  const setImageWidth = (width: number): number | null => {
     if (!editor || !toolbarState.hasImageSelection) {
       return null;
     }
@@ -633,7 +648,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     }
 
     const image = target ? selectedRenderedImageByTarget(editor, target) : renderedImageAtPosition(editor, position) ?? selectedRenderedImage(editor);
-    const maxWidth = options.respectCurrentPage === false ? readMaximumImageWidth(editor, image) : readMaximumImageWidthForCurrentPage(editor, image);
+    const maxWidth = readMaximumImageWidth(editor, image);
     const nextWidth = Math.max(48, Math.min(maxWidth, Math.round(width)));
     const applied = withStablePageStageScroll(editor, () =>
       editor
@@ -652,10 +667,6 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     );
     if (applied) {
       imageSelectionTargetRef.current = target ?? readSelectedImageTarget(editor);
-      syncRenderedImageWidth(editor, target, nextWidth);
-      window.requestAnimationFrame(() => syncRenderedImageWidth(editor, target, nextWidth));
-      setToolbarState((previous) => (previous.hasImageSelection ? { ...previous, selectedImageWidth: nextWidth } : previous));
-      setImageWidthDraft(String(nextWidth));
       return nextWidth;
     }
 
@@ -667,12 +678,13 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    const image = selectedRenderedImage(editor);
+    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
+    const image = target ? selectedRenderedImageByTarget(editor, target) : selectedRenderedImage(editor);
     if (!image) {
       return;
     }
 
-    setImageWidth(readMaximumImageWidthForCurrentPage(editor, image));
+    setImageWidth(readMaximumImageWidth(editor, image));
   };
 
   const matchPreviousImageSize = () => {
@@ -688,7 +700,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       return;
     }
 
-    setImageWidth(width, { respectCurrentPage: false });
+    setImageWidth(width);
   };
 
   const commitImageWidthDraft = () => {
@@ -1668,16 +1680,6 @@ function readMaximumImageWidth(editor: Editor, image: HTMLImageElement | null): 
   return Math.max(48, Math.min(textWidth, (textHeight - fitPadding * 2) * aspectRatio));
 }
 
-function readMaximumImageWidthForCurrentPage(editor: Editor, image: HTMLImageElement | null): number {
-  if (!image) {
-    return readMaximumImageWidth(editor, image);
-  }
-
-  const aspectRatio = readImageAspectRatio(image);
-  const availableHeight = readAvailableImageHeightForCurrentPage(editor, image);
-  return Math.max(48, Math.min(readTextWidthPx(editor), availableHeight * aspectRatio));
-}
-
 function readImageAspectRatio(image: HTMLImageElement | null): number {
   if (!image) {
     return 1;
@@ -1691,30 +1693,6 @@ function readImageAspectRatio(image: HTMLImageElement | null): number {
   return Math.max(0.05, rect.width / Math.max(1, rect.height));
 }
 
-function readAvailableImageHeightForCurrentPage(editor: Editor, image: HTMLImageElement): number {
-  const fitPadding = readImageFitPaddingPx(editor);
-  const fallbackHeight = Math.max(64, readTextHeightPx(editor) - fitPadding * 2);
-  const block = image.closest<HTMLElement>("[data-resize-container][data-node='image']") ?? image.closest<HTMLElement>("[data-resize-wrapper]") ?? image;
-  const blockRect = block.getBoundingClientRect();
-  const safeGuide = pageSafeGuideForRect(editor, blockRect);
-  if (!safeGuide) {
-    return fallbackHeight;
-  }
-
-  const safeRect = safeGuide.getBoundingClientRect();
-  // Page previews are transform-scaled, while stored image widths use unscaled layout pixels.
-  const visualScale = safeGuide.offsetHeight > 0 ? safeRect.height / safeGuide.offsetHeight : 1;
-  const safeVisualScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
-  const toLayoutPx = (visualPx: number) => visualPx / safeVisualScale;
-  const contentAfterBottom = readFollowingContentBottomInPage(editor, block, blockRect, safeRect);
-  if (contentAfterBottom !== null) {
-    const currentBlockHeight = Math.max(1, toLayoutPx(blockRect.height));
-    return Math.max(64, currentBlockHeight + toLayoutPx(safeRect.bottom - contentAfterBottom) - fitPadding);
-  }
-
-  return Math.max(64, toLayoutPx(safeRect.bottom - blockRect.top) - fitPadding);
-}
-
 function readImageFitPaddingPx(editor: Editor): number {
   const rawValue = getComputedStyle(editor.view.dom).getPropertyValue("--image-fit-padding").trim();
   if (rawValue === "0" || rawValue === "0px" || rawValue === "0mm") {
@@ -1723,53 +1701,6 @@ function readImageFitPaddingPx(editor: Editor): number {
 
   const value = readCssLengthPx(editor, "--image-fit-padding");
   return Number.isFinite(value) && value >= 0 ? value : IMAGE_FIT_PADDING_PX;
-}
-
-function pageSafeGuideForRect(editor: Editor, targetRect: DOMRect): HTMLElement | null {
-  const guides = Array.from(editor.view.dom.closest(".page-stage")?.querySelectorAll<HTMLElement>(".page-safe-guide") ?? []);
-  if (guides.length === 0) {
-    return null;
-  }
-
-  const targetCenterX = targetRect.left + targetRect.width / 2;
-  return guides.reduce<{ guide: HTMLElement | null; distance: number }>(
-    (best, guide) => {
-      const rect = guide.getBoundingClientRect();
-      const overlaps = targetCenterX >= rect.left - 2 && targetCenterX <= rect.right + 2;
-      const distance = overlaps ? 0 : Math.min(Math.abs(targetCenterX - rect.left), Math.abs(targetCenterX - rect.right));
-      return distance < best.distance ? { guide, distance } : best;
-    },
-    { guide: null, distance: Number.POSITIVE_INFINITY }
-  ).guide;
-}
-
-function readFollowingContentBottomInPage(editor: Editor, block: HTMLElement, blockRect: DOMRect, safeRect: DOMRect): number | null {
-  const candidates = Array.from(
-    editor.view.dom.querySelectorAll<HTMLElement>(
-      "p,h1,h2,h3,blockquote,ul,ol,figure[data-type='qr-card'],section[data-type='table-of-contents'],[data-resize-container][data-node='image']"
-    )
-  );
-  let bottom: number | null = null;
-
-  for (const candidate of candidates) {
-    if (candidate === block || block.contains(candidate) || candidate.contains(block)) {
-      continue;
-    }
-
-    const rect = candidate.getBoundingClientRect();
-    const inSamePage =
-      rect.right > safeRect.left + 2 &&
-      rect.left < safeRect.right - 2 &&
-      rect.bottom > safeRect.top &&
-      rect.top < safeRect.bottom + 2;
-    if (!inSamePage || rect.top < blockRect.bottom - 1) {
-      continue;
-    }
-
-    bottom = Math.max(bottom ?? rect.bottom, rect.bottom);
-  }
-
-  return bottom;
 }
 
 function readCssLengthPx(editor: Editor, variableName: string): number {
@@ -1902,25 +1833,6 @@ function syncRenderedImage(editor: Editor, target: ImageReplacementTarget, next:
   image.setAttribute("title", next.title);
 }
 
-function syncRenderedImageWidth(editor: Editor, target: ImageReplacementTarget | null, width: number): void {
-  const image = target ? selectedRenderedImageByTarget(editor, target) : selectedRenderedImage(editor);
-  if (!image) {
-    return;
-  }
-
-  const nextWidth = `${Math.round(width)}px`;
-  image.style.width = nextWidth;
-  image.style.height = "auto";
-  image.setAttribute("width", String(Math.round(width)));
-  image.removeAttribute("height");
-
-  const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
-  if (wrapper) {
-    wrapper.style.width = nextWidth;
-    wrapper.style.maxWidth = nextWidth;
-  }
-}
-
 function selectedRenderedImageByTarget(editor: Editor, target: ImageReplacementTarget): HTMLImageElement | null {
   const images = renderedImages(editor);
   return (
@@ -1934,7 +1846,7 @@ function selectedRenderedImageByTarget(editor: Editor, target: ImageReplacementT
 
 function readRenderedImageWidth(image: HTMLImageElement): number | null {
   const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
-  const measuredWidth = wrapper ? Math.round(wrapper.getBoundingClientRect().width) : Math.round(image.getBoundingClientRect().width);
+  const measuredWidth = Math.round(wrapper?.offsetWidth || image.offsetWidth || image.getBoundingClientRect().width);
   const width =
     parseImageDimension(wrapper?.style.width) ??
     parseImageDimension(wrapper?.getAttribute("width")) ??

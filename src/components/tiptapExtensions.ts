@@ -1,6 +1,7 @@
 import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
 function readFontSize(element: HTMLElement): string | null {
   return element.style.fontSize || element.getAttribute("data-font-size") || null;
@@ -158,6 +159,86 @@ function tocItemsAttribute(items: unknown): string {
   return JSON.stringify(readTocItems(items));
 }
 
+type ImageDimensionEntry = {
+  position: number;
+  width: number | null;
+  height: number | null;
+};
+
+function imageDimensionEntries(doc: ProseMirrorNode): ImageDimensionEntry[] {
+  const entries: ImageDimensionEntry[] = [];
+  doc.descendants((node, position) => {
+    if (node.type.name === "image") {
+      entries.push({
+        position,
+        width: positiveRoundedDimension(node.attrs.width),
+        height: positiveRoundedDimension(node.attrs.height)
+      });
+    }
+  });
+  return entries;
+}
+
+function sameImageDimensions(left: ImageDimensionEntry[], right: ImageDimensionEntry[]): boolean {
+  return left.length === right.length && left.every((entry, index) => entry.width === right[index].width && entry.height === right[index].height);
+}
+
+function rangeContainsImage(doc: ProseMirrorNode, from: number, to: number): boolean {
+  const start = Math.max(0, Math.min(doc.content.size, from));
+  const end = Math.max(start, Math.min(doc.content.size, to));
+  let containsImage = doc.nodeAt(start)?.type.name === "image";
+  doc.nodesBetween(Math.max(0, start - 1), Math.min(doc.content.size, Math.max(end, start + 1)), (node) => {
+    if (node.type.name === "image") {
+      containsImage = true;
+      return false;
+    }
+    return !containsImage;
+  });
+  return containsImage;
+}
+
+function imageMayHaveChanged(previousDoc: ProseMirrorNode, nextDoc: ProseMirrorNode): boolean {
+  const start = previousDoc.content.findDiffStart(nextDoc.content);
+  if (start === null) {
+    return false;
+  }
+
+  const end = previousDoc.content.findDiffEnd(nextDoc.content) ?? { a: start, b: start };
+  return rangeContainsImage(previousDoc, start, end.a) || rangeContainsImage(nextDoc, start, end.b);
+}
+
+function syncRenderedImageDimensions(view: EditorView, entry: ImageDimensionEntry): void {
+  const nodeDom = view.nodeDOM(entry.position);
+  const image = nodeDom instanceof HTMLImageElement
+    ? nodeDom
+    : nodeDom instanceof HTMLElement
+      ? nodeDom.querySelector<HTMLImageElement>("img:not(.qr-card-image)")
+      : null;
+  if (!image) {
+    return;
+  }
+
+  if (entry.width) {
+    image.style.width = `${entry.width}px`;
+    image.setAttribute("width", String(entry.width));
+  } else {
+    image.style.removeProperty("width");
+    image.removeAttribute("width");
+  }
+
+  if (entry.height) {
+    image.style.height = `${entry.height}px`;
+    image.setAttribute("height", String(entry.height));
+  } else {
+    image.style.height = "auto";
+    image.removeAttribute("height");
+  }
+
+  const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
+  wrapper?.style.removeProperty("width");
+  wrapper?.style.removeProperty("max-width");
+}
+
 function tocBoolean(value: unknown, fallback: boolean): boolean {
   if (typeof value === "boolean") {
     return value;
@@ -289,6 +370,36 @@ export const ImageAssetIdExtension = Extension.create({
           }
         }
       }
+    ];
+  }
+});
+
+export const ImageDimensionSyncExtension = Extension.create({
+  name: "imageDimensionSync",
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        view: (initialView) => {
+          let dimensions = imageDimensionEntries(initialView.state.doc);
+          return {
+            update: (view, previousState) => {
+              if (!imageMayHaveChanged(previousState.doc, view.state.doc)) {
+                return;
+              }
+
+              const nextDimensions = imageDimensionEntries(view.state.doc);
+              if (sameImageDimensions(dimensions, nextDimensions)) {
+                return;
+              }
+
+              dimensions = nextDimensions;
+              nextDimensions.forEach((entry) => syncRenderedImageDimensions(view, entry));
+              view.dom.dispatchEvent(new CustomEvent("manuscript:image-dimensions-synced"));
+            }
+          };
+        }
+      })
     ];
   }
 });
