@@ -175,7 +175,8 @@ export const DEFAULT_TOC_SETTINGS: TocSettings = {
   showPageNumbers: true,
   enableLinks: false,
   titleGapPt: 18,
-  leaderWidthMm: DEFAULT_TOC_LEADER_WIDTH_MM
+  leaderWidthMm: DEFAULT_TOC_LEADER_WIDTH_MM,
+  verticalPageNumberOffsetMm: 0
 };
 
 const sampleContent = `
@@ -298,6 +299,9 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
   const leaderWidthMm = typeof settings?.leaderWidthMm === "number" && Number.isFinite(settings.leaderWidthMm) && settings.leaderWidthMm >= 0
     ? Math.max(0, Math.min(40, Number(settings.leaderWidthMm.toFixed(1))))
     : DEFAULT_TOC_SETTINGS.leaderWidthMm;
+  const verticalPageNumberOffsetMm = typeof settings?.verticalPageNumberOffsetMm === "number" && Number.isFinite(settings.verticalPageNumberOffsetMm)
+    ? Math.max(0, Math.min(80, Number(settings.verticalPageNumberOffsetMm.toFixed(1))))
+    : DEFAULT_TOC_SETTINGS.verticalPageNumberOffsetMm;
   const titlePosition = TOC_TITLE_POSITIONS.has(settings?.titlePosition ?? "center")
     ? settings?.titlePosition ?? "center"
     : DEFAULT_TOC_SETTINGS.titlePosition;
@@ -311,7 +315,8 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
     enableLinks: typeof settings?.enableLinks === "boolean" ? settings.enableLinks : DEFAULT_TOC_SETTINGS.enableLinks,
     ...(fontSizePt ? { fontSizePt } : {}),
     titleGapPt,
-    leaderWidthMm
+    leaderWidthMm,
+    verticalPageNumberOffsetMm
   };
 }
 

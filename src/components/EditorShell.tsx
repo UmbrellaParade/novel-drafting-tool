@@ -1011,8 +1011,14 @@ function isCenteredVerticalChapterHeading(flow: HTMLElement, element: HTMLElemen
   return flow.closest(".center-chapter-headings") !== null && element.matches("h1");
 }
 
+function isCenteredVerticalBlock(flow: HTMLElement, element: HTMLElement): boolean {
+  return element.dataset.verticalPageCenter === "true"
+    || element.classList.contains("vertical-page-center")
+    || isCenteredVerticalChapterHeading(flow, element);
+}
+
 function isVerticalUnbreakableBlock(flow: HTMLElement, element: HTMLElement): boolean {
-  return element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR) || isCenteredVerticalChapterHeading(flow, element);
+  return element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR) || isCenteredVerticalBlock(flow, element);
 }
 
 const PAGE_BOUNDARY_EPSILON_PX = 0.75;
@@ -1263,7 +1269,7 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
 
     if (element.parentElement === flow && isVerticalUnbreakableBlock(flow, element)) {
       if (blockWidth <= contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
-        const forcedBreak = isForcedPageBreakTarget(element) || isCenteredVerticalChapterHeading(flow, element);
+        const forcedBreak = isForcedPageBreakTarget(element) || isCenteredVerticalBlock(flow, element);
         const remainingSpace = remainder > 0 ? contentWidth - remainder : contentWidth;
         const fitsCurrentPage = !forcedBreak && blockWidth <= remainingSpace + PAGE_BOUNDARY_EPSILON_PX;
         const pageStartOffset = fitsCurrentPage
@@ -1461,6 +1467,7 @@ function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
     fontSizePt: settings.fontSizePt ?? null,
     titleGapPt: settings.titleGapPt ?? null,
     leaderWidthMm: settings.leaderWidthMm ?? DEFAULT_TOC_LEADER_WIDTH_MM,
+    verticalPageNumberOffsetMm: settings.verticalPageNumberOffsetMm ?? 0,
     items: tocItemsJson(entries)
   };
 }
@@ -1514,6 +1521,7 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           node.attrs.fontSizePt === nextAttrs.fontSizePt &&
           node.attrs.titleGapPt === nextAttrs.titleGapPt &&
           node.attrs.leaderWidthMm === nextAttrs.leaderWidthMm &&
+          node.attrs.verticalPageNumberOffsetMm === nextAttrs.verticalPageNumberOffsetMm &&
           node.attrs.items === nextAttrs.items;
         if (!isSame) {
           tr.setNodeMarkup(position, undefined, nextAttrs, node.marks);
@@ -3329,6 +3337,7 @@ function TableOfContentsPanel({
   const tocFontSizePt = settings.fontSizePt ?? 9;
   const tocTitleGapPt = settings.titleGapPt ?? 18;
   const tocLeaderWidthMm = settings.leaderWidthMm ?? DEFAULT_TOC_LEADER_WIDTH_MM;
+  const tocVerticalPageNumberOffsetMm = settings.verticalPageNumberOffsetMm ?? 0;
   const updateTocFontSize = (nextSize: number) => {
     const clampedSize = Math.max(6, Math.min(16, Number(nextSize.toFixed(1))));
     onSettingChange("fontSizePt", clampedSize);
@@ -3340,6 +3349,10 @@ function TableOfContentsPanel({
   const updateTocLeaderWidth = (nextWidth: number) => {
     const clampedWidth = Math.max(0, Math.min(40, Number(nextWidth.toFixed(1))));
     onSettingChange("leaderWidthMm", clampedWidth);
+  };
+  const updateTocVerticalPageNumberOffset = (nextOffset: number) => {
+    const clampedOffset = Math.max(0, Math.min(80, Number(nextOffset.toFixed(1))));
+    onSettingChange("verticalPageNumberOffsetMm", clampedOffset);
   };
 
   return (
@@ -3452,6 +3465,28 @@ function TableOfContentsPanel({
                 aria-label="点線の長さmm"
               />
               <button type="button" onClick={() => updateTocLeaderWidth(tocLeaderWidthMm + 1)} aria-label="点線を長くする">
+                <Plus size={14} />
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {verticalWriting && settings.showPageNumbers ? (
+          <div className="toc-form-field wide">
+            <span>縦書きページ番号を上へ：{tocVerticalPageNumberOffsetMm}mm</span>
+            <div className="toc-size-stepper">
+              <button type="button" onClick={() => updateTocVerticalPageNumberOffset(tocVerticalPageNumberOffsetMm - 1)} aria-label="縦書きページ番号を下へ戻す">
+                <Minus size={14} />
+              </button>
+              <input
+                type="number"
+                min={0}
+                max={80}
+                step={1}
+                value={tocVerticalPageNumberOffsetMm}
+                onChange={(event) => updateTocVerticalPageNumberOffset(Number(event.target.value))}
+                aria-label="縦書きページ番号を上へ移動する距離mm"
+              />
+              <button type="button" onClick={() => updateTocVerticalPageNumberOffset(tocVerticalPageNumberOffsetMm + 1)} aria-label="縦書きページ番号を上へ移動する">
                 <Plus size={14} />
               </button>
             </div>

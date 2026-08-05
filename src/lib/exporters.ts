@@ -917,6 +917,14 @@ function epubCss(project: ManuscriptProject): string {
   text-orientation: mixed;
   text-combine-upright: none;`
     : "";
+  const verticalTocPageNumberCss = project.pageSettings.writingMode === "vertical"
+    ? "  transform: translateY(calc(0mm - var(--toc-page-number-offset, 0mm)));"
+    : "";
+  const verticalDashCss = project.pageSettings.writingMode === "vertical"
+    ? `  display: inline-block;
+  transform: rotate(90deg);
+  transform-origin: center;`
+    : "";
 
   return `body {
   color: #24211d;
@@ -1039,6 +1047,7 @@ img {
   min-inline-size: 2.5em;
   color: currentColor;
   text-align: end;
+${verticalTocPageNumberCss}
 }
 
 .manuscript-toc-plain {
@@ -1120,6 +1129,7 @@ nav {
   white-space: nowrap;
   text-orientation: mixed;
   font-feature-settings: "vert" 1;
+${verticalDashCss}
 }
 
 .vertical-tate-chu-yoko {

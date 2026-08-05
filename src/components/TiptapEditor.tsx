@@ -17,6 +17,7 @@ import {
   Columns2,
   Columns3,
   Copy,
+  Focus,
   Heading1,
   ImagePlus,
   Minus,
@@ -57,6 +58,8 @@ type ToolButtonProps = {
 };
 
 type ToolbarState = {
+  hasVerticalPageCenterTarget: boolean;
+  selectedVerticalPageCenter: boolean;
   hasImageSelection: boolean;
   selectedImageWidth: number | null;
   selectedImagePageBreakBefore: boolean;
@@ -87,6 +90,7 @@ const FONT_SIZE_SCOPES = {
 } as const;
 
 const LINE_HEIGHT_BLOCK_TYPES = new Set(["paragraph", "heading", "blockquote", "listItem"]);
+const VERTICAL_PAGE_CENTER_BLOCK_TYPES = new Set(["paragraph", "heading", "blockquote"]);
 const EDITOR_HTML_COMMIT_DELAY_MS = 2400;
 const EDITOR_HTML_BLUR_COMMIT_DELAY_MS = 250;
 const EDITOR_HTML_IDLE_TIMEOUT_MS = 3200;
@@ -94,6 +98,29 @@ const IMAGE_FIT_PADDING_PX = 8;
 
 function preserveEditorSelection(event: MouseEvent<HTMLButtonElement>) {
   event.preventDefault();
+}
+
+function selectedVerticalPageCenterBlocks(editor: Editor): Array<{ node: ProseMirrorNode; position: number }> {
+  const { doc, selection } = editor.state;
+  const selectedTopLevelPosition = selection.empty && selection.$from.depth > 0
+    ? selection.$from.before(1)
+    : null;
+  const blocks: Array<{ node: ProseMirrorNode; position: number }> = [];
+
+  doc.forEach((node, position) => {
+    if (!VERTICAL_PAGE_CENTER_BLOCK_TYPES.has(node.type.name)) {
+      return;
+    }
+
+    const selected = selectedTopLevelPosition !== null
+      ? position === selectedTopLevelPosition
+      : selection.to > position && selection.from < position + node.nodeSize;
+    if (selected) {
+      blocks.push({ node, position });
+    }
+  });
+
+  return blocks;
 }
 
 export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayoutHints, onTableOfContentsLink, onReady }: TiptapEditorProps) {
@@ -323,6 +350,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const rubyReadingInputRef = useRef<HTMLInputElement | null>(null);
   const columnBlockActiveRef = useRef(false);
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
+    hasVerticalPageCenterTarget: false,
+    selectedVerticalPageCenter: false,
     hasImageSelection: false,
     selectedImageWidth: null,
     selectedImagePageBreakBefore: false,
@@ -345,6 +374,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   useEffect(() => {
     if (!editor) {
       setToolbarState({
+        hasVerticalPageCenterTarget: false,
+        selectedVerticalPageCenter: false,
         hasImageSelection: false,
         selectedImageWidth: null,
         selectedImagePageBreakBefore: false,
@@ -371,6 +402,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       const hasQrCardSelection = editor.isActive("qrCard");
       const columnAttributes = editor.getAttributes("columnBlock");
       const hasColumnBlock = editor.isActive("columnBlock");
+      const verticalPageCenterBlocks = selectedVerticalPageCenterBlocks(editor);
       const activeColumnCount: ToolbarState["activeColumnCount"] = hasColumnBlock && Number(columnAttributes.columns) === 3 ? 3 : hasColumnBlock ? 2 : 0;
       const rawColumnGapMm = Number(columnAttributes.gapMm);
       const activeColumnGapMm = hasColumnBlock && Number.isFinite(rawColumnGapMm)
@@ -380,6 +412,8 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       qrCardSelectionPositionRef.current = hasQrCardSelection ? selectedNodePosition(editor, "qrCard") : null;
       columnBlockActiveRef.current = hasColumnBlock;
       const nextState = {
+        hasVerticalPageCenterTarget: verticalPageCenterBlocks.length > 0,
+        selectedVerticalPageCenter: verticalPageCenterBlocks.length > 0 && verticalPageCenterBlocks.every(({ node }) => Boolean(node.attrs.verticalPageCenter)),
         hasImageSelection,
         selectedImageWidth,
         selectedImagePageBreakBefore: hasImageSelection && Boolean(imageAttributes.pageBreakBefore),
@@ -689,6 +723,30 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     }
 
     setImageWidth(readMaximumImageWidth(editor, image));
+  };
+
+  const toggleVerticalPageCenter = () => {
+    if (!editor) {
+      return;
+    }
+
+    const blocks = selectedVerticalPageCenterBlocks(editor);
+    if (!blocks.length) {
+      return;
+    }
+
+    const nextValue = !blocks.every(({ node }) => Boolean(node.attrs.verticalPageCenter));
+    withStablePageStageScroll(editor, () => editor
+      .chain()
+      .focus()
+      .command(({ tr }) => {
+        blocks.forEach(({ node, position }) => {
+          tr.setNodeMarkup(position, undefined, { ...node.attrs, verticalPageCenter: nextValue }, node.marks);
+        });
+        return true;
+      })
+      .run());
+    setToolbarState((previous) => ({ ...previous, selectedVerticalPageCenter: nextValue }));
   };
 
   const fitAllImagesToPages = () => {
@@ -1159,6 +1217,14 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         <ToolButton label="右揃え" active={editor?.isActive({ textAlign: "right" })} disabled={disabled} onClick={() => editor?.chain().focus().setTextAlign("right").run()}>
           <AlignRight size={18} />
         </ToolButton>
+        <ToolButton
+          label="選択ブロックをページ中央"
+          active={toolbarState.selectedVerticalPageCenter}
+          disabled={disabled || !toolbarState.hasVerticalPageCenterTarget}
+          onClick={toggleVerticalPageCenter}
+        >
+          <Focus size={18} />
+        </ToolButton>
         <ToolButton label="ページ内カラム" active={columnPanelOpen || toolbarState.activeColumnCount > 0} disabled={disabled} onClick={() => setColumnPanelOpen((open) => !open)}>
           <Columns2 size={18} />
         </ToolButton>
@@ -1430,6 +1496,8 @@ function parseImageDimension(value: unknown): number | null {
 
 function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
   return (
+    left.hasVerticalPageCenterTarget === right.hasVerticalPageCenterTarget &&
+    left.selectedVerticalPageCenter === right.selectedVerticalPageCenter &&
     left.hasImageSelection === right.hasImageSelection &&
     left.selectedImageWidth === right.selectedImageWidth &&
     left.selectedImagePageBreakBefore === right.selectedImagePageBreakBefore &&

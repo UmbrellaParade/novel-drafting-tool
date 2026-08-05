@@ -68,6 +68,8 @@ export type TocSettings = {
   titleGapPt?: number;
   /** 目次項目とページ番号の間に出す点線の長さ（mm）。 */
   leaderWidthMm?: number;
+  /** 縦書き目次のページ番号を既定位置から上へ移動する距離（mm）。 */
+  verticalPageNumberOffsetMm?: number;
 };
 
 export type ManuscriptProject = {

@@ -1695,6 +1695,13 @@ h1 {
   white-space: nowrap;
 }
 
+.paged-document.is-vertical .manuscript-prose .vertical-dash,
+.pdf-export-document.is-vertical .manuscript-prose .vertical-dash {
+  display: inline-block;
+  transform: rotate(90deg);
+  transform-origin: center;
+}
+
 .paged-document.is-vertical .manuscript-prose > p,
 .pdf-export-document.is-vertical .manuscript-prose > p {
   display: var(--vertical-flow-display, block);
@@ -1972,6 +1979,11 @@ h1 {
   width: auto;
   block-size: 0;
   transform: translateX(0.22em);
+}
+
+.paged-document.is-vertical .manuscript-toc .toc-entry-page,
+.pdf-export-document.is-vertical .manuscript-toc .toc-entry-page {
+  transform: translateY(calc(0mm - var(--toc-page-number-offset, 0mm)));
 }
 
 .manuscript-toc-plain {

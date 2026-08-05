@@ -542,6 +542,20 @@ export const PageBreakBeforeExtension = Extension.create({
                 class: "page-break-before"
               };
             }
+          },
+          verticalPageCenter: {
+            default: false,
+            parseHTML: (element) => element.getAttribute("data-vertical-page-center") === "true" || element.classList.contains("vertical-page-center"),
+            renderHTML: (attributes) => {
+              if (!attributes.verticalPageCenter) {
+                return {};
+              }
+
+              return {
+                "data-vertical-page-center": "true",
+                class: "vertical-page-center"
+              };
+            }
           }
         }
       }
@@ -609,6 +623,17 @@ export const TableOfContentsNode = Node.create({
           return { "data-leader-width-mm": String(attributes.leaderWidthMm) };
         }
       },
+      verticalPageNumberOffsetMm: {
+        default: null,
+        parseHTML: (element) => {
+          const v = (element as HTMLElement).dataset.verticalPageNumberOffsetMm;
+          return v ? Number.parseFloat(v) : null;
+        },
+        renderHTML: (attributes) => {
+          if (!attributes.verticalPageNumberOffsetMm && attributes.verticalPageNumberOffsetMm !== 0) return {};
+          return { "data-vertical-page-number-offset-mm": String(attributes.verticalPageNumberOffsetMm) };
+        }
+      },
       items: {
         default: "[]",
         parseHTML: (element) => (element as HTMLElement).dataset.items ?? "[]",
@@ -636,6 +661,7 @@ export const TableOfContentsNode = Node.create({
             fontSizePt: fontSizePtRaw ? Number.parseFloat(fontSizePtRaw) : null,
             titleGapPt: element.dataset.titleGapPt ? Number.parseFloat(element.dataset.titleGapPt) : null,
             leaderWidthMm: element.dataset.leaderWidthMm ? Number.parseFloat(element.dataset.leaderWidthMm) : null,
+            verticalPageNumberOffsetMm: element.dataset.verticalPageNumberOffsetMm ? Number.parseFloat(element.dataset.verticalPageNumberOffsetMm) : null,
             items: JSON.stringify(tocItemsFromElement(element))
           };
         }
@@ -658,10 +684,14 @@ export const TableOfContentsNode = Node.create({
     const leaderWidthMm = typeof node.attrs.leaderWidthMm === "number" && node.attrs.leaderWidthMm >= 0
       ? node.attrs.leaderWidthMm
       : null;
+    const verticalPageNumberOffsetMm = typeof node.attrs.verticalPageNumberOffsetMm === "number" && node.attrs.verticalPageNumberOffsetMm >= 0
+      ? node.attrs.verticalPageNumberOffsetMm
+      : null;
     const styleRules = [
       fontSizePt ? `font-size: ${fontSizePt}pt` : "",
       titleGapPt !== null ? `--toc-title-gap: ${titleGapPt}pt` : "",
-      leaderWidthMm !== null ? `--toc-leader-width: ${leaderWidthMm}mm` : ""
+      leaderWidthMm !== null ? `--toc-leader-width: ${leaderWidthMm}mm` : "",
+      verticalPageNumberOffsetMm !== null ? `--toc-page-number-offset: ${verticalPageNumberOffsetMm}mm` : ""
     ].filter(Boolean);
     const blockStyle = styleRules.length ? styleRules.join("; ") : undefined;
 
@@ -678,6 +708,7 @@ export const TableOfContentsNode = Node.create({
         ...(fontSizePt ? { "data-font-size-pt": String(fontSizePt) } : {}),
         ...(titleGapPt !== null ? { "data-title-gap-pt": String(titleGapPt) } : {}),
         ...(leaderWidthMm !== null ? { "data-leader-width-mm": String(leaderWidthMm) } : {}),
+        ...(verticalPageNumberOffsetMm !== null ? { "data-vertical-page-number-offset-mm": String(verticalPageNumberOffsetMm) } : {}),
         ...(blockStyle ? { style: blockStyle } : {}),
         class: `manuscript-toc manuscript-toc-${style}${showPageNumbers ? "" : " manuscript-toc-without-pages"}${enableLinks ? " manuscript-toc-with-links" : ""}`
       }),
