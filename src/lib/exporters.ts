@@ -908,6 +908,9 @@ ${chapter.body}
 function epubCss(project: ManuscriptProject): string {
   const bodyFont = project.pageSettings.fontFamily === "noto-sans-jp" ? "sans-serif" : "serif";
   const tocWritingMode = project.pageSettings.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb";
+  const tocTitleAlignment = project.pageSettings.writingMode === "vertical" && project.tocSettings.titlePosition === "start"
+    ? "start"
+    : "center";
   const verticalWritingCss = project.pageSettings.writingMode === "vertical"
     ? `  writing-mode: vertical-rl;
   text-orientation: mixed;
@@ -978,7 +981,7 @@ img {
 
 .toc-title {
   margin: 0;
-  text-align: center;
+  text-align: ${tocTitleAlignment};
   font-size: 1.45em;
   font-weight: bold;
 }

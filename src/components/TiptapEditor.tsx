@@ -59,6 +59,7 @@ type ToolButtonProps = {
 type ToolbarState = {
   hasImageSelection: boolean;
   selectedImageWidth: number | null;
+  selectedImagePageBreakBefore: boolean;
   hasQrCardSelection: boolean;
   selectedQrCardWidth: number | null;
   selectedQrCardHeight: number | null;
@@ -324,6 +325,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
   const [toolbarState, setToolbarState] = useState<ToolbarState>({
     hasImageSelection: false,
     selectedImageWidth: null,
+    selectedImagePageBreakBefore: false,
     hasQrCardSelection: false,
     selectedQrCardWidth: null,
     selectedQrCardHeight: null,
@@ -345,6 +347,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       setToolbarState({
         hasImageSelection: false,
         selectedImageWidth: null,
+        selectedImagePageBreakBefore: false,
         hasQrCardSelection: false,
         selectedQrCardWidth: null,
         selectedQrCardHeight: null,
@@ -379,6 +382,7 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
       const nextState = {
         hasImageSelection,
         selectedImageWidth,
+        selectedImagePageBreakBefore: hasImageSelection && Boolean(imageAttributes.pageBreakBefore),
         hasQrCardSelection,
         selectedQrCardWidth: hasQrCardSelection ? parseImageDimension(qrCardAttributes.width) : null,
         selectedQrCardHeight: hasQrCardSelection ? parseImageDimension(qrCardAttributes.height) : null,
@@ -1249,6 +1253,16 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
             <Copy size={15} />
             前画像と同じ
           </button>
+          <button
+            className={toolbarState.selectedImagePageBreakBefore ? "is-active" : ""}
+            type="button"
+            onMouseDown={preserveEditorSelection}
+            onClick={insertPageBreak}
+            aria-pressed={toolbarState.selectedImagePageBreakBefore}
+          >
+            <ScissorsLineDashed size={15} />
+            画像前で改ページ
+          </button>
           <input
             className="image-size-number"
             type="number"
@@ -1420,6 +1434,7 @@ function sameToolbarState(left: ToolbarState, right: ToolbarState): boolean {
   return (
     left.hasImageSelection === right.hasImageSelection &&
     left.selectedImageWidth === right.selectedImageWidth &&
+    left.selectedImagePageBreakBefore === right.selectedImagePageBreakBefore &&
     left.hasQrCardSelection === right.hasQrCardSelection &&
     left.selectedQrCardWidth === right.selectedQrCardWidth &&
     left.selectedQrCardHeight === right.selectedQrCardHeight &&

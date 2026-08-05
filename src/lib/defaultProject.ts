@@ -1,4 +1,4 @@
-import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId, WritingMode } from "./types";
+import type { DriveState, ManuscriptCheck, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, TocSettings, TocStyleId, TocTitlePosition, WritingMode } from "./types";
 
 export const MANUSCRIPT_FONTS: Record<ManuscriptFontId, { label: string; css: string }> = {
   "noto-serif-jp": {
@@ -160,6 +160,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
 
 const QR_CARD_TEMPLATE_IDS = new Set<QrCardTemplateId>(["umbrella", "rain-letter", "antique-book", "midnight", "ornate"]);
 const TOC_STYLE_IDS = new Set<TocStyleId>(["plain", "classic", "rain", "antique", "midnight", "ornate"]);
+const TOC_TITLE_POSITIONS = new Set<TocTitlePosition>(["start", "center"]);
 const PAGE_NUMBER_POSITIONS = new Set<PageNumberPosition>(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]);
 const WRITING_MODES = new Set<WritingMode>(["horizontal", "vertical"]);
 const QR_TEXT_SIZE_MIN_PT = 5;
@@ -170,6 +171,7 @@ export const DEFAULT_TOC_SETTINGS: TocSettings = {
   title: "目次",
   subtitle: "",
   style: "classic",
+  titlePosition: "center",
   showPageNumbers: true,
   enableLinks: false,
   titleGapPt: 18,
@@ -296,11 +298,15 @@ export function normalizeTocSettings(settings?: Partial<TocSettings>): TocSettin
   const leaderWidthMm = typeof settings?.leaderWidthMm === "number" && Number.isFinite(settings.leaderWidthMm) && settings.leaderWidthMm >= 0
     ? Math.max(0, Math.min(40, Number(settings.leaderWidthMm.toFixed(1))))
     : DEFAULT_TOC_SETTINGS.leaderWidthMm;
+  const titlePosition = TOC_TITLE_POSITIONS.has(settings?.titlePosition ?? "center")
+    ? settings?.titlePosition ?? "center"
+    : DEFAULT_TOC_SETTINGS.titlePosition;
 
   return {
     title: settings?.title?.trim() || DEFAULT_TOC_SETTINGS.title,
     subtitle: "",
     style: TOC_STYLE_IDS.has(settings?.style ?? "classic") ? settings?.style ?? "classic" : DEFAULT_TOC_SETTINGS.style,
+    titlePosition,
     showPageNumbers: typeof settings?.showPageNumbers === "boolean" ? settings.showPageNumbers : DEFAULT_TOC_SETTINGS.showPageNumbers,
     enableLinks: typeof settings?.enableLinks === "boolean" ? settings.enableLinks : DEFAULT_TOC_SETTINGS.enableLinks,
     ...(fontSizePt ? { fontSizePt } : {}),

@@ -598,6 +598,10 @@ h1 {
   grid-column: 1 / -1;
 }
 
+.toc-title-position {
+  margin: 0;
+}
+
 .toc-option-row {
   grid-column: 1 / -1;
   display: grid;
@@ -1431,6 +1435,12 @@ h1 {
   color: #1f5c54;
 }
 
+.image-size-controls button.is-active {
+  border-color: var(--rain);
+  background: #dfeee9;
+  color: #174b45;
+}
+
 .image-size-controls button.danger:hover {
   border-color: var(--danger);
   background: #fbeeee;
@@ -1915,6 +1925,11 @@ h1 {
   text-align: center;
 }
 
+.paged-document.is-vertical .manuscript-toc[data-title-position="start"] .toc-title,
+.pdf-export-document.is-vertical .manuscript-toc[data-title-position="start"] .toc-title {
+  text-align: start;
+}
+
 .paged-document.is-vertical .manuscript-toc .toc-list,
 .pdf-export-document.is-vertical .manuscript-toc .toc-list,
 .paged-document.is-vertical .manuscript-prose .manuscript-toc .toc-list,
@@ -2199,6 +2214,19 @@ h1 {
 .manuscript-prose img[data-page-break-before="true"] {
   padding-top: 3mm;
   border-top: 1px dashed #9a8f82;
+}
+
+.paged-document.is-horizontal .manuscript-prose img.page-break-before,
+.paged-document.is-horizontal .manuscript-prose img[data-page-break-before="true"],
+.paged-document.is-horizontal .manuscript-prose [data-resize-container][data-node="image"].page-break-before,
+.paged-document.is-horizontal .manuscript-prose [data-resize-container][data-node="image"][data-page-break-before="true"],
+.pdf-export-document.is-horizontal .manuscript-prose img.page-break-before,
+.pdf-export-document.is-horizontal .manuscript-prose img[data-page-break-before="true"],
+.pdf-export-document.is-horizontal .manuscript-prose [data-resize-container][data-node="image"].page-break-before,
+.pdf-export-document.is-horizontal .manuscript-prose [data-resize-container][data-node="image"][data-page-break-before="true"] {
+  break-before: column;
+  page-break-before: always;
+  -webkit-column-break-before: always;
 }
 
 .manuscript-prose [data-resize-container][data-node="image"].page-break-before::before,

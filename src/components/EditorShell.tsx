@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
 import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
-import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId, WritingMode } from "@/lib/types";
+import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId, TocTitlePosition, WritingMode } from "@/lib/types";
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectBackupToLocalStorage, saveProjectToBrowser } from "@/lib/storage";
 import { blobToDataUrl } from "@/lib/imageAssets";
 import { buildManuscriptFontEmbedCss } from "@/lib/pdfFonts";
@@ -1422,6 +1422,7 @@ function tableOfContentsAttrs(settings: TocSettings, entries: TocEntry[]) {
     title: settings.title.trim() || "目次",
     subtitle: "",
     style: settings.style,
+    titlePosition: settings.titlePosition,
     showPageNumbers: settings.showPageNumbers,
     enableLinks: settings.enableLinks,
     fontSizePt: settings.fontSizePt ?? null,
@@ -1474,6 +1475,7 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
           node.attrs.title === nextAttrs.title &&
           node.attrs.subtitle === nextAttrs.subtitle &&
           node.attrs.style === nextAttrs.style &&
+          node.attrs.titlePosition === nextAttrs.titlePosition &&
           node.attrs.showPageNumbers === nextAttrs.showPageNumbers &&
           node.attrs.enableLinks === nextAttrs.enableLinks &&
           node.attrs.fontSizePt === nextAttrs.fontSizePt &&
@@ -1628,7 +1630,7 @@ export function EditorShell() {
       chapters: layoutChapters.map((chapter, index) => (index === 0 ? { ...chapter, content: layoutChapterContent } : chapter)),
       activeChapterId: activeChapter.id,
       qrLinks: [],
-      tocSettings: { title: "目次", subtitle: "", style: "classic", showPageNumbers: true, enableLinks: false },
+      tocSettings: { title: "目次", subtitle: "", style: "classic", titlePosition: "center", showPageNumbers: true, enableLinks: false },
       updatedAt: ""
     };
   }, [activeChapter, layoutChapterContent, layoutChapters, layoutPageSettings]);
@@ -2925,6 +2927,7 @@ export function EditorShell() {
           <TableOfContentsPanel
             entries={tocEntries}
             settings={project.tocSettings}
+            verticalWriting={verticalWriting}
             collapsed={collapsedPanels.toc}
             onToggle={() => toggleSidebarPanel("toc")}
             onSettingChange={updateTocSetting}
@@ -3268,6 +3271,7 @@ function ProjectPanel({
 function TableOfContentsPanel({
   entries,
   settings,
+  verticalWriting,
   collapsed,
   onToggle,
   onSettingChange,
@@ -3277,6 +3281,7 @@ function TableOfContentsPanel({
 }: {
   entries: TocEntry[];
   settings: TocSettings;
+  verticalWriting: boolean;
   collapsed: boolean;
   onToggle: () => void;
   onSettingChange: (key: keyof TocSettings, value: TocSettings[keyof TocSettings]) => void;
@@ -3307,6 +3312,26 @@ function TableOfContentsPanel({
           <span>目次タイトル</span>
           <input value={settings.title} onChange={(event) => onSettingChange("title", event.target.value)} />
         </label>
+        {verticalWriting ? (
+          <div className="toc-form-field wide">
+            <span>縦書きタイトル位置</span>
+            <div className="segmented toc-title-position" role="group" aria-label="縦書き目次のタイトル位置">
+              {([
+                ["start", "上"],
+                ["center", "中央"]
+              ] as Array<[TocTitlePosition, string]>).map(([position, label]) => (
+                <button
+                  key={position}
+                  className={settings.titlePosition === position ? "is-active" : ""}
+                  type="button"
+                  onClick={() => onSettingChange("titlePosition", position)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         <label className="toc-form-field wide">
           <span>外観</span>
           <select value={settings.style} onChange={(event) => onSettingChange("style", event.target.value as TocStyleId)}>

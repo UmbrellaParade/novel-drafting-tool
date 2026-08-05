@@ -155,6 +155,10 @@ function tocStyle(value: unknown): string {
   return value === "plain" || value === "rain" || value === "antique" || value === "midnight" || value === "ornate" || value === "classic" ? value : "classic";
 }
 
+function tocTitlePosition(value: unknown): "start" | "center" {
+  return value === "start" ? "start" : "center";
+}
+
 function tocItemsAttribute(items: unknown): string {
   return JSON.stringify(readTocItems(items));
 }
@@ -202,6 +206,7 @@ type ImageDimensionEntry = {
   position: number;
   width: number | null;
   height: number | null;
+  pageBreakBefore: boolean;
 };
 
 function imageDimensionEntries(doc: ProseMirrorNode): ImageDimensionEntry[] {
@@ -211,7 +216,8 @@ function imageDimensionEntries(doc: ProseMirrorNode): ImageDimensionEntry[] {
       entries.push({
         position,
         width: positiveRoundedDimension(node.attrs.width),
-        height: positiveRoundedDimension(node.attrs.height)
+        height: positiveRoundedDimension(node.attrs.height),
+        pageBreakBefore: Boolean(node.attrs.pageBreakBefore)
       });
     }
   });
@@ -219,7 +225,11 @@ function imageDimensionEntries(doc: ProseMirrorNode): ImageDimensionEntry[] {
 }
 
 function sameImageDimensions(left: ImageDimensionEntry[], right: ImageDimensionEntry[]): boolean {
-  return left.length === right.length && left.every((entry, index) => entry.width === right[index].width && entry.height === right[index].height);
+  return left.length === right.length && left.every((entry, index) => (
+    entry.width === right[index].width &&
+    entry.height === right[index].height &&
+    entry.pageBreakBefore === right[index].pageBreakBefore
+  ));
 }
 
 function rangeContainsImage(doc: ProseMirrorNode, from: number, to: number): boolean {
@@ -276,6 +286,13 @@ function syncRenderedImageDimensions(view: EditorView, entry: ImageDimensionEntr
   const wrapper = image.closest<HTMLElement>("[data-resize-wrapper]");
   wrapper?.style.removeProperty("width");
   wrapper?.style.removeProperty("max-width");
+
+  const layoutTarget = image.closest<HTMLElement>("[data-resize-container]") ?? image;
+  if (entry.pageBreakBefore) {
+    layoutTarget.setAttribute("data-page-break-before", "true");
+  } else {
+    layoutTarget.removeAttribute("data-page-break-before");
+  }
 }
 
 function tocBoolean(value: unknown, fallback: boolean): boolean {
@@ -434,6 +451,10 @@ export const ImageDimensionSyncExtension = Extension.create({
       new Plugin({
         view: (initialView) => {
           let dimensions = imageDimensionEntries(initialView.state.doc);
+          const initialSyncFrame = window.requestAnimationFrame(() => {
+            dimensions.forEach((entry) => syncRenderedImageDimensions(initialView, entry));
+            initialView.dom.dispatchEvent(new CustomEvent("manuscript:image-dimensions-synced"));
+          });
           return {
             update: (view, previousState) => {
               if (!imageMayHaveChanged(previousState.doc, view.state.doc)) {
@@ -448,7 +469,8 @@ export const ImageDimensionSyncExtension = Extension.create({
               dimensions = nextDimensions;
               nextDimensions.forEach((entry) => syncRenderedImageDimensions(view, entry));
               view.dom.dispatchEvent(new CustomEvent("manuscript:image-dimensions-synced"));
-            }
+            },
+            destroy: () => window.cancelAnimationFrame(initialSyncFrame)
           };
         }
       })
@@ -539,6 +561,11 @@ export const TableOfContentsNode = Node.create({
       title: { default: "目次" },
       subtitle: { default: "" },
       style: { default: "classic" },
+      titlePosition: {
+        default: "center",
+        parseHTML: (element) => tocTitlePosition((element as HTMLElement).dataset.titlePosition),
+        renderHTML: (attributes) => ({ "data-title-position": tocTitlePosition(attributes.titlePosition) })
+      },
       showPageNumbers: {
         default: true,
         parseHTML: (element) => tocBoolean((element as HTMLElement).dataset.showPageNumbers, true),
@@ -603,6 +630,7 @@ export const TableOfContentsNode = Node.create({
             title: element.dataset.title ?? element.querySelector(".toc-title")?.textContent ?? "目次",
             subtitle: element.dataset.subtitle ?? element.querySelector(".toc-subtitle")?.textContent ?? "",
             style: tocStyle(element.dataset.style),
+            titlePosition: tocTitlePosition(element.dataset.titlePosition),
             showPageNumbers: tocBoolean(element.dataset.showPageNumbers, true),
             enableLinks: tocBoolean(element.dataset.enableLinks, false),
             fontSizePt: fontSizePtRaw ? Number.parseFloat(fontSizePtRaw) : null,
@@ -617,6 +645,7 @@ export const TableOfContentsNode = Node.create({
 
   renderHTML({ node, HTMLAttributes }) {
     const style = tocStyle(node.attrs.style);
+    const titlePosition = tocTitlePosition(node.attrs.titlePosition);
     const items = readTocItems(node.attrs.items);
     const showPageNumbers = tocBoolean(node.attrs.showPageNumbers, true);
     const enableLinks = tocBoolean(node.attrs.enableLinks, false);
@@ -643,6 +672,7 @@ export const TableOfContentsNode = Node.create({
         "data-title": node.attrs.title,
         "data-subtitle": "",
         "data-style": style,
+        "data-title-position": titlePosition,
         "data-show-page-numbers": String(showPageNumbers),
         "data-enable-links": String(enableLinks),
         ...(fontSizePt ? { "data-font-size-pt": String(fontSizePt) } : {}),

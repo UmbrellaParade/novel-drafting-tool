@@ -2,6 +2,7 @@ export type PagePresetId = "kindle" | "shimauma-a6" | "shimauma-a5" | "shimauma-
 export type ManuscriptFontId = "noto-serif-jp" | "noto-sans-jp";
 export type QrCardTemplateId = "umbrella" | "rain-letter" | "antique-book" | "midnight" | "ornate";
 export type TocStyleId = "plain" | "classic" | "rain" | "antique" | "midnight" | "ornate";
+export type TocTitlePosition = "start" | "center";
 export type PageNumberPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
 export type WritingMode = "horizontal" | "vertical";
 
@@ -56,6 +57,7 @@ export type TocSettings = {
   title: string;
   subtitle: string;
   style: TocStyleId;
+  titlePosition: TocTitlePosition;
   /** 目次項目に紙面上のページ番号を表示する。 */
   showPageNumbers: boolean;
   /** 目次項目から対応するH1見出しへ移動できるリンクを付ける。 */
