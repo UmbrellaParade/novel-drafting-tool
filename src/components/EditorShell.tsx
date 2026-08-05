@@ -630,6 +630,68 @@ async function inlineImagesForPdfExport(root: HTMLElement): Promise<void> {
   );
 }
 
+const PDF_IMAGE_PLACEHOLDER_SRC =
+  "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+
+type PdfPageImageSource = {
+  image: HTMLImageElement;
+  originalSrc: string;
+  originalWidth: string;
+  originalHeight: string;
+  pageIndex: number | null;
+};
+
+function collectPdfPageImageSources(flow: HTMLElement, contentWidth: number): PdfPageImageSource[] {
+  const flowRect = flow.getBoundingClientRect();
+  const visualScale = flow.offsetWidth > 0 ? flowRect.width / flow.offsetWidth : 1;
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+
+  return Array.from(flow.querySelectorAll<HTMLImageElement>("img")).map((image) => {
+    let directChild: HTMLElement | null = image;
+    while (directChild?.parentElement && directChild.parentElement !== flow) {
+      directChild = directChild.parentElement;
+    }
+
+    const imageRect = image.getBoundingClientRect();
+    const originalWidth = image.style.width;
+    const originalHeight = image.style.height;
+    image.style.width = `${imageRect.width / safeScale}px`;
+    image.style.height = `${imageRect.height / safeScale}px`;
+
+    let pageIndex: number | null = null;
+    if (directChild?.parentElement === flow && directChild.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR)) {
+      const directChildRect = directChild.getBoundingClientRect();
+      const offset = Math.max(0, (flowRect.right - directChildRect.right) / safeScale);
+      pageIndex = Math.floor((offset + PAGE_BOUNDARY_EPSILON_PX) / contentWidth);
+    }
+
+    return {
+      image,
+      originalSrc: image.getAttribute("src") ?? "",
+      originalWidth,
+      originalHeight,
+      pageIndex
+    };
+  });
+}
+
+function showOnlyPdfPageImages(sources: PdfPageImageSource[], pageIndex: number): void {
+  sources.forEach(({ image, originalSrc, pageIndex: imagePageIndex }) => {
+    image.setAttribute(
+      "src",
+      imagePageIndex === null || imagePageIndex === pageIndex ? originalSrc : PDF_IMAGE_PLACEHOLDER_SRC
+    );
+  });
+}
+
+function restorePdfPageImages(sources: PdfPageImageSource[]): void {
+  sources.forEach(({ image, originalSrc, originalWidth, originalHeight }) => {
+    image.setAttribute("src", originalSrc);
+    image.style.width = originalWidth;
+    image.style.height = originalHeight;
+  });
+}
+
 async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnapshot, onProgress?: RasterPdfBuildProgress): Promise<RasterPdfBuildResult> {
   // html2canvasは独自のテキスト描画のため日本語・ルビの折り返しが編集画面とズレる。
   // html-to-image(SVG foreignObject)はブラウザ本来のレンダリングをそのまま使うので、
@@ -644,11 +706,16 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
     throw new Error("PDF用ページを作成できませんでした。");
   }
 
-  if (snapshot.project.pageSettings.writingMode === "vertical") {
+  const pageSettings = snapshot.project.pageSettings;
+  const verticalWriting = pageSettings.writingMode === "vertical";
+  let verticalContentWidth = 0;
+  if (verticalWriting) {
     const contentWindow = root.querySelector<HTMLElement>(".pdf-export-content-window");
-    const contentWidth = contentWindow?.getBoundingClientRect().width || contentWindow?.offsetWidth || 0;
-    applyVerticalFlowSpacing(flow, contentWidth);
-    await nextAnimationFrame();
+    if (!contentWindow) {
+      throw new Error("PDF用の本文領域を作成できませんでした。");
+    }
+    await ensureVerticalFlowLayout(flow, contentWindow);
+    verticalContentWidth = contentWindow.getBoundingClientRect().width || contentWindow.offsetWidth;
   }
 
   const pdfDoc = await PDFDocument.create();
@@ -665,65 +732,71 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
     fontEmbedCSS = undefined;
   }
 
-  const pageSettings = snapshot.project.pageSettings;
-  const verticalWriting = pageSettings.writingMode === "vertical";
   const pageWidthPt = mmToPt(snapshot.project.pageSettings.pageWidthMm);
   const pageHeightPt = mmToPt(snapshot.project.pageSettings.pageHeightMm);
   const renderScale = PDF_EXPORT_DPI / 96;
   const contentWidthMm = Math.max(1, pageSettings.pageWidthMm - pageSettings.marginLeftMm - pageSettings.marginRightMm);
   const pagePitchMm = contentWidthMm + pageSettings.marginLeftMm + pageSettings.marginRightMm + PAGE_GAP_MM;
 
-  for (let pageIndex = 0; pageIndex < snapshot.pageCount; pageIndex += 1) {
-    pageElement.dataset.pageNumber = String(pageIndex + 1);
-    const header = pageElement.querySelector<HTMLElement>(".pdf-export-page-header");
-    if (header) {
-      header.replaceChildren();
-      const title = snapshot.sectionTitles[pageIndex] ?? "";
-      if (title) {
-        const span = document.createElement("span");
-        span.textContent = title;
-        header.append(span);
+  const pageImageSources = verticalWriting ? collectPdfPageImageSources(flow, verticalContentWidth) : [];
+  try {
+    for (let pageIndex = 0; pageIndex < snapshot.pageCount; pageIndex += 1) {
+      pageElement.dataset.pageNumber = String(pageIndex + 1);
+      const header = pageElement.querySelector<HTMLElement>(".pdf-export-page-header");
+      if (header) {
+        header.replaceChildren();
+        const title = snapshot.sectionTitles[pageIndex] ?? "";
+        if (title) {
+          const span = document.createElement("span");
+          span.textContent = title;
+          header.append(span);
+        }
       }
+
+      const footer = pageElement.querySelector<HTMLElement>(".pdf-export-page-footer");
+      if (footer) {
+        footer.replaceChildren();
+      }
+
+      const pageNumber = pageElement.querySelector<HTMLElement>(".pdf-export-page-number");
+      if (pageNumber) {
+        pageNumber.textContent = pageSettings.showPageNumber ? String(pageIndex + 1) : "";
+        pageNumber.hidden = !pageSettings.showPageNumber;
+      }
+
+      flow.style.marginLeft = verticalWriting
+        ? `-${Math.max(0, snapshot.pageCount - pageIndex - 1) * contentWidthMm}mm`
+        : `-${pageIndex * pagePitchMm}mm`;
+      if (verticalWriting) {
+        showOnlyPdfPageImages(pageImageSources, pageIndex);
+      }
+      onProgress?.(pageIndex, snapshot.pageCount);
+      await nextAnimationFrame();
+
+      const pageRect = pageElement.getBoundingClientRect();
+      const svgDataUrl = await htmlToImage.toSvg(pageElement, {
+        backgroundColor: "#ffffff",
+        fontEmbedCSS,
+        skipAutoScale: true,
+        cacheBust: false
+      });
+      const correctedSvg = correctSvgFontSizes(pageElement, svgDataUrl);
+      const canvas = await svgDataUrlToCanvas(correctedSvg, pageRect.width, pageRect.height, renderScale);
+      const imageBytes = await canvasToPngBytes(canvas);
+      canvas.width = 0;
+      canvas.height = 0;
+
+      const image = await pdfDoc.embedPng(imageBytes);
+      const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+      pdfPage.drawImage(image, {
+        x: 0,
+        y: 0,
+        width: pageWidthPt,
+        height: pageHeightPt
+      });
     }
-
-    const footer = pageElement.querySelector<HTMLElement>(".pdf-export-page-footer");
-    if (footer) {
-      footer.replaceChildren();
-    }
-
-    const pageNumber = pageElement.querySelector<HTMLElement>(".pdf-export-page-number");
-    if (pageNumber) {
-      pageNumber.textContent = pageSettings.showPageNumber ? String(pageIndex + 1) : "";
-      pageNumber.hidden = !pageSettings.showPageNumber;
-    }
-
-    flow.style.marginLeft = verticalWriting
-      ? `-${Math.max(0, snapshot.pageCount - pageIndex - 1) * contentWidthMm}mm`
-      : `-${pageIndex * pagePitchMm}mm`;
-    onProgress?.(pageIndex, snapshot.pageCount);
-    await nextAnimationFrame();
-
-    const pageRect = pageElement.getBoundingClientRect();
-    const svgDataUrl = await htmlToImage.toSvg(pageElement, {
-      backgroundColor: "#ffffff",
-      fontEmbedCSS,
-      skipAutoScale: true,
-      cacheBust: false
-    });
-    const correctedSvg = correctSvgFontSizes(pageElement, svgDataUrl);
-    const canvas = await svgDataUrlToCanvas(correctedSvg, pageRect.width, pageRect.height, renderScale);
-    const imageBytes = await canvasToPngBytes(canvas);
-    canvas.width = 0;
-    canvas.height = 0;
-
-    const image = await pdfDoc.embedPng(imageBytes);
-    const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
-    pdfPage.drawImage(image, {
-      x: 0,
-      y: 0,
-      width: pageWidthPt,
-      height: pageHeightPt
-    });
+  } finally {
+    restorePdfPageImages(pageImageSources);
   }
 
   const bytes = await pdfDoc.save();
@@ -838,7 +911,7 @@ async function measurePdfExportLayout(snapshot: PdfExportSnapshot): Promise<PdfE
     const contentWidth = contentWindow.getBoundingClientRect().width || contentWindow.offsetWidth;
     const verticalWriting = snapshot.project.pageSettings.writingMode === "vertical";
     if (verticalWriting) {
-      applyVerticalFlowSpacing(flow, contentWidth);
+      await ensureVerticalFlowLayout(flow, contentWindow);
     }
     const computedColumnGap = Number.parseFloat(window.getComputedStyle(flow).columnGap);
     const columnGap = Number.isFinite(computedColumnGap) ? computedColumnGap : 0;
@@ -1010,15 +1083,12 @@ function verticalPageRemainder(offset: number, contentWidth: number): number {
 }
 
 function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void {
-  const layoutTargets = Array.from(
-    flow.querySelectorAll<HTMLElement>(
-      `.page-break-before,[data-page-break-before='true'],${VERTICAL_UNBREAKABLE_BLOCK_SELECTOR}`
-    )
-  ).filter(
-    (element) => isForcedPageBreakTarget(element) || (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR))
+  const layoutTargets = Array.from(flow.children).filter(
+    (element): element is HTMLElement => element instanceof HTMLElement
   );
   const contentEditableFlow = flow.isContentEditable;
   let previewStyle: HTMLStyleElement | null = null;
+  let previewVariableHost: HTMLElement | null = null;
   if (contentEditableFlow) {
     flow.dataset.verticalPageFlow = "preview";
     previewStyle = document.querySelector<HTMLStyleElement>("style[data-vertical-flow-rules='preview']");
@@ -1026,6 +1096,18 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
       previewStyle = document.createElement("style");
       previewStyle.dataset.verticalFlowRules = "preview";
       document.head.append(previewStyle);
+    }
+    previewVariableHost = flow.parentElement;
+    const previousVariableCount = Number.parseInt(
+      previewVariableHost?.dataset.verticalFlowVariableCount ?? "0",
+      10
+    );
+    if (previewVariableHost && Number.isFinite(previousVariableCount)) {
+      for (let index = 0; index < previousVariableCount; index += 1) {
+        previewVariableHost.style.removeProperty(`--vertical-flow-before-${index}`);
+        previewVariableHost.style.removeProperty(`--vertical-flow-after-${index}`);
+      }
+      previewVariableHost.dataset.verticalFlowVariableCount = String(layoutTargets.length);
     }
     previewStyle.textContent = "";
   } else {
@@ -1038,29 +1120,57 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
     return;
   }
 
-  const flowRect = flow.getBoundingClientRect();
-  const visualScale = flow.offsetWidth > 0 ? flowRect.width / flow.offsetWidth : 1;
-  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
-  const flowRight = flowRect.right;
   const previewRules: string[] = [];
-
-  layoutTargets.forEach((element) => {
-    let beforeSpace = 0;
-    let afterSpace = 0;
-    let setSpacing: (before: number, after: number) => void;
-    if (previewStyle) {
+  const previewRuleIndexes = new Map<HTMLElement, number>();
+  if (previewStyle) {
+    layoutTargets.forEach((element) => {
       const childSelector = elementChildSelector(element, flow);
       if (!childSelector) {
         return;
       }
+      previewRuleIndexes.set(element, previewRules.length);
       const ruleIndex = previewRules.length;
-      previewRules.push("");
+      previewRules.push(
+        `.paged-document.is-vertical .manuscript-prose[data-vertical-page-flow="preview"] > ${childSelector} { ` +
+        `--vertical-page-break-space: var(--vertical-flow-before-${ruleIndex}, 0px); ` +
+        `--vertical-page-after-space: var(--vertical-flow-after-${ruleIndex}, 0px); }`
+      );
+    });
+    previewStyle.textContent = previewRules.join("\n");
+  }
+
+  const flowRect = flow.getBoundingClientRect();
+  const visualScale = flow.offsetWidth > 0 ? flowRect.width / flow.offsetWidth : 1;
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+  const flowRight = flowRect.right;
+
+  layoutTargets.forEach((element) => {
+    let beforeSpace = 0;
+    let afterSpace = 0;
+    let appliedBeforeSpace = 0;
+    let appliedAfterSpace = 0;
+    let setSpacing: (before: number, after: number) => void;
+    if (previewStyle && previewVariableHost) {
+      const ruleIndex = previewRuleIndexes.get(element);
+      if (ruleIndex === undefined) {
+        return;
+      }
       setSpacing = (before, after) => {
-        previewRules[ruleIndex] = `.paged-document.is-vertical .manuscript-prose[data-vertical-page-flow="preview"] > ${childSelector} { --vertical-page-break-space: ${before}px; --vertical-page-after-space: ${after}px; }`;
-        previewStyle.textContent = previewRules.join("\n");
+        if (before === appliedBeforeSpace && after === appliedAfterSpace) {
+          return;
+        }
+        appliedBeforeSpace = before;
+        appliedAfterSpace = after;
+        previewVariableHost.style.setProperty(`--vertical-flow-before-${ruleIndex}`, `${before}px`);
+        previewVariableHost.style.setProperty(`--vertical-flow-after-${ruleIndex}`, `${after}px`);
       };
     } else {
       setSpacing = (before, after) => {
+        if (before === appliedBeforeSpace && after === appliedAfterSpace) {
+          return;
+        }
+        appliedBeforeSpace = before;
+        appliedAfterSpace = after;
         element.style.setProperty("--vertical-page-break-space", `${before}px`);
         element.style.setProperty("--vertical-page-after-space", `${after}px`);
       };
@@ -1079,15 +1189,24 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
     setSpacing(0, 0);
     const rect = element.getBoundingClientRect();
     const offset = Math.max(0, (flowRight - rect.right) / safeScale);
+    const blockWidth = rect.width / safeScale;
+    const rawRemainder = ((offset % contentWidth) + contentWidth) % contentWidth;
+    const remainder = rawRemainder <= PAGE_BOUNDARY_EPSILON_PX ? 0 : rawRemainder;
 
     if (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR)) {
-      const blockWidth = rect.width / safeScale;
       if (blockWidth <= contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
-        const remainder = verticalPageRemainder(offset, contentWidth);
-        const pageStartOffset = offset + (remainder > 0 ? contentWidth - remainder : 0);
-        const availableSpace = Math.max(0, contentWidth - blockWidth);
+        const forcedBreak = isForcedPageBreakTarget(element);
+        const remainingSpace = remainder > 0 ? contentWidth - remainder : contentWidth;
+        const fitsCurrentPage = !forcedBreak && blockWidth <= remainingSpace + PAGE_BOUNDARY_EPSILON_PX;
+        const pageStartOffset = fitsCurrentPage
+          ? offset
+          : offset + (remainder > 0 ? contentWidth - remainder : 0);
+        const availableSpace = Math.max(
+          0,
+          (fitsCurrentPage ? remainingSpace : contentWidth) - blockWidth
+        );
         const leadingInset = availableSpace / 2;
-        beforeSpace = pageStartOffset - offset + leadingInset;
+        beforeSpace = Math.max(0, pageStartOffset - offset + leadingInset);
         afterSpace = availableSpace - leadingInset;
         alignToOffset(pageStartOffset + leadingInset);
         return;
@@ -1095,13 +1214,100 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
     }
 
     if (isForcedPageBreakTarget(element)) {
-      const remainder = verticalPageRemainder(offset, contentWidth);
       if (remainder > 0) {
         beforeSpace = contentWidth - remainder;
         alignToOffset(offset + contentWidth - remainder);
       }
+      return;
+    }
+
+    if (blockWidth <= PAGE_BOUNDARY_EPSILON_PX || blockWidth > contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
+      return;
+    }
+
+    const remainingSpace = remainder > 0 ? contentWidth - remainder : contentWidth;
+    if (blockWidth > remainingSpace + PAGE_BOUNDARY_EPSILON_PX) {
+      beforeSpace = contentWidth - remainder;
+      alignToOffset(offset + contentWidth - remainder);
     }
   });
+}
+
+function collectVerticalFlowLayoutIssues(
+  flow: HTMLElement,
+  contentWidth: number,
+  contentHeight: number
+): string[] {
+  if (contentWidth <= 0 || contentHeight <= 0) {
+    return ["本文領域のサイズを測定できませんでした。"];
+  }
+
+  const flowRect = flow.getBoundingClientRect();
+  const visualScale = flow.offsetWidth > 0 ? flowRect.width / flow.offsetWidth : 1;
+  const safeScale = Number.isFinite(visualScale) && visualScale > 0 ? visualScale : 1;
+  const flowRight = flowRect.right;
+  const issues: string[] = [];
+
+  Array.from(flow.children).forEach((child, index) => {
+    if (!(child instanceof HTMLElement)) {
+      return;
+    }
+
+    const rect = child.getBoundingClientRect();
+    const blockWidth = rect.width / safeScale;
+    const blockHeight = rect.height / safeScale;
+    if (blockWidth <= PAGE_BOUNDARY_EPSILON_PX && !hasPreviewPageContent(child)) {
+      return;
+    }
+    const offset = Math.max(0, (flowRight - rect.right) / safeScale);
+    const startPage = Math.floor((offset + PAGE_BOUNDARY_EPSILON_PX) / contentWidth);
+    const endPage = Math.floor(
+      Math.max(0, offset + blockWidth - PAGE_BOUNDARY_EPSILON_PX) / contentWidth
+    );
+    const image = child.matches("img") ? child : child.querySelector("img");
+    const textLabel = (child.textContent ?? "").trim().slice(0, 24);
+    const label =
+      child.getAttribute("aria-label") ||
+      image?.getAttribute("alt") ||
+      textLabel ||
+      `要素${index + 1}`;
+
+    if (blockWidth > contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
+      issues.push(`${label}が1ページの横幅を超えています。`);
+    }
+    if (child.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR) && blockHeight > contentHeight + PAGE_BOUNDARY_EPSILON_PX) {
+      issues.push(`${label}が本文領域の高さを超えています。`);
+    }
+    if (startPage !== endPage) {
+      const startRemainder = verticalPageRemainder(offset, contentWidth);
+      const endRemainder = verticalPageRemainder(offset + blockWidth, contentWidth);
+      issues.push(
+        `${label}がページ境界をまたいでいます` +
+        `（開始余白${startRemainder.toFixed(2)}px / 終了余白${endRemainder.toFixed(2)}px）。`
+      );
+    }
+  });
+
+  return issues;
+}
+
+async function ensureVerticalFlowLayout(flow: HTMLElement, contentWindow: HTMLElement): Promise<void> {
+  const contentRect = contentWindow.getBoundingClientRect();
+  const contentWidth = contentRect.width || contentWindow.offsetWidth;
+  const contentHeight = contentRect.height || contentWindow.offsetHeight;
+
+  applyVerticalFlowSpacing(flow, contentWidth);
+  await nextAnimationFrame();
+  let issues = collectVerticalFlowLayoutIssues(flow, contentWidth, contentHeight);
+  if (issues.length > 0) {
+    applyVerticalFlowSpacing(flow, contentWidth);
+    await nextAnimationFrame();
+    issues = collectVerticalFlowLayoutIssues(flow, contentWidth, contentHeight);
+  }
+
+  if (issues.length > 0) {
+    throw new Error(`縦書きの配置を安全にPDF化できませんでした。\n${issues.slice(0, 3).join("\n")}`);
+  }
 }
 
 function measureOccupiedVerticalPages(prose: HTMLElement, contentWidth: number): number | null {
