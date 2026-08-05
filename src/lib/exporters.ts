@@ -53,6 +53,7 @@ type ZipEntry = {
 type DocxTextSegment = {
   text: string;
   fontSizePt?: number;
+  rubyText?: string;
 };
 
 type DocxBlock =
@@ -208,6 +209,7 @@ export async function exportProjectDocx(project: ManuscriptProject): Promise<voi
       const textRuns = createDocxTextRuns(docx, block.segments, {
         font: bodyFont,
         defaultFontSizePt: project.pageSettings.fontSizePt,
+        rubyFontSizePt: project.pageSettings.rubySizePt,
         color: "000000"
       });
       const textChildren = block.kind === "heading"
@@ -1263,17 +1265,90 @@ function docxHeadingBookmarkId(index: number): string {
 function createDocxTextRuns(
   docx: DocxModule,
   segments: DocxTextSegment[],
-  options: { font: string; defaultFontSizePt: number; color: string }
+  options: { font: string; defaultFontSizePt: number; rubyFontSizePt: number; color: string }
 ): InstanceType<DocxModule["TextRun"]>[] {
   const source = segments.length > 0 ? segments : [{ text: "" }];
-  return source.map((segment) =>
-    new docx.TextRun({
+  return source.map((segment) => {
+    const fontSizePt = segment.fontSizePt ?? options.defaultFontSizePt;
+    if (segment.rubyText) {
+      return createDocxRubyRun(docx, {
+        baseText: segment.text,
+        rubyText: segment.rubyText,
+        font: options.font,
+        baseFontSizePt: fontSizePt,
+        rubyFontSizePt: options.rubyFontSizePt,
+        color: options.color
+      });
+    }
+
+    return new docx.TextRun({
       text: segment.text,
       font: options.font,
-      size: Math.round((segment.fontSizePt ?? options.defaultFontSizePt) * 2),
+      size: Math.round(fontSizePt * 2),
       color: options.color
-    })
-  );
+    });
+  });
+}
+
+function createDocxRubyRun(
+  docx: DocxModule,
+  options: {
+    baseText: string;
+    rubyText: string;
+    font: string;
+    baseFontSizePt: number;
+    rubyFontSizePt: number;
+    color: string;
+  }
+): InstanceType<DocxModule["TextRun"]> {
+  const baseSize = Math.max(2, Math.round(options.baseFontSizePt * 2));
+  const rubySize = Math.max(2, Math.round(Math.min(options.rubyFontSizePt, options.baseFontSizePt) * 2));
+  const ruby = new docx.ImportedXmlComponent("w:ruby");
+  const rubyProperties = new docx.ImportedXmlComponent("w:rubyPr");
+  rubyProperties.push(docx.createStringElement("w:rubyAlign", "center"));
+  rubyProperties.push(docx.createStringElement("w:hps", String(rubySize)));
+  rubyProperties.push(docx.createStringElement("w:hpsRaise", String(baseSize)));
+  rubyProperties.push(docx.createStringElement("w:hpsBaseText", String(baseSize)));
+  rubyProperties.push(docx.createStringElement("w:lid", "ja-JP"));
+  ruby.push(rubyProperties);
+  ruby.push(createDocxRubyContent(docx, "w:rt", options.rubyText, {
+    font: options.font,
+    size: rubySize,
+    color: options.color
+  }));
+  ruby.push(createDocxRubyContent(docx, "w:rubyBase", options.baseText, {
+    font: options.font,
+    size: baseSize,
+    color: options.color
+  }));
+
+  return new docx.TextRun({
+    font: options.font,
+    size: baseSize,
+    color: options.color,
+    children: [ruby]
+  });
+}
+
+function createDocxRubyContent(
+  docx: DocxModule,
+  elementName: "w:rt" | "w:rubyBase",
+  text: string,
+  options: { font: string; size: number; color: string }
+): InstanceType<DocxModule["ImportedXmlComponent"]> {
+  const content = new docx.ImportedXmlComponent(elementName);
+  const run = new docx.ImportedXmlComponent("w:r");
+  const properties = new docx.ImportedXmlComponent("w:rPr");
+  properties.push(docx.createRunFonts(options.font));
+  properties.push(docx.createStringElement("w:color", options.color));
+  properties.push(docx.createStringElement("w:sz", String(options.size)));
+  properties.push(docx.createStringElement("w:szCs", String(options.size)));
+  run.push(properties);
+  const textElement = new docx.ImportedXmlComponent("w:t");
+  textElement.push(text);
+  run.push(textElement);
+  content.push(run);
+  return content;
 }
 
 function normalizeImageMimeType(mimeType: string): string {
@@ -1584,7 +1659,7 @@ function readDocxTextSegments(element: HTMLElement): DocxTextSegment[] {
         return;
       }
       const previous = segments.at(-1);
-      if (previous && previous.fontSizePt === inheritedFontSizePt) {
+      if (previous && !previous.rubyText && previous.fontSizePt === inheritedFontSizePt) {
         previous.text += text;
       } else {
         segments.push({ text, fontSizePt: inheritedFontSizePt });
@@ -1602,6 +1677,27 @@ function readDocxTextSegments(element: HTMLElement): DocxTextSegment[] {
     }
 
     const fontSizePt = readDocxFontSizePt(node) ?? inheritedFontSizePt;
+    if (node.matches("ruby")) {
+      const rubyText = node.getAttribute("rt")?.trim()
+        || node.dataset.rt?.trim()
+        || node.querySelector("rt")?.textContent?.trim()
+        || "";
+      const clone = node.cloneNode(true) as HTMLElement;
+      clone.querySelectorAll("rt,rp").forEach((rubyElement) => rubyElement.remove());
+      const baseText = node.getAttribute("base")?.trim()
+        || node.dataset.base?.trim()
+        || clone.textContent?.trim()
+        || "";
+      if (baseText) {
+        segments.push({
+          text: baseText,
+          fontSizePt,
+          rubyText: rubyText || undefined
+        });
+      }
+      return;
+    }
+
     node.childNodes.forEach((child) => visit(child, fontSizePt));
   };
 
