@@ -67,6 +67,7 @@ const PAGE_PROGRAMMATIC_SCROLL_SUPPRESS_MS = 450;
 const PAGE_USER_SCROLL_WINDOW_MS = 900;
 const PDF_EXPORT_DPI = 300;
 const MANGA_PRESETS = new Set<PagePresetId>(["shimauma-a6-manga", "shimauma-a5-manga"]);
+const VISIBLE_PAGE_PRESETS: PagePresetId[] = ["shimauma-a5", "shimauma-a6"];
 const PAGE_NUMBER_POSITION_OPTIONS: Array<{ value: PageNumberPosition; label: string }> = [
   { value: "bottom-right", label: "下・右" },
   { value: "bottom-center", label: "下・中央" },
@@ -3250,11 +3251,15 @@ function ProjectPanel({
       ) : null}
 
       <div className="segmented" aria-label="ページ設定プリセット">
-        {(Object.entries(PAGE_PRESETS) as Array<[PagePresetId, (typeof PAGE_PRESETS)[PagePresetId]]>).map(([preset, data]) => (
-          <button key={preset} className={settings.preset === preset ? "is-active" : ""} type="button" onClick={() => onPreset(preset)}>
-            {data.label}
-          </button>
-        ))}
+        {VISIBLE_PAGE_PRESETS.map((preset) => {
+          const data = PAGE_PRESETS[preset];
+          const isActive = settings.preset === preset || (preset === "shimauma-a5" && settings.preset === "kindle");
+          return (
+            <button key={preset} className={isActive ? "is-active" : ""} type="button" onClick={() => onPreset(preset)}>
+              {data.label}
+            </button>
+          );
+        })}
       </div>
 
       <div className="number-grid">
