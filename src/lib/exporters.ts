@@ -607,7 +607,15 @@ export async function exportProjectEpub(project: ManuscriptProject): Promise<voi
   );
 
   for (const [chapterIndex, chapter] of project.chapters.entries()) {
-    chapters.push(await buildEpubChapter(chapter.title, chapter.content, chapterIndex + 1, assetState, project.title, contentWidthPx));
+    chapters.push(await buildEpubChapter(
+      chapter.title,
+      chapter.content,
+      chapterIndex + 1,
+      assetState,
+      project.title,
+      contentWidthPx,
+      project.pageSettings.writingMode === "vertical"
+    ));
   }
 
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -640,7 +648,8 @@ async function buildEpubChapter(
   chapterNumber: number,
   assetState: EpubAssetState,
   navigationFallbackTitle: string,
-  contentWidthPx: number
+  contentWidthPx: number,
+  verticalWriting: boolean
 ): Promise<EpubChapter> {
   const href = `chapter-${chapterNumber}.xhtml`;
   const template = document.createElement("template");
@@ -719,6 +728,10 @@ async function buildEpubChapter(
     link.removeAttribute("data-toc-target-index");
   });
 
+  if (verticalWriting) {
+    decorateVerticalEpubText(template.content);
+  }
+
   const serializer = new XMLSerializer();
   const body = [...template.content.childNodes].map((node) => serializer.serializeToString(node)).join("\n");
 
@@ -729,6 +742,59 @@ async function buildEpubChapter(
     body,
     navItems
   };
+}
+
+function decorateVerticalEpubText(root: DocumentFragment): void {
+  const textNodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode as Text);
+  }
+
+  textNodes.forEach((textNode) => {
+    if (textNode.parentElement?.closest(".vertical-ellipsis, .vertical-dash, .vertical-tate-chu-yoko")) {
+      return;
+    }
+    const value = textNode.nodeValue ?? "";
+    const matches = [
+      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)).map((match) => ({
+        index: match.index ?? 0,
+        text: match[0],
+        className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
+      })),
+      ...Array.from(value.matchAll(/\d+/g))
+        .filter((match) => match[0].length <= 2)
+        .map((match) => ({ index: match.index ?? 0, text: match[0], className: "vertical-tate-chu-yoko" })),
+      ...Array.from(value.matchAll(/[!?！？]{2}/g)).map((match) => ({
+        index: match.index ?? 0,
+        text: match[0],
+        className: "vertical-tate-chu-yoko"
+      }))
+    ].sort((left, right) => left.index - right.index);
+    if (matches.length === 0) {
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    let offset = 0;
+    matches.forEach((match) => {
+      if (match.index < offset) {
+        return;
+      }
+      if (match.index > offset) {
+        fragment.append(document.createTextNode(value.slice(offset, match.index)));
+      }
+      const span = document.createElement("span");
+      span.className = match.className;
+      span.textContent = match.text;
+      fragment.append(span);
+      offset = match.index + match.text.length;
+    });
+    if (offset < value.length) {
+      fragment.append(document.createTextNode(value.slice(offset)));
+    }
+    textNode.replaceWith(fragment);
+  });
 }
 
 async function collectEpubImageAsset(src: string, state: EpubAssetState): Promise<EpubAsset | null> {
@@ -841,10 +907,11 @@ ${chapter.body}
 
 function epubCss(project: ManuscriptProject): string {
   const bodyFont = project.pageSettings.fontFamily === "noto-sans-jp" ? "sans-serif" : "serif";
+  const tocWritingMode = project.pageSettings.writingMode === "vertical" ? "vertical-rl" : "horizontal-tb";
   const verticalWritingCss = project.pageSettings.writingMode === "vertical"
     ? `  writing-mode: vertical-rl;
   text-orientation: mixed;
-  text-combine-upright: digits 2;`
+  text-combine-upright: none;`
     : "";
 
   return `body {
@@ -906,7 +973,7 @@ img {
   border: 1.4px solid #111111;
   background: #ffffff;
   color: #111111;
-  writing-mode: horizontal-tb;
+  writing-mode: ${tocWritingMode};
 }
 
 .toc-title {
@@ -956,18 +1023,18 @@ img {
 
 .toc-entry-leader {
   flex: 0 1 var(--toc-leader-width, 2.8em);
-  width: var(--toc-leader-width, 2.8em);
-  min-width: 0;
-  margin-left: auto;
-  border-bottom: 1px dotted currentColor;
+  inline-size: var(--toc-leader-width, 2.8em);
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  border-block-end: 1px dotted currentColor;
   opacity: 0.7;
 }
 
 .toc-entry-page {
   flex: 0 0 auto;
-  min-width: 2.5em;
+  min-inline-size: 2.5em;
   color: currentColor;
-  text-align: right;
+  text-align: end;
 }
 
 .manuscript-toc-plain {
@@ -1036,7 +1103,23 @@ img {
 }
 
 nav {
-  writing-mode: horizontal-tb;
+  writing-mode: ${tocWritingMode};
+}
+
+.vertical-ellipsis {
+  white-space: nowrap;
+  text-orientation: sideways;
+}
+
+.vertical-dash {
+  text-orientation: sideways;
+}
+
+.vertical-tate-chu-yoko {
+  text-combine-upright: all;
+  -webkit-text-combine: horizontal;
+  text-orientation: mixed;
+  letter-spacing: 0;
 }
 
 .qr-card-body {

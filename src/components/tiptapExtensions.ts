@@ -1,5 +1,5 @@
 import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
-import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import type { DOMOutputSpec, Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
@@ -157,6 +157,45 @@ function tocStyle(value: unknown): string {
 
 function tocItemsAttribute(items: unknown): string {
   return JSON.stringify(readTocItems(items));
+}
+
+function verticalTextOutput(value: string): DOMOutputSpec {
+  const matches = [
+    ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)).map((match) => ({
+      index: match.index ?? 0,
+      text: match[0],
+      className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
+    })),
+    ...Array.from(value.matchAll(/\d+/g))
+      .filter((match) => match[0].length <= 2)
+      .map((match) => ({ index: match.index ?? 0, text: match[0], className: "vertical-tate-chu-yoko" })),
+    ...Array.from(value.matchAll(/[!?！？]{2}/g)).map((match) => ({
+      index: match.index ?? 0,
+      text: match[0],
+      className: "vertical-tate-chu-yoko"
+    }))
+  ].sort((left, right) => left.index - right.index);
+  if (matches.length === 0) {
+    return ["span", { class: "vertical-text-content" }, value];
+  }
+
+  const output: Array<string | DOMOutputSpec> = [];
+  let offset = 0;
+  matches.forEach((match) => {
+    if (match.index < offset) {
+      return;
+    }
+    if (match.index > offset) {
+      output.push(value.slice(offset, match.index));
+    }
+    output.push(["span", { class: match.className }, match.text]);
+    offset = match.index + match.text.length;
+  });
+  if (offset < value.length) {
+    output.push(value.slice(offset));
+  }
+
+  return ["span", { class: "vertical-text-content" }, ...output] as DOMOutputSpec;
 }
 
 type ImageDimensionEntry = {
@@ -336,6 +375,19 @@ export const VerticalPunctuationExtension = Extension.create({
                 const start = position + (match.index ?? 0);
                 const className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
                 decorations.push(Decoration.inline(start, start + match[0].length, { class: className }));
+              }
+
+              for (const match of node.text.matchAll(/\d+/g)) {
+                if (match[0].length > 2) {
+                  continue;
+                }
+                const start = position + (match.index ?? 0);
+                decorations.push(Decoration.inline(start, start + match[0].length, { class: "vertical-tate-chu-yoko" }));
+              }
+
+              for (const match of node.text.matchAll(/[!?！？]{2}/g)) {
+                const start = position + (match.index ?? 0);
+                decorations.push(Decoration.inline(start, start + match[0].length, { class: "vertical-tate-chu-yoko" }));
               }
             });
 
@@ -599,14 +651,14 @@ export const TableOfContentsNode = Node.create({
         ...(blockStyle ? { style: blockStyle } : {}),
         class: `manuscript-toc manuscript-toc-${style}${showPageNumbers ? "" : " manuscript-toc-without-pages"}${enableLinks ? " manuscript-toc-with-links" : ""}`
       }),
-      ["div", { class: "toc-title" }, node.attrs.title || "目次"],
+      ["div", { class: "toc-title" }, verticalTextOutput(node.attrs.title || "目次")],
       [
         "ol",
         { class: "toc-list" },
         ...items.map((item, index) => {
           const title = enableLinks
-            ? ["a", { class: "toc-entry-title toc-entry-link", role: "link", tabindex: "0", "data-toc-target-index": String(index) }, item.title]
-            : ["span", { class: "toc-entry-title" }, item.title];
+            ? ["a", { class: "toc-entry-title toc-entry-link", role: "link", tabindex: "0", "data-toc-target-index": String(index) }, verticalTextOutput(item.title)]
+            : ["span", { class: "toc-entry-title" }, verticalTextOutput(item.title)];
           return [
             "li",
             { class: "toc-entry" },
@@ -614,7 +666,7 @@ export const TableOfContentsNode = Node.create({
             ...(showPageNumbers
               ? [
                   ["span", { class: "toc-entry-leader" }, ""],
-                  ["span", { class: "toc-entry-page" }, item.page === null ? "…" : String(item.page)]
+                  ["span", { class: "toc-entry-page" }, verticalTextOutput(item.page === null ? "…" : String(item.page))]
                 ]
               : [])
           ];

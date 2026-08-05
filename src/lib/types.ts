@@ -9,6 +9,7 @@ export type PageSettings = {
   preset: PagePresetId;
   fontFamily: ManuscriptFontId;
   writingMode: WritingMode;
+  centerChapterHeadings: boolean;
   pageWidthMm: number;
   pageHeightMm: number;
   marginTopMm: number;

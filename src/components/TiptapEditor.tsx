@@ -687,6 +687,43 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
     setImageWidth(readMaximumImageWidth(editor, image));
   };
 
+  const fitAllImagesToPages = () => {
+    if (!editor) {
+      return;
+    }
+
+    const imageWidths: Array<{ position: number; width: number }> = [];
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name !== "image") {
+        return;
+      }
+
+      const image = renderedImageAtPosition(editor, position);
+      imageWidths.push({ position, width: Math.round(readMaximumImageWidth(editor, image)) });
+    });
+
+    if (imageWidths.length === 0) {
+      window.alert("本文内に画像がありません。");
+      return;
+    }
+
+    withStablePageStageScroll(editor, () =>
+      editor
+        .chain()
+        .focus()
+        .command(({ state, tr }) => {
+          imageWidths.forEach(({ position, width }) => {
+            const node = state.doc.nodeAt(position);
+            if (node?.type.name === "image") {
+              tr.setNodeMarkup(position, undefined, { ...node.attrs, width, height: null }, node.marks);
+            }
+          });
+          return true;
+        })
+        .run()
+    );
+  };
+
   const matchPreviousImageSize = () => {
     if (!editor || !toolbarState.hasImageSelection) {
       return;
@@ -1125,6 +1162,9 @@ export function TiptapToolbar({ editor, onOpenQrLibrary }: TiptapToolbarProps) {
         </ToolButton>
         <ToolButton label="画像" disabled={disabled} onClick={() => imageInputRef.current?.click()}>
           <ImagePlus size={18} />
+        </ToolButton>
+        <ToolButton label="全画像をページ内最大" disabled={disabled} onClick={fitAllImagesToPages}>
+          <Scan size={18} />
         </ToolButton>
         <ToolButton label="QRリンク" disabled={!onOpenQrLibrary} onClick={() => onOpenQrLibrary?.()}>
           <QrCode size={18} />

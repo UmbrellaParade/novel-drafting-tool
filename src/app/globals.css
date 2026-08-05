@@ -1565,7 +1565,7 @@ h1 {
   column-gap: normal;
   writing-mode: vertical-rl;
   text-orientation: mixed;
-  text-combine-upright: digits 2;
+  text-combine-upright: none;
   font-feature-settings: "vert" 1;
 }
 
@@ -1603,11 +1603,9 @@ h1 {
   padding-inline-start: 1.4em;
 }
 
-.paged-document.is-vertical .manuscript-prose .manuscript-toc,
 .paged-document.is-vertical .manuscript-prose .manuscript-column-block,
 .paged-document.is-vertical .manuscript-prose .qr-card,
 .paged-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"],
-.pdf-export-document.is-vertical .manuscript-prose .manuscript-toc,
 .pdf-export-document.is-vertical .manuscript-prose .manuscript-column-block,
 .pdf-export-document.is-vertical .manuscript-prose .qr-card,
 .pdf-export-document.is-vertical .manuscript-prose [data-resize-container][data-node="image"] {
@@ -1671,6 +1669,19 @@ h1 {
 .pdf-export-document.is-vertical .manuscript-prose .vertical-ellipsis,
 .pdf-export-document.is-vertical .manuscript-prose .vertical-dash {
   text-orientation: sideways;
+}
+
+.paged-document.is-vertical .manuscript-prose .vertical-ellipsis,
+.pdf-export-document.is-vertical .manuscript-prose .vertical-ellipsis {
+  white-space: nowrap;
+}
+
+.paged-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko,
+.pdf-export-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko {
+  text-combine-upright: all;
+  -webkit-text-combine: horizontal;
+  text-orientation: mixed;
+  letter-spacing: 0;
 }
 
 .paged-document.is-vertical .manuscript-prose .page-break-before,
@@ -1845,7 +1856,7 @@ h1 {
 .toc-entry-title {
   min-width: 0;
   overflow-wrap: anywhere;
-  padding-left: 4em;
+  padding-inline-start: 4em;
   text-indent: -4em;
 }
 
@@ -1868,20 +1879,70 @@ h1 {
 
 .toc-entry-leader {
   flex: 0 1 var(--toc-leader-width, 12mm);
-  width: var(--toc-leader-width, 12mm);
-  min-width: 0;
-  margin-left: auto;
-  border-bottom: 1px dotted currentColor;
+  inline-size: var(--toc-leader-width, 12mm);
+  min-inline-size: 0;
+  margin-inline-start: auto;
+  border-block-end: 1px dotted currentColor;
   opacity: 0.7;
   transform: translateY(-0.22em);
 }
 
 .toc-entry-page {
   flex: 0 0 auto;
-  min-width: 2.5em;
+  min-inline-size: 2.5em;
   color: currentColor;
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  text-align: end;
+}
+
+.paged-document.is-vertical .manuscript-prose .manuscript-toc,
+.pdf-export-document.is-vertical .manuscript-prose .manuscript-toc {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: var(--content-width);
+  max-width: var(--content-width);
+  height: var(--content-height);
+  max-height: var(--content-height);
+  margin: 0;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.paged-document.is-vertical .manuscript-toc .toc-title,
+.pdf-export-document.is-vertical .manuscript-toc .toc-title {
+  min-height: 0;
+  text-align: center;
+}
+
+.paged-document.is-vertical .manuscript-toc .toc-list,
+.pdf-export-document.is-vertical .manuscript-toc .toc-list,
+.paged-document.is-vertical .manuscript-prose .manuscript-toc .toc-list,
+.pdf-export-document.is-vertical .manuscript-prose .manuscript-toc .toc-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2.2mm;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  margin-block-start: var(--toc-title-gap, 18pt);
+}
+
+.paged-document.is-vertical .manuscript-toc .toc-entry,
+.pdf-export-document.is-vertical .manuscript-toc .toc-entry {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: baseline;
+  min-width: 0;
+  min-height: 0;
+}
+
+.paged-document.is-vertical .manuscript-toc .toc-entry-leader,
+.pdf-export-document.is-vertical .manuscript-toc .toc-entry-leader {
+  width: auto;
+  block-size: 0;
+  transform: translateX(0.22em);
 }
 
 .manuscript-toc-plain {

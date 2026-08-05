@@ -696,7 +696,7 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
   // html2canvasは独自のテキスト描画のため日本語・ルビの折り返しが編集画面とズレる。
   // html-to-image(SVG foreignObject)はブラウザ本来のレンダリングをそのまま使うので、
   // 編集画面と同じ改行・同じルビ配置でPDF化できる。
-  const [htmlToImage, { PDFDocument }] = await Promise.all([import("html-to-image"), import("pdf-lib")]);
+  const [htmlToImage, { PDFDocument, ReadingDirection }] = await Promise.all([import("html-to-image"), import("pdf-lib")]);
   await inlineImagesForPdfExport(root);
   await waitForPdfExportDom(root);
 
@@ -720,6 +720,9 @@ async function buildRasterPdfFromDom(root: HTMLElement, snapshot: PdfExportSnaps
 
   const pdfDoc = await PDFDocument.create();
   pdfDoc.setTitle(snapshot.project.title);
+  if (verticalWriting) {
+    pdfDoc.catalog.getOrCreateViewerPreferences().setReadingDirection(ReadingDirection.R2L);
+  }
 
   // フォント埋め込みCSSは全ページ共通なので1回だけ作る。
   // 原稿に含まれる文字のサブセットだけを埋め込む（全部埋め込むと数十MBになり
@@ -844,7 +847,11 @@ function setPdfExportStyleVars(root: HTMLElement, snapshot: PdfExportSnapshot): 
 function createPdfExportDom(snapshot: PdfExportSnapshot): HTMLElement {
   const page = snapshot.project.pageSettings;
   const root = document.createElement("div");
-  root.className = `pdf-export-document ${page.writingMode === "vertical" ? "is-vertical" : "is-horizontal"}`;
+  root.className = [
+    "pdf-export-document",
+    page.writingMode === "vertical" ? "is-vertical" : "is-horizontal",
+    page.writingMode === "vertical" && page.centerChapterHeadings ? "center-chapter-headings" : ""
+  ].filter(Boolean).join(" ");
   root.lang = "ja";
   root.setAttribute("aria-hidden", "true");
   setPdfExportStyleVars(root, snapshot);
@@ -999,6 +1006,14 @@ const VERTICAL_UNBREAKABLE_BLOCK_SELECTOR = [
   "img:not(.qr-card-image)"
 ].join(",");
 
+function isCenteredVerticalChapterHeading(flow: HTMLElement, element: HTMLElement): boolean {
+  return flow.closest(".center-chapter-headings") !== null && element.matches("h1");
+}
+
+function isVerticalUnbreakableBlock(flow: HTMLElement, element: HTMLElement): boolean {
+  return element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR) || isCenteredVerticalChapterHeading(flow, element);
+}
+
 const PAGE_BOUNDARY_EPSILON_PX = 0.75;
 
 function hasPreviewPageContent(element: HTMLElement): boolean {
@@ -1025,8 +1040,25 @@ function decorateVerticalPunctuation(root: HTMLElement): void {
   }
 
   textNodes.forEach((textNode) => {
+    if (textNode.parentElement?.closest(".vertical-ellipsis, .vertical-dash, .vertical-tate-chu-yoko")) {
+      return;
+    }
     const value = textNode.nodeValue ?? "";
-    const matches = Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g));
+    const matches = [
+      ...Array.from(value.matchAll(/…+|[.．]{3,}|[―—─]{2,}/g)).map((match) => ({
+        index: match.index ?? 0,
+        text: match[0],
+        className: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
+      })),
+      ...Array.from(value.matchAll(/\d+/g))
+        .filter((match) => match[0].length <= 2)
+        .map((match) => ({ index: match.index ?? 0, text: match[0], className: "vertical-tate-chu-yoko" })),
+      ...Array.from(value.matchAll(/[!?！？]{2}/g)).map((match) => ({
+        index: match.index ?? 0,
+        text: match[0],
+        className: "vertical-tate-chu-yoko"
+      }))
+    ].sort((left, right) => left.index - right.index);
     if (matches.length === 0) {
       return;
     }
@@ -1034,15 +1066,18 @@ function decorateVerticalPunctuation(root: HTMLElement): void {
     const fragment = document.createDocumentFragment();
     let offset = 0;
     matches.forEach((match) => {
-      const start = match.index ?? 0;
+      const start = match.index;
+      if (start < offset) {
+        return;
+      }
       if (start > offset) {
         fragment.append(document.createTextNode(value.slice(offset, start)));
       }
       const span = document.createElement("span");
-      span.className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
-      span.textContent = match[0];
+      span.className = match.className;
+      span.textContent = match.text;
       fragment.append(span);
-      offset = start + match[0].length;
+      offset = start + match.text.length;
     });
     if (offset < value.length) {
       fragment.append(document.createTextNode(value.slice(offset)));
@@ -1193,9 +1228,9 @@ function applyVerticalFlowSpacing(flow: HTMLElement, contentWidth: number): void
     const rawRemainder = ((offset % contentWidth) + contentWidth) % contentWidth;
     const remainder = rawRemainder <= PAGE_BOUNDARY_EPSILON_PX ? 0 : rawRemainder;
 
-    if (element.parentElement === flow && element.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR)) {
+    if (element.parentElement === flow && isVerticalUnbreakableBlock(flow, element)) {
       if (blockWidth <= contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
-        const forcedBreak = isForcedPageBreakTarget(element);
+        const forcedBreak = isForcedPageBreakTarget(element) || isCenteredVerticalChapterHeading(flow, element);
         const remainingSpace = remainder > 0 ? contentWidth - remainder : contentWidth;
         const fitsCurrentPage = !forcedBreak && blockWidth <= remainingSpace + PAGE_BOUNDARY_EPSILON_PX;
         const pageStartOffset = fitsCurrentPage
@@ -1275,7 +1310,7 @@ function collectVerticalFlowLayoutIssues(
     if (blockWidth > contentWidth + PAGE_BOUNDARY_EPSILON_PX) {
       issues.push(`${label}が1ページの横幅を超えています。`);
     }
-    if (child.matches(VERTICAL_UNBREAKABLE_BLOCK_SELECTOR) && blockHeight > contentHeight + PAGE_BOUNDARY_EPSILON_PX) {
+    if (isVerticalUnbreakableBlock(flow, child) && blockHeight > contentHeight + PAGE_BOUNDARY_EPSILON_PX) {
       issues.push(`${label}が本文領域の高さを超えています。`);
     }
     if (startPage !== endPage) {
@@ -1627,6 +1662,10 @@ export function EditorShell() {
   const visibleSpreadLabel = pageSpreadLabel(visibleSpread);
   const canGoPreviousPage = clampedVisibleSpreadIndex > 0;
   const canGoNextPage = clampedVisibleSpreadIndex < pageSpreads.length - 1;
+  const leftPageTargetIndex = verticalWriting ? clampedVisibleSpreadIndex + 1 : clampedVisibleSpreadIndex - 1;
+  const rightPageTargetIndex = verticalWriting ? clampedVisibleSpreadIndex - 1 : clampedVisibleSpreadIndex + 1;
+  const canGoLeft = verticalWriting ? canGoNextPage : canGoPreviousPage;
+  const canGoRight = verticalWriting ? canGoPreviousPage : canGoNextPage;
   const pageViewportStyle = {
     "--page-scale": pageFit.scale,
     "--page-step": `${pageFit.pageStep || 1}px`,
@@ -2915,7 +2954,7 @@ export function EditorShell() {
         <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`}>
           <div className="page-viewport" style={pageViewportStyle}>
             <div
-              className={`paged-document ${verticalWriting ? "is-vertical" : "is-horizontal"} ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
+              className={`paged-document ${verticalWriting ? "is-vertical" : "is-horizontal"} ${verticalWriting && project.pageSettings.centerChapterHeadings ? "center-chapter-headings" : ""} ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
               data-estimated-pages={estimatedPages}
               data-rendered-pages={pageFrameCount}
               data-visible-page={spreadStartPageIndex + 1}
@@ -2963,13 +3002,23 @@ export function EditorShell() {
           </div>
           <nav className="page-navigation" aria-label="ページ送り">
             <div className="page-stepper">
-              <button type="button" onClick={() => goToSpreadIndex(clampedVisibleSpreadIndex - 1)} disabled={!canGoPreviousPage} aria-label="前のページへ">
+              <button
+                type="button"
+                onClick={() => goToSpreadIndex(leftPageTargetIndex)}
+                disabled={!canGoLeft}
+                aria-label={verticalWriting ? "次のページへ" : "前のページへ"}
+              >
                 <ChevronLeft size={16} />
-                <Minus size={14} />
+                {verticalWriting ? <Plus size={14} /> : <Minus size={14} />}
               </button>
               <span className="page-stepper-current">{visibleSpreadLabel} / {pageFrameCount}頁</span>
-              <button type="button" onClick={() => goToSpreadIndex(clampedVisibleSpreadIndex + 1)} disabled={!canGoNextPage} aria-label="次のページへ">
-                <Plus size={14} />
+              <button
+                type="button"
+                onClick={() => goToSpreadIndex(rightPageTargetIndex)}
+                disabled={!canGoRight}
+                aria-label={verticalWriting ? "前のページへ" : "次のページへ"}
+              >
+                {verticalWriting ? <Minus size={14} /> : <Plus size={14} />}
                 <ChevronRight size={16} />
               </button>
             </div>
@@ -3142,6 +3191,28 @@ function ProjectPanel({
           縦書き
         </button>
       </div>
+
+      {verticalWriting ? (
+        <div className="field">
+          <span>章見出しの位置</span>
+          <div className="segmented" aria-label="縦書きの章見出し位置">
+            <button
+              className={settings.centerChapterHeadings ? "" : "is-active"}
+              type="button"
+              onClick={() => onPageChange("centerChapterHeadings", false)}
+            >
+              通常
+            </button>
+            <button
+              className={settings.centerChapterHeadings ? "is-active" : ""}
+              type="button"
+              onClick={() => onPageChange("centerChapterHeadings", true)}
+            >
+              ページ中央
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <div className="segmented" aria-label="ページ設定プリセット">
         {(Object.entries(PAGE_PRESETS) as Array<[PagePresetId, (typeof PAGE_PRESETS)[PagePresetId]]>).map(([preset, data]) => (

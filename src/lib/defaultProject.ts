@@ -18,6 +18,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       preset: "kindle",
       fontFamily: "noto-serif-jp",
       writingMode: "horizontal",
+      centerChapterHeadings: false,
       pageWidthMm: 148,
       pageHeightMm: 210,
       marginTopMm: 18,
@@ -41,6 +42,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       preset: "shimauma-a6",
       fontFamily: "noto-serif-jp",
       writingMode: "horizontal",
+      centerChapterHeadings: false,
       pageWidthMm: 111,
       pageHeightMm: 154,
       marginTopMm: 13,
@@ -64,6 +66,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       preset: "shimauma-a5",
       fontFamily: "noto-serif-jp",
       writingMode: "horizontal",
+      centerChapterHeadings: false,
       pageWidthMm: 154,
       pageHeightMm: 216,
       marginTopMm: 16,
@@ -87,6 +90,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       preset: "shimauma-a6-manga",
       fontFamily: "noto-serif-jp",
       writingMode: "horizontal",
+      centerChapterHeadings: false,
       pageWidthMm: 111,
       pageHeightMm: 154,
       marginTopMm: 0,
@@ -110,6 +114,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       preset: "shimauma-a5-manga",
       fontFamily: "noto-serif-jp",
       writingMode: "horizontal",
+      centerChapterHeadings: false,
       pageWidthMm: 154,
       pageHeightMm: 216,
       marginTopMm: 0,
@@ -133,6 +138,7 @@ export const PAGE_PRESETS: Record<PagePresetId, { label: string; settings: PageS
       preset: "custom",
       fontFamily: "noto-serif-jp",
       writingMode: "horizontal",
+      centerChapterHeadings: false,
       pageWidthMm: 105,
       pageHeightMm: 148,
       marginTopMm: 10,
@@ -216,7 +222,11 @@ export function applyPreset(settings: PageSettings, preset: PagePresetId): PageS
     return normalizePageSettings({ ...settings, preset: "custom" });
   }
 
-  return normalizePageSettings({ ...PAGE_PRESETS[preset].settings, writingMode: settings.writingMode });
+  return normalizePageSettings({
+    ...PAGE_PRESETS[preset].settings,
+    writingMode: settings.writingMode,
+    centerChapterHeadings: settings.centerChapterHeadings
+  });
 }
 
 export function normalizeProject(project: ManuscriptProject): ManuscriptProject {
@@ -305,6 +315,9 @@ export function normalizePageSettings(settings: PageSettings): PageSettings {
   const writingMode = WRITING_MODES.has(settings.writingMode ?? presetDefaults.writingMode)
     ? settings.writingMode ?? presetDefaults.writingMode
     : presetDefaults.writingMode;
+  const centerChapterHeadings = typeof settings.centerChapterHeadings === "boolean"
+    ? settings.centerChapterHeadings
+    : false;
   const pageNumberPosition = PAGE_NUMBER_POSITIONS.has(settings.pageNumberPosition ?? presetDefaults.pageNumberPosition)
     ? settings.pageNumberPosition ?? presetDefaults.pageNumberPosition
     : presetDefaults.pageNumberPosition;
@@ -313,6 +326,7 @@ export function normalizePageSettings(settings: PageSettings): PageSettings {
     ...settings,
     fontFamily,
     writingMode,
+    centerChapterHeadings,
     pageNumberPosition,
     imageMaxHeightMm: settings.imageMaxHeightMm ?? presetDefaults.imageMaxHeightMm
   };
