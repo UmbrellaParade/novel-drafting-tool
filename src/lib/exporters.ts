@@ -931,7 +931,8 @@ function epubCss(project: ManuscriptProject): string {
   block-size: 1em;
   visibility: hidden;
   font-feature-settings: normal;
-  line-height: 1;
+  line-height: inherit;
+  transform: translateX(${(1 - project.pageSettings.lineHeight) / 2}em);
   vertical-align: middle;`
     : "";
   const verticalDashMarkerCss = project.pageSettings.writingMode === "vertical"
@@ -1179,19 +1180,16 @@ ${verticalDashMarkerCss}
 }
 
 .vertical-tate-chu-yoko-number {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1em;
-  height: 1em;
-  writing-mode: horizontal-tb;
-  text-combine-upright: none;
-  -webkit-text-combine: none;
+  display: inline;
+  width: auto;
+  height: auto;
+  writing-mode: inherit;
+  text-combine-upright: all;
+  -webkit-text-combine: horizontal;
   font-feature-settings: normal;
-  line-height: 1;
-  text-align: center;
-  vertical-align: middle;
+  line-height: inherit;
+  text-align: inherit;
+  vertical-align: baseline;
 }
 
 .qr-card-body {

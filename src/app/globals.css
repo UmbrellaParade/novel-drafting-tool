@@ -1709,7 +1709,8 @@ h1 {
   block-size: 1em;
   visibility: hidden;
   font-feature-settings: normal;
-  line-height: 1;
+  line-height: inherit;
+  transform: translateX(calc(0.5em - 0.5lh));
   vertical-align: middle;
 }
 
@@ -1743,19 +1744,16 @@ h1 {
 
 .paged-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko-number,
 .pdf-export-document.is-vertical .manuscript-prose .vertical-tate-chu-yoko-number {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1em;
-  height: 1em;
-  writing-mode: horizontal-tb;
-  text-combine-upright: none;
-  -webkit-text-combine: none;
+  display: inline;
+  width: auto;
+  height: auto;
+  writing-mode: inherit;
+  text-combine-upright: all;
+  -webkit-text-combine: horizontal;
   font-feature-settings: normal;
-  line-height: 1;
-  text-align: center;
-  vertical-align: middle;
+  line-height: inherit;
+  text-align: inherit;
+  vertical-align: baseline;
 }
 
 .paged-document.is-vertical .manuscript-prose .horizontal-writing-block .vertical-dash,
@@ -1766,6 +1764,7 @@ h1 {
   block-size: auto;
   visibility: visible;
   line-height: inherit;
+  transform: none;
   vertical-align: baseline;
 }
 
@@ -1783,6 +1782,7 @@ h1 {
   text-combine-upright: none;
   -webkit-text-combine: none;
   line-height: inherit;
+  transform: none;
   vertical-align: baseline;
 }
 
