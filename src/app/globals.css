@@ -976,7 +976,7 @@ h1 {
 .paged-editor-layer {
   position: absolute;
   top: var(--margin-top);
-  left: var(--margin-left);
+  left: calc(var(--margin-left) + var(--horizontal-editor-slot-offset, 0px));
   z-index: 2;
   width: var(--paged-content-width);
   min-height: var(--content-height);
@@ -991,8 +991,8 @@ h1 {
 .paged-document.is-vertical .paged-editor-window {
   position: absolute;
   top: var(--margin-top);
-  left: var(--margin-left);
-  z-index: 2;
+  left: calc(var(--margin-left) + var(--vertical-editor-slot-offset, 0px));
+  z-index: 3;
   display: block;
   width: var(--content-width);
   height: var(--content-height);
@@ -1006,6 +1006,31 @@ h1 {
   z-index: 0;
   width: var(--vertical-flow-width);
   transform: translateX(var(--vertical-visible-page-offset, 0));
+}
+
+.vertical-page-preview-window {
+  position: absolute;
+  top: var(--margin-top);
+  left: calc(var(--margin-left) + var(--vertical-preview-slot-offset, 0px));
+  z-index: 2;
+  width: var(--content-width);
+  height: var(--content-height);
+  overflow: hidden;
+  overflow: clip;
+  cursor: pointer;
+}
+
+.vertical-page-preview-window:focus-visible {
+  outline: 2px solid var(--rain);
+  outline-offset: -2px;
+}
+
+.vertical-page-preview-layer {
+  width: var(--vertical-flow-width);
+  height: var(--content-height);
+  pointer-events: none;
+  user-select: none;
+  transform: translateX(var(--vertical-preview-page-offset, 0));
 }
 
 .page-scroll-track {
@@ -1878,6 +1903,8 @@ h1 {
   writing-mode: horizontal-tb;
   text-orientation: mixed;
   text-combine-upright: none;
+  font-feature-settings: normal;
+  font-variant-east-asian: normal;
 }
 
 .paged-document .horizontal-writing-block {

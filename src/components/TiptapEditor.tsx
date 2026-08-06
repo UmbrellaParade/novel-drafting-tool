@@ -1253,6 +1253,66 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
     }));
   };
 
+  const insertHorizontalTextBelowImage = () => {
+    if (!editor) {
+      return;
+    }
+
+    const target = readSelectedImageTarget(editor) ?? imageSelectionTargetRef.current;
+    const imagePosition = target ? resolveImagePosition(editor, target) : null;
+    if (imagePosition === null) {
+      window.alert("画像を選択してください。");
+      return;
+    }
+
+    const applied = withStablePageStageScroll(editor, () => editor
+      .chain()
+      .focus()
+      .command(({ state, tr }) => {
+        const imageNode = state.doc.nodeAt(imagePosition);
+        const paragraphType = state.schema.nodes.paragraph;
+        const horizontalBlockType = state.schema.nodes.horizontalWritingBlock;
+        if (imageNode?.type.name !== "image" || !paragraphType || !horizontalBlockType) {
+          return false;
+        }
+
+        const $image = state.doc.resolve(imagePosition);
+        if ($image.parent.type.name === "horizontalWritingBlock") {
+          const childIndex = $image.index();
+          const nextChild = childIndex + 1 < $image.parent.childCount ? $image.parent.child(childIndex + 1) : null;
+          const paragraphPosition = imagePosition + imageNode.nodeSize;
+          if (!nextChild || nextChild.type.name !== "paragraph") {
+            tr.insert(paragraphPosition, paragraphType.create());
+          }
+          tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(tr.doc.content.size, paragraphPosition + 1)), 1));
+          return true;
+        }
+
+        if ($image.parent.type.name !== "doc") {
+          return false;
+        }
+
+        const pageBreakBefore = Boolean(imageNode.attrs.pageBreakBefore);
+        const wrappedImage = pageBreakBefore
+          ? imageNode.type.create({ ...imageNode.attrs, pageBreakBefore: false }, imageNode.content, imageNode.marks)
+          : imageNode;
+        const paragraph = paragraphType.create();
+        const horizontalBlock = horizontalBlockType.create(
+          { pageBreakBefore },
+          Fragment.fromArray([wrappedImage, paragraph])
+        );
+        tr.replaceWith(imagePosition, imagePosition + imageNode.nodeSize, horizontalBlock);
+        const paragraphTextPosition = Math.min(tr.doc.content.size, imagePosition + wrappedImage.nodeSize + 2);
+        tr.setSelection(TextSelection.near(tr.doc.resolve(paragraphTextPosition), 1));
+        return true;
+      })
+      .run());
+
+    if (!applied) {
+      window.alert("この画像は現在の配置では横書き本文とまとめられません。");
+    }
+  };
+
   const pageWidth = editor ? readPageWidthPx(editor) : 420;
   const imageWidth = toolbarState.selectedImageWidth ?? Math.round(pageWidth * 0.75);
   const maxImageWidth = Math.max(240, Math.round(pageWidth));
@@ -1409,6 +1469,12 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
             <ScissorsLineDashed size={15} />
             画像前で改ページ
           </button>
+          {verticalWriting ? (
+            <button type="button" onMouseDown={preserveEditorSelection} onClick={insertHorizontalTextBelowImage}>
+              <Rows3 size={15} />
+              画像下に横書き
+            </button>
+          ) : null}
           <input
             className="image-size-number"
             type="number"

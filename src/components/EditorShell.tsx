@@ -89,7 +89,7 @@ type TocEntry = OutlineItem & {
 
 type PageSpread = {
   id: string;
-  pages: number[];
+  pages: Array<number | null>;
 };
 
 type QrDraft = {
@@ -482,14 +482,19 @@ function sameNumberList(left: number[], right: number[]): boolean {
 
 function buildPageSpreads(pageCount: number, writingMode: WritingMode): PageSpread[] {
   const safePageCount = Math.max(1, pageCount);
-  if (writingMode === "vertical" || safePageCount === 1) {
-    return Array.from({ length: safePageCount }, (_, pageIndex) => ({ id: `page-${pageIndex + 1}`, pages: [pageIndex] }));
-  }
-
-  const spreads: PageSpread[] = [{ id: "page-1", pages: [0] }];
+  const spreads: PageSpread[] = [{
+    id: "spread-0-1",
+    pages: writingMode === "vertical" ? [0, null] : [null, 0]
+  }];
   for (let pageIndex = 1; pageIndex < safePageCount; pageIndex += 2) {
-    const pages = pageIndex + 1 < safePageCount ? [pageIndex, pageIndex + 1] : [pageIndex];
-    spreads.push({ id: pages.map((page) => `page-${page + 1}`).join("-"), pages });
+    const nextPageIndex = pageIndex + 1 < safePageCount ? pageIndex + 1 : null;
+    const pages = writingMode === "vertical"
+      ? [nextPageIndex, pageIndex]
+      : [pageIndex, nextPageIndex];
+    spreads.push({
+      id: `spread-${pageIndex + 1}-${nextPageIndex === null ? "blank" : nextPageIndex + 1}`,
+      pages
+    });
   }
   return spreads;
 }
@@ -499,12 +504,20 @@ function findSpreadIndexForPage(spreads: PageSpread[], pageIndex: number): numbe
   return foundIndex >= 0 ? foundIndex : Math.max(0, spreads.length - 1);
 }
 
+function spreadContentPages(spread: PageSpread): number[] {
+  return spread.pages.filter((pageIndex): pageIndex is number => pageIndex !== null);
+}
+
 function pageSpreadLabel(spread: PageSpread): string {
-  if (spread.pages.length <= 1) {
-    return String((spread.pages[0] ?? 0) + 1);
+  const contentPages = spreadContentPages(spread).sort((left, right) => left - right);
+  if (contentPages.includes(0) && spread.pages.includes(null)) {
+    return "0-1";
+  }
+  if (contentPages.length <= 1) {
+    return String((contentPages[0] ?? 0) + 1);
   }
 
-  return `${(spread.pages[0] ?? 0) + 1}-${(spread.pages[spread.pages.length - 1] ?? 0) + 1}`;
+  return `${contentPages[0] + 1}-${contentPages[contentPages.length - 1] + 1}`;
 }
 
 function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -1558,9 +1571,11 @@ export function EditorShell() {
   const [headingPageNumbers, setHeadingPageNumbers] = useState<number[]>([]);
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
   const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
+  const [verticalActivePageIndex, setVerticalActivePageIndex] = useState(0);
   const [fastEditing, setFastEditing] = useState(false);
   const bundledDriveSettings = hasBundledGoogleDriveSettings();
   const pageStageRef = useRef<HTMLDivElement | null>(null);
+  const verticalPreviewLayerRef = useRef<HTMLDivElement | null>(null);
   const visibleSpreadIndexRef = useRef(0);
   const scrollFrameRef = useRef<number | null>(null);
   const scrollLockFrameRef = useRef<number | null>(null);
@@ -1704,10 +1719,24 @@ export function EditorShell() {
   const verticalWriting = writingMode === "vertical";
   const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount, writingMode), [pageFrameCount, writingMode]);
   const clampedVisibleSpreadIndex = Math.max(0, Math.min(visibleSpreadIndex, pageSpreads.length - 1));
-  const visibleSpread = pageSpreads[clampedVisibleSpreadIndex] ?? pageSpreads[0] ?? { id: "page-1", pages: [0] };
-  const spreadStartPageIndex = visibleSpread.pages[0] ?? 0;
+  const visibleSpread = useMemo<PageSpread>(
+    () => pageSpreads[clampedVisibleSpreadIndex] ?? pageSpreads[0] ?? { id: "spread-0-1", pages: [null, 0] },
+    [clampedVisibleSpreadIndex, pageSpreads]
+  );
+  const visibleContentPages = spreadContentPages(visibleSpread);
+  const defaultVisiblePageIndex = visibleContentPages.length > 0 ? Math.min(...visibleContentPages) : 0;
+  const spreadStartPageIndex = verticalWriting && visibleContentPages.includes(verticalActivePageIndex)
+    ? verticalActivePageIndex
+    : defaultVisiblePageIndex;
   const spreadPageCount = Math.max(1, visibleSpread.pages.length);
   const maxSpreadPageCount = pageSpreads.some((spread) => spread.pages.length > 1) ? 2 : 1;
+  const activePageSlotIndex = Math.max(0, visibleSpread.pages.indexOf(spreadStartPageIndex));
+  const adjacentVerticalPageIndex = verticalWriting
+    ? visibleContentPages.find((pageIndex) => pageIndex !== spreadStartPageIndex) ?? null
+    : null;
+  const adjacentVerticalPageSlotIndex = adjacentVerticalPageIndex === null
+    ? -1
+    : visibleSpread.pages.indexOf(adjacentVerticalPageIndex);
   const visibleSpreadLabel = pageSpreadLabel(visibleSpread);
   const canGoPreviousPage = clampedVisibleSpreadIndex > 0;
   const canGoNextPage = clampedVisibleSpreadIndex < pageSpreads.length - 1;
@@ -1721,6 +1750,12 @@ export function EditorShell() {
     "--visible-page-index": spreadStartPageIndex,
     "--visible-page-offset": `calc(-${spreadStartPageIndex} * (var(--page-width) + var(--page-gap)))`,
     "--vertical-visible-page-offset": `calc(-${Math.max(0, pageFrameCount - spreadStartPageIndex - 1)} * var(--content-width))`,
+    "--horizontal-editor-slot-offset": !verticalWriting && visibleSpread.pages[0] === null
+      ? "calc(var(--page-width) + var(--page-gap))"
+      : "0px",
+    "--vertical-editor-slot-offset": verticalWriting && activePageSlotIndex === 1
+      ? "calc(var(--page-width) + var(--page-gap))"
+      : "0px",
     "--spread-width": spreadPageCount > 1 ? "calc(2 * var(--page-width) + var(--page-gap))" : "var(--page-width)",
     width: pageFit.width ? `${pageFit.width}px` : undefined,
     minHeight: pageFit.height ? `${pageFit.height}px` : undefined
@@ -2075,6 +2110,75 @@ export function EditorShell() {
     }
   }, [pageSpreads.length]);
 
+  useEffect(() => {
+    if (!verticalWriting) {
+      return;
+    }
+
+    const contentPages = spreadContentPages(visibleSpread);
+    const defaultPageIndex = contentPages.length > 0 ? Math.min(...contentPages) : 0;
+    setVerticalActivePageIndex((previous) => contentPages.includes(previous) ? previous : defaultPageIndex);
+  }, [verticalWriting, visibleSpread]);
+
+  useLayoutEffect(() => {
+    const target = verticalPreviewLayerRef.current;
+    if (!verticalWriting || adjacentVerticalPageIndex === null || !target) {
+      target?.replaceChildren();
+      return;
+    }
+
+    const stage = pageStageRef.current;
+    const source = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
+    const contentWidth = stage ? readCssLengthPx(stage, "--content-width") : 0;
+    if (!source || contentWidth <= 0) {
+      return;
+    }
+
+    let syncTimer: number | null = null;
+    let layoutFrame: number | null = null;
+    const syncPreview = () => {
+      syncTimer = null;
+      const clone = source.cloneNode(true) as HTMLElement;
+      clone.contentEditable = "false";
+      clone.tabIndex = -1;
+      clone.setAttribute("aria-hidden", "true");
+      clone.removeAttribute("data-vertical-page-flow");
+      clone.classList.remove("ProseMirror-focused");
+      clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => {
+        element.contentEditable = "false";
+      });
+      clone.querySelectorAll<HTMLElement>(".ProseMirror-selectednode").forEach((element) => {
+        element.classList.remove("ProseMirror-selectednode");
+        element.removeAttribute("data-resize-state");
+      });
+      target.replaceChildren(clone);
+      layoutFrame = window.requestAnimationFrame(() => {
+        layoutFrame = null;
+        applyVerticalFlowSpacing(clone, contentWidth);
+      });
+    };
+    const schedulePreviewSync = () => {
+      if (syncTimer !== null) {
+        window.clearTimeout(syncTimer);
+      }
+      syncTimer = window.setTimeout(syncPreview, 500);
+    };
+
+    syncPreview();
+    const observer = new MutationObserver(schedulePreviewSync);
+    observer.observe(source, { attributes: true, characterData: true, childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (syncTimer !== null) {
+        window.clearTimeout(syncTimer);
+      }
+      if (layoutFrame !== null) {
+        window.cancelAnimationFrame(layoutFrame);
+      }
+      target.replaceChildren();
+    };
+  }, [adjacentVerticalPageIndex, layoutContentRevision, layoutPageSettings, pageFrameCount, verticalWriting]);
+
   useLayoutEffect(() => {
     if (pageFit.pageStep <= 0 || pageSpreads.length === 0) {
       return;
@@ -2129,20 +2233,21 @@ export function EditorShell() {
     const handle = window.requestAnimationFrame(() => {
       const stage = pageStageRef.current;
       const prose = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
-      const firstFrame = stage?.querySelector<HTMLElement>(".page-frame");
-      if (!stage || !prose || !firstFrame) {
+      const activeFrame = stage?.querySelector<HTMLElement>(`.page-frame[data-page-index="${spreadStartPageIndex}"]`)
+        ?? stage?.querySelector<HTMLElement>(".page-frame:not(.is-blank)");
+      if (!stage || !prose || !activeFrame) {
         return;
       }
 
       // スマホ表示ではページ枠が非表示（幅0）になり計測が成立しないためスキップする。
       // ここで異常値を採用すると目次のページ番号が壊れた状態で保存されてしまう。
-      if (firstFrame.offsetWidth <= 0) {
+      if (activeFrame.offsetWidth <= 0) {
         return;
       }
 
       const pageGap = stage ? readCssLengthPx(stage, "--page-gap") : 0;
-      const pagePitch = firstFrame.offsetWidth + pageGap;
-      const firstFrameRect = firstFrame.getBoundingClientRect();
+      const pagePitch = activeFrame.offsetWidth + pageGap;
+      const activeFrameRect = activeFrame.getBoundingClientRect();
       const visualPagePitch = pagePitch * pageFit.scale;
       const contentWidth = readCssLengthPx(stage, "--content-width");
       if (pagePitch <= 0 || visualPagePitch <= 0 || (verticalWriting && contentWidth <= 0)) {
@@ -2154,13 +2259,13 @@ export function EditorShell() {
       }
       const measuredContentPages = verticalWriting
         ? measureOccupiedVerticalPages(prose, contentWidth)
-        : measureOccupiedPreviewPages(prose, firstFrameRect.left - spreadStartPageIndex * visualPagePitch, visualPagePitch);
+        : measureOccupiedPreviewPages(prose, activeFrameRect.left - spreadStartPageIndex * visualPagePitch, visualPagePitch);
       const actualPages = measuredContentPages ?? Math.ceil((prose.scrollWidth + 1) / (verticalWriting ? contentWidth : pagePitch));
       const nextCount = Math.max(1, Math.min(actualPages, MAX_PAGE_FRAMES));
       const titleCount = nextCount;
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];
-      const firstFrameLeft = firstFrameRect.left - spreadStartPageIndex * visualPagePitch;
+      const firstFrameLeft = activeFrameRect.left - spreadStartPageIndex * visualPagePitch;
       const proseRect = prose.getBoundingClientRect();
       const proseScale = prose.offsetWidth > 0 ? proseRect.width / prose.offsetWidth : pageFit.scale;
       const verticalPagePitch = contentWidth * (Number.isFinite(proseScale) && proseScale > 0 ? proseScale : pageFit.scale);
@@ -3015,24 +3120,53 @@ export function EditorShell() {
               data-visible-spread={clampedVisibleSpreadIndex + 1}
             >
               <div className="page-frame-track" aria-hidden="true">
-                {visibleSpread.pages.map((pageIndex) => (
+                {visibleSpread.pages.map((pageIndex, slotIndex) => (
                   <section
-                    key={pageIndex}
-                    className={`page-frame ${project.pageSettings.showPageNumber && pageNumberIsTop(project.pageSettings.pageNumberPosition) ? "has-page-number-top" : ""}`.trim()}
-                    data-page-number={pageIndex + 1}
+                    key={`${visibleSpread.id}-${slotIndex}`}
+                    className={`page-frame ${pageIndex === null ? "is-blank" : ""} ${pageIndex !== null && project.pageSettings.showPageNumber && pageNumberIsTop(project.pageSettings.pageNumberPosition) ? "has-page-number-top" : ""}`.trim()}
+                    data-page-index={pageIndex ?? undefined}
+                    data-page-number={pageIndex === null ? (clampedVisibleSpreadIndex === 0 ? 0 : undefined) : pageIndex + 1}
                   >
-                    <header className="page-frame-header">
-                      {pageSectionTitles[pageIndex] ? <span>{pageSectionTitles[pageIndex]}</span> : null}
-                    </header>
-                    {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
-                    {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
-                    <footer className="page-frame-footer" />
-                    {project.pageSettings.showPageNumber ? (
-                      <span className={`page-frame-page-number ${pageNumberPositionClass(project.pageSettings.pageNumberPosition)}`}>{pageIndex + 1}</span>
-                    ) : null}
+                    {pageIndex === null ? null : (
+                      <>
+                        <header className="page-frame-header">
+                          {pageSectionTitles[pageIndex] ? <span>{pageSectionTitles[pageIndex]}</span> : null}
+                        </header>
+                        {project.pageSettings.showBleedGuide ? <div className="page-bleed-guide" /> : null}
+                        {project.pageSettings.showSafeArea ? <div className="page-safe-guide" /> : null}
+                        <footer className="page-frame-footer" />
+                        {project.pageSettings.showPageNumber ? (
+                          <span className={`page-frame-page-number ${pageNumberPositionClass(project.pageSettings.pageNumberPosition)}`}>{pageIndex + 1}</span>
+                        ) : null}
+                      </>
+                    )}
                   </section>
                 ))}
               </div>
+              {verticalWriting && adjacentVerticalPageIndex !== null && adjacentVerticalPageSlotIndex >= 0 ? (
+                <div
+                  className="vertical-page-preview-window"
+                  style={{
+                    "--vertical-preview-slot-offset": adjacentVerticalPageSlotIndex === 1
+                      ? "calc(var(--page-width) + var(--page-gap))"
+                      : "0px",
+                    "--vertical-preview-page-offset": `calc(-${Math.max(0, pageFrameCount - adjacentVerticalPageIndex - 1)} * var(--content-width))`
+                  } as React.CSSProperties}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${adjacentVerticalPageIndex + 1}ページを編集`}
+                  title="クリックしてこのページを編集"
+                  onClick={() => setVerticalActivePageIndex(adjacentVerticalPageIndex)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setVerticalActivePageIndex(adjacentVerticalPageIndex);
+                    }
+                  }}
+                >
+                  <div ref={verticalPreviewLayerRef} className="vertical-page-preview-layer" />
+                </div>
+              ) : null}
               <div className="paged-editor-window">
                 <div className="paged-editor-layer">
                   <TiptapEditor

@@ -392,6 +392,13 @@ export const VerticalPunctuationExtension = Extension.create({
                 return;
               }
 
+              const $position = state.doc.resolve(position);
+              for (let depth = $position.depth; depth > 0; depth -= 1) {
+                if ($position.node(depth).type.name === "horizontalWritingBlock") {
+                  return;
+                }
+              }
+
               for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]/g)) {
                 const start = position + (match.index ?? 0);
                 const className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";

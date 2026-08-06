@@ -1010,6 +1010,8 @@ img {
   writing-mode: horizontal-tb;
   text-orientation: mixed;
   text-combine-upright: none;
+  font-feature-settings: normal;
+  font-variant-east-asian: normal;
   break-before: page;
   break-after: page;
   page-break-before: always;
