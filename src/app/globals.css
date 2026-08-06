@@ -2114,6 +2114,16 @@ h1 {
   transform: translateY(calc(0mm - var(--toc-page-number-offset, 0mm)));
 }
 
+.paged-document.is-vertical .manuscript-toc .vertical-dash::after,
+.pdf-export-document.is-vertical .manuscript-toc .vertical-dash::after {
+  content: "";
+  inset: 0.06em auto 0.06em 50%;
+  display: block;
+  width: max(1px, 0.08em);
+  transform: translateX(-50%);
+  background: currentColor;
+}
+
 .manuscript-toc-plain {
   padding: 0;
   border: 0;
