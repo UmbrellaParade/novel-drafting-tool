@@ -875,6 +875,38 @@ h1 {
   color: #1f1d1a;
 }
 
+.blank-page-notice {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  width: min(76%, 90mm);
+  padding: 6mm 5mm;
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 2mm;
+  border: 0.3mm solid #b8aa96;
+  border-radius: 2mm;
+  background: #f7f4ee;
+  color: #5d5449;
+  font-family: var(--font-sans), sans-serif;
+  font-size: 9pt;
+  line-height: 1.55;
+  text-align: center;
+  pointer-events: none;
+}
+
+.blank-page-notice strong {
+  color: #312b25;
+  font-size: 12pt;
+  line-height: 1.35;
+}
+
+.blank-page-notice span {
+  display: block;
+}
+
 .page-frame-header,
 .page-frame-footer {
   position: absolute;

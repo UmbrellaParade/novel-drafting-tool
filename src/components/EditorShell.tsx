@@ -3127,6 +3127,13 @@ export function EditorShell() {
                     data-page-index={pageIndex ?? undefined}
                     data-page-number={pageIndex === null ? (clampedVisibleSpreadIndex === 0 ? 0 : undefined) : pageIndex + 1}
                   >
+                    {pageIndex === null && clampedVisibleSpreadIndex === 0 ? (
+                      <div className="blank-page-notice">
+                        <strong>0ページ（印刷されません）</strong>
+                        <span>表紙の裏側を示す見開き確認用ページです。</span>
+                        <span>PDF・DOCX・EPUBには出力されません。</span>
+                      </div>
+                    ) : null}
                     {pageIndex === null ? null : (
                       <>
                         <header className="page-frame-header">
