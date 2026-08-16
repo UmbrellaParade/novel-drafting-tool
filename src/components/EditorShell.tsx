@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Cloud,
   CloudCog,
+  ExternalLink,
   FileDown,
   FileJson,
   FilePlus,
@@ -3008,10 +3009,32 @@ export function EditorShell() {
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-mark">UP</span>
-          <div>
+          <div className="brand-title">
             <p className="eyebrow">Umbrella Parade</p>
             <h1>原稿制作ツール</h1>
           </div>
+          <nav className="publishing-links" aria-label="出版サービス">
+            <a
+              className="publishing-link"
+              href="https://kdp.amazon.co.jp/ja_JP/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="KDPを新しいタブで開く"
+            >
+              <span>KDP</span>
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+            <a
+              className="publishing-link"
+              href="https://publish.n-pri.jp/"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="しまうま出版を新しいタブで開く"
+            >
+              <span>しまうま出版</span>
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          </nav>
         </div>
         <div className="topbar-editor-tools">
           <TiptapToolbar

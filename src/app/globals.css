@@ -110,6 +110,46 @@ button:disabled {
   min-width: 170px;
 }
 
+.brand-title {
+  flex: 0 0 auto;
+}
+
+.publishing-links {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 3px;
+}
+
+.publishing-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid #cfc3b4;
+  border-radius: 6px;
+  background: #fffdf8;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.publishing-link:hover {
+  border-color: var(--rain);
+  background: #f2f8f6;
+  color: #1f5c54;
+}
+
+.publishing-link:focus-visible {
+  outline: 2px solid var(--rain);
+  outline-offset: 2px;
+}
+
 .brand-mark {
   display: grid;
   place-items: center;
@@ -2996,6 +3036,11 @@ h1 {
   .brand-lockup {
     width: 100%;
     min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .publishing-links {
+    margin-left: auto;
   }
 
   .brand-mark {
