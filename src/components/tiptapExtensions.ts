@@ -1,7 +1,30 @@
-import { Extension, getRenderedAttributes, Mark, mergeAttributes, Node } from "@tiptap/core";
+import { Extension, getRenderedAttributes, isNodeEmpty, Mark, mergeAttributes, Node } from "@tiptap/core";
 import { DOMSerializer, type DOMOutputSpec, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
+
+// Only the selected block needs a placeholder; no viewport probing is necessary.
+export const ManuscriptPlaceholder = Extension.create({
+  name: "manuscriptPlaceholder",
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    return [new Plugin({
+      props: {
+        decorations({ doc, selection }) {
+          if (!editor.isEditable) return null;
+          const resolved = selection.$anchor;
+          const node = resolved.depth > 0 ? resolved.node(1) : resolved.nodeAfter;
+          if (!node?.isTextblock || !isNodeEmpty(node)) return null;
+          const position = resolved.depth > 0 ? resolved.before(1) : resolved.pos;
+          return DecorationSet.create(doc, [Decoration.node(position, position + node.nodeSize, {
+            class: isNodeEmpty(doc) ? "is-empty is-editor-empty" : "is-empty",
+            "data-placeholder": "本文を書きはじめる"
+          })]);
+        }
+      }
+    })];
+  }
+});
 
 function readFontSize(element: HTMLElement): string | null {
   return element.style.fontSize || element.getAttribute("data-font-size") || null;

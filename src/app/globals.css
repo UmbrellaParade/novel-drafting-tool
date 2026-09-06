@@ -1914,14 +1914,6 @@ h1 {
   writing-mode: vertical-rl;
 }
 
-.page-stage.is-fast-editing .manuscript-prose {
-  text-rendering: optimizeSpeed;
-}
-
-.page-stage.is-fast-editing .paged-editor-layer {
-  will-change: auto;
-}
-
 .manuscript-prose p {
   margin: 0 0 var(--paragraph-spacing);
   orphans: 2;

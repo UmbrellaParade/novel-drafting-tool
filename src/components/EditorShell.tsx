@@ -57,7 +57,6 @@ const tabLabels: Record<MobileTab, string> = {
 };
 
 const PAGE_GAP_MM = 14;
-const MAX_PAGE_FRAMES = 160;
 const DOCUMENT_CHAPTER_TITLE = "本文";
 const AUTOSAVE_DELAY_MS = 1600;
 const CONTENT_COMMIT_DELAY_MS = 450;
@@ -943,7 +942,10 @@ async function measurePdfExportLayout(snapshot: PdfExportSnapshot): Promise<PdfE
     }
 
     const measuredVerticalPages = verticalWriting ? measureOccupiedVerticalPages(flow, contentWidth) : null;
-    const pageCount = Math.max(1, Math.min(measuredVerticalPages ?? Math.ceil((flow.scrollWidth + 1) / pagePitch), MAX_PAGE_FRAMES));
+    const pageCount = Math.max(1, measuredVerticalPages ?? Math.ceil((flow.scrollWidth + 1) / pagePitch));
+    if (!Number.isFinite(pageCount)) {
+      throw new Error("PDFのページ数を測定できませんでした。");
+    }
     const sectionTitles = Array.from({ length: pageCount }, () => "");
     const firstContentLeft = contentWindow.getBoundingClientRect().left;
     const firstContentRight = flow.getBoundingClientRect().right;
@@ -1715,7 +1717,7 @@ export function EditorShell() {
     measuredPages.pageSettings === layoutPageSettings
       ? measuredPages.count
       : null;
-  const pageFrameCount = Math.max(1, Math.min(measuredPageCount ?? estimatedPages, MAX_PAGE_FRAMES));
+  const pageFrameCount = Math.max(1, measuredPageCount ?? estimatedPages);
   const writingMode = layoutPageSettings?.writingMode ?? "horizontal";
   const verticalWriting = writingMode === "vertical";
   const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount, writingMode), [pageFrameCount, writingMode]);
@@ -2271,7 +2273,10 @@ export function EditorShell() {
         ? measureOccupiedVerticalPages(prose, contentWidth)
         : measureOccupiedPreviewPages(prose, activeFrameRect.left - spreadStartPageIndex * visualPagePitch, visualPagePitch);
       const actualPages = measuredContentPages ?? Math.ceil((prose.scrollWidth + 1) / (verticalWriting ? contentWidth : pagePitch));
-      const nextCount = Math.max(1, Math.min(actualPages, MAX_PAGE_FRAMES));
+      if (!Number.isFinite(actualPages)) {
+        return;
+      }
+      const nextCount = Math.max(1, actualPages);
       const titleCount = nextCount;
       const nextTitles = Array.from({ length: titleCount }, () => "");
       const nextHeadingPageNumbers: number[] = [];

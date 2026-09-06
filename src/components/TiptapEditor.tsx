@@ -2,13 +2,11 @@
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import Image from "@tiptap/extension-image";
-import Placeholder from "@tiptap/extension-placeholder";
 import TextAlign from "@tiptap/extension-text-align";
 import { Fragment, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { NodeSelection, TextSelection } from "@tiptap/pm/state";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { flushSync } from "react-dom";
 import {
   AlignCenter,
   AlignLeft,
@@ -33,7 +31,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
-import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, HorizontalWritingBlockNode, ImageAssetIdExtension, ImageDimensionSyncExtension, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
+import { BlockFontSizeExtension, BlockLineHeightExtension, ColumnBlockNode, FontSizeMark, HorizontalWritingBlockNode, ImageAssetIdExtension, ImageDimensionSyncExtension, ManuscriptPlaceholder, PageBreakBeforeExtension, PageBreakNode, QrCardNode, RubyTextNode, TableOfContentsNode, VerticalPunctuationExtension } from "./tiptapExtensions";
 import { internImageBlob, internImageDataUrl } from "@/lib/imageAssets";
 
 type TiptapEditorProps = {
@@ -131,6 +129,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   const onPasteLayoutHintsRef = useRef(onPasteLayoutHints);
   const onTableOfContentsLinkRef = useRef(onTableOfContentsLink);
   const lastDirectTypingActivityRef = useRef(0);
+  const lastCommittedDocRef = useRef<ProseMirrorNode | null>(null);
   // getHTML()のdebounce用タイマー（画像リサイズ中の連続シリアライズを防止）
   const onUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onUpdateIdleRef = useRef<number | null>(null);
@@ -171,11 +170,16 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         if (updatedEditor.isDestroyed) {
           return;
         }
+        if (updatedEditor.state.doc === lastCommittedDocRef.current) {
+          return;
+        }
         if (updatedEditor.view.composing) {
           scheduleHtmlCommit(updatedEditor, EDITOR_HTML_BLUR_COMMIT_DELAY_MS);
           return;
         }
+        const doc = updatedEditor.state.doc;
         onChangeRef.current(updatedEditor.getHTML());
+        lastCommittedDocRef.current = doc;
       };
       if (window.requestIdleCallback) {
         onUpdateIdleRef.current = window.requestIdleCallback(commitHtml, { timeout: EDITOR_HTML_IDLE_TIMEOUT_MS });
@@ -212,9 +216,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       TextAlign.configure({
         types: ["heading", "paragraph"]
       }),
-      Placeholder.configure({
-        placeholder: "本文を書きはじめる"
-      }),
+      ManuscriptPlaceholder,
       PageBreakBeforeExtension,
       RubyTextNode,
       TableOfContentsNode,
@@ -223,6 +225,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
     ],
     content,
     immediatelyRender: false,
+    shouldRerenderOnTransaction: false,
     editorProps: {
       attributes: {
         autocapitalize: "off",
@@ -255,7 +258,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
           event.key === "Tab";
         if (isEditingKey) {
           lastDirectTypingActivityRef.current = Date.now();
-          onTypingActivity?.();
+          onTypingActivityRef.current?.();
         }
         return false;
       },
@@ -280,7 +283,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       handleScrollToSelection: () => true,
       handlePaste: (_view, event) => {
         lastDirectTypingActivityRef.current = Date.now();
-        onTypingActivity?.();
+        onTypingActivityRef.current?.();
         const clipboard = event.clipboardData;
         const pastedEditor = editorRef.current;
         if (!clipboard || !pastedEditor) {
@@ -308,7 +311,11 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         return false;
       }
     },
+    onCreate: ({ editor }) => {
+      lastCommittedDocRef.current ??= editor.state.doc;
+    },
     onUpdate: ({ editor, transaction }) => {
+      lastCommittedDocRef.current ??= transaction.before;
       // キー入力直後のupdateでは同じ通知を二重に走らせない。
       if (!transaction.getMeta("skipTypingActivity") && Date.now() - lastDirectTypingActivityRef.current > 120) {
         onTypingActivityRef.current?.();
@@ -494,7 +501,7 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
 
       frameHandle = window.requestAnimationFrame(() => {
         frameHandle = null;
-        flushSync(refreshToolbarState);
+        refreshToolbarState();
       });
     };
     const scheduleSelectedMediaRefresh = () => {
@@ -503,11 +510,7 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
       }
     };
     const refreshAfterImageDimensionSync = () => {
-      if (frameHandle !== null) {
-        window.cancelAnimationFrame(frameHandle);
-        frameHandle = null;
-      }
-      flushSync(refreshToolbarState);
+      scheduleRefreshToolbarState();
     };
 
     refreshToolbarState();

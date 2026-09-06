@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { DOMSerializer, Fragment } from "@tiptap/pm/model";
 import QRCode from "qrcode";
@@ -15,6 +15,7 @@ export default function EditorBrowserFixture() {
   const [report, setReport] = useState("Ready");
   const [htmlLength, setHtmlLength] = useState(0);
   const [vertical, setVertical] = useState(false);
+  const commits = useRef<string[]>([]);
   useEffect(() => {
     void QRCode.toDataURL("https://example.com", { width: 420 }).then((src) => {
       const canvas = document.createElement("canvas");
@@ -40,6 +41,23 @@ export default function EditorBrowserFixture() {
     };
     setReport("Running");
     try {
+      const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+      const unchangedCommits = commits.current.length;
+      editor.view.dom.focus();
+      editor.view.dom.blur();
+      await pause(650);
+      check(commits.current.length === unchangedCommits, "Unchanged focus/blur does not serialize the manuscript");
+      editor.commands.setTextSelection(2);
+      editor.commands.insertContent("保存確認");
+      editor.view.dom.focus();
+      editor.view.dom.blur();
+      await pause(650);
+      check(commits.current.length === unchangedCommits + 1 && commits.current.at(-1)?.includes("保存確認"), "Changed focus/blur commits the latest text exactly once");
+      editor.view.dom.focus();
+      editor.view.dom.blur();
+      await pause(650);
+      check(commits.current.length === unchangedCommits + 1, "Repeated blur does not reserialize committed text");
+
       const positions: Record<string, number[]> = { image: [], qrCard: [] };
       editor.state.doc.descendants((node, pos) => { positions[node.type.name]?.push(pos); });
       const qrPos = positions.qrCard[0];
@@ -82,6 +100,15 @@ export default function EditorBrowserFixture() {
       check(editor.getHTML() === html, "HTML save/read round trip preserves serialized content and attributes");
       check(!editor.view.dom.querySelector(".horizontal-writing-block .vertical-dash"), "Horizontal block has no vertical decorations");
 
+      editor.commands.setContent("<p></p>");
+      editor.commands.setTextSelection(1);
+      check(editor.view.dom.querySelector("p")?.getAttribute("data-placeholder") === "本文を書きはじめる", "Empty current paragraph keeps its placeholder");
+      editor.commands.insertContent("本文");
+      check(!editor.view.dom.querySelector("[data-placeholder]"), "Typing removes the empty paragraph placeholder");
+      editor.commands.setContent("<p>本文</p><p></p><p></p>");
+      editor.commands.setTextSelection(5);
+      check(editor.view.dom.querySelectorAll("[data-placeholder]").length === 1, "Only the selected empty top-level paragraph has a placeholder");
+
       const text = "日本語13……―！！。画像やQRのある長編原稿を編集します。";
       const blocks: string[] = [];
       for (let i = 0; i < 1200; i++) blocks.push(`<p>${text.repeat(3)}</p>${i % 30 === 0 ? image.outerHTML + qrDom.outerHTML : ""}`);
@@ -123,7 +150,7 @@ export default function EditorBrowserFixture() {
     <div className="topbar-editor-tools"><TiptapToolbar editor={editor} verticalWriting={vertical} /></div>
     <div className="page-stage" style={{ height: 500, padding: 16, display: "block", background: "white", "--content-width": "600px", "--content-height": "450px", "--page-width": "650px", "--margin-left": "20px" } as React.CSSProperties}>
       <style>{`.qa-editor .manuscript-prose { columns: auto; width: 600px; height: auto; min-height: 450px; font-size: 16px; line-height: 1.8; writing-mode: ${vertical ? "vertical-rl" : "horizontal-tb"}; }`}</style>
-      <div className="qa-editor">{content && <TiptapEditor content={content} onChange={(html) => setHtmlLength(html.length)} onReady={setEditor} />}</div>
+      <div className="qa-editor">{content && <TiptapEditor content={content} onChange={(html) => { commits.current.push(html); setHtmlLength(html.length); }} onReady={setEditor} />}</div>
     </div>
   </main>;
 }
