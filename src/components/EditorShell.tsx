@@ -1838,7 +1838,9 @@ export function EditorShell() {
     }, FAST_EDITING_RESET_MS);
   }, [restoreEditingScrollLock]);
 
-  const readLatestEditorContent = useCallback(() => pendingChapterContentRef.current ?? activeEditor?.getHTML() ?? null, [activeEditor]);
+  const readLatestEditorContent = useCallback(() => activeEditor && !activeEditor.isDestroyed
+    ? activeEditor.getHTML()
+    : pendingChapterContentRef.current, [activeEditor]);
 
   const projectWithLatestContent = useCallback(
     (source: ManuscriptProject) => {
@@ -2139,6 +2141,13 @@ export function EditorShell() {
     let layoutFrame: number | null = null;
     const syncPreview = () => {
       syncTimer = null;
+      if (fastEditingRef.current || activeEditor?.view.composing) {
+        syncTimer = window.setTimeout(syncPreview, 250);
+        return;
+      }
+      if (layoutFrame !== null) {
+        window.cancelAnimationFrame(layoutFrame);
+      }
       const clone = source.cloneNode(true) as HTMLElement;
       clone.contentEditable = "false";
       clone.tabIndex = -1;
@@ -2178,7 +2187,7 @@ export function EditorShell() {
       }
       target.replaceChildren();
     };
-  }, [adjacentVerticalPageIndex, layoutContentRevision, layoutPageSettings, pageFrameCount, verticalWriting]);
+  }, [activeEditor, adjacentVerticalPageIndex, layoutContentRevision, layoutPageSettings, pageFrameCount, verticalWriting]);
 
   useLayoutEffect(() => {
     if (pageFit.pageStep <= 0 || pageSpreads.length === 0) {
@@ -2904,11 +2913,14 @@ export function EditorShell() {
     }
 
     const template = getQrCardTemplateId(nextLink.template);
-    const src = await QRCode.toDataURL(nextLink.url, {
+    const previousTemplate = getQrCardTemplateId(previousLink.template);
+    const needsNewCode = previousLink.url !== nextLink.url
+      || QR_CARD_TEMPLATES[previousTemplate].qrDark !== QR_CARD_TEMPLATES[template].qrDark;
+    const src = needsNewCode ? await QRCode.toDataURL(nextLink.url, {
       margin: 1,
       width: 420,
       color: { dark: QR_CARD_TEMPLATES[template].qrDark, light: "#ffffff" }
-    });
+    }) : null;
 
     activeEditor
       .chain()
@@ -2927,7 +2939,7 @@ export function EditorShell() {
               url: nextLink.url,
               title: nextLink.name,
               description: nextLink.description,
-              src,
+              src: src ?? node.attrs.src,
               template,
               ...qrTextSizeSettings(nextLink),
               label: nextLink.category || "記録室リンク"

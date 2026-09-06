@@ -109,18 +109,15 @@ function selectedVerticalPageCenterBlocks(editor: Editor): Array<{ node: ProseMi
     ? selection.$from.before(1)
     : null;
   const blocks: Array<{ node: ProseMirrorNode; position: number }> = [];
-
-  doc.forEach((node, position) => {
-    if (!VERTICAL_PAGE_CENTER_BLOCK_TYPES.has(node.type.name)) {
-      return;
-    }
-
-    const selected = selectedTopLevelPosition !== null
-      ? position === selectedTopLevelPosition
-      : selection.to > position && selection.from < position + node.nodeSize;
-    if (selected) {
+  if (selectedTopLevelPosition !== null) {
+    const node = selection.$from.node(1);
+    return VERTICAL_PAGE_CENTER_BLOCK_TYPES.has(node.type.name) ? [{ node, position: selectedTopLevelPosition }] : [];
+  }
+  doc.nodesBetween(selection.from, selection.to, (node, position) => {
+    if (VERTICAL_PAGE_CENTER_BLOCK_TYPES.has(node.type.name)) {
       blocks.push({ node, position });
     }
+    return false;
   });
 
   return blocks;
@@ -171,6 +168,13 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       onUpdateTimerRef.current = null;
       const commitHtml = () => {
         onUpdateIdleRef.current = null;
+        if (updatedEditor.isDestroyed) {
+          return;
+        }
+        if (updatedEditor.view.composing) {
+          scheduleHtmlCommit(updatedEditor, EDITOR_HTML_BLUR_COMMIT_DELAY_MS);
+          return;
+        }
         onChangeRef.current(updatedEditor.getHTML());
       };
       if (window.requestIdleCallback) {
@@ -327,6 +331,49 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
       onReady?.(null);
     };
   }, [editor, onReady]);
+
+  useEffect(() => {
+    if (!editor) {
+      return;
+    }
+    let resizing = false;
+    const startResize = (event: Event) => {
+      if (event.target instanceof Element && event.target.closest("[data-resize-handle]")) {
+        resizing = true;
+        onTypingActivityRef.current?.();
+      }
+    };
+    const continueResize = () => {
+      if (resizing) {
+        onTypingActivityRef.current?.();
+      }
+    };
+    const endResize = () => {
+      if (resizing) {
+        resizing = false;
+        onTypingActivityRef.current?.();
+      }
+    };
+    const dom = editor.view.dom;
+    dom.addEventListener("mousedown", startResize, true);
+    dom.addEventListener("touchstart", startResize, { capture: true, passive: true });
+    document.addEventListener("mousemove", continueResize, { passive: true });
+    document.addEventListener("touchmove", continueResize, { passive: true });
+    document.addEventListener("mouseup", endResize);
+    document.addEventListener("touchend", endResize);
+    document.addEventListener("touchcancel", endResize);
+    window.addEventListener("blur", endResize);
+    return () => {
+      dom.removeEventListener("mousedown", startResize, true);
+      dom.removeEventListener("touchstart", startResize, true);
+      document.removeEventListener("mousemove", continueResize);
+      document.removeEventListener("touchmove", continueResize);
+      document.removeEventListener("mouseup", endResize);
+      document.removeEventListener("touchend", endResize);
+      document.removeEventListener("touchcancel", endResize);
+      window.removeEventListener("blur", endResize);
+    };
+  }, [editor]);
 
   // コンポーネントアンマウント時にタイマーをクリア
   useEffect(() => {
@@ -842,7 +889,9 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
           if (!node || node.type.name !== "qrCard") {
             return false;
           }
-
+          if (parseImageDimension(node.attrs.width) === nextWidth) {
+            return false;
+          }
           tr.setNodeMarkup(position, undefined, { ...node.attrs, width: nextWidth }, node.marks);
           return true;
         })
@@ -880,7 +929,9 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
           if (!node || node.type.name !== "qrCard") {
             return false;
           }
-
+          if (parseImageDimension(node.attrs.height) === nextHeight) {
+            return false;
+          }
           tr.setNodeMarkup(position, undefined, { ...node.attrs, height: nextHeight }, node.marks);
           return true;
         })

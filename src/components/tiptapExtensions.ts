@@ -1,5 +1,5 @@
-import { Extension, Mark, mergeAttributes, Node } from "@tiptap/core";
-import type { DOMOutputSpec, Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Extension, getRenderedAttributes, Mark, mergeAttributes, Node } from "@tiptap/core";
+import { DOMSerializer, type DOMOutputSpec, type Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 
@@ -213,9 +213,9 @@ type ImageDimensionEntry = {
   pageBreakBefore: boolean;
 };
 
-function imageDimensionEntries(doc: ProseMirrorNode): ImageDimensionEntry[] {
+function imageDimensionEntries(doc: ProseMirrorNode, from = 0, to = doc.content.size): ImageDimensionEntry[] {
   const entries: ImageDimensionEntry[] = [];
-  doc.descendants((node, position) => {
+  doc.nodesBetween(from, to, (node, position) => {
     if (node.type.name === "image") {
       entries.push({
         position,
@@ -226,38 +226,6 @@ function imageDimensionEntries(doc: ProseMirrorNode): ImageDimensionEntry[] {
     }
   });
   return entries;
-}
-
-function sameImageDimensions(left: ImageDimensionEntry[], right: ImageDimensionEntry[]): boolean {
-  return left.length === right.length && left.every((entry, index) => (
-    entry.width === right[index].width &&
-    entry.height === right[index].height &&
-    entry.pageBreakBefore === right[index].pageBreakBefore
-  ));
-}
-
-function rangeContainsImage(doc: ProseMirrorNode, from: number, to: number): boolean {
-  const start = Math.max(0, Math.min(doc.content.size, from));
-  const end = Math.max(start, Math.min(doc.content.size, to));
-  let containsImage = doc.nodeAt(start)?.type.name === "image";
-  doc.nodesBetween(Math.max(0, start - 1), Math.min(doc.content.size, Math.max(end, start + 1)), (node) => {
-    if (node.type.name === "image") {
-      containsImage = true;
-      return false;
-    }
-    return !containsImage;
-  });
-  return containsImage;
-}
-
-function imageMayHaveChanged(previousDoc: ProseMirrorNode, nextDoc: ProseMirrorNode): boolean {
-  const start = previousDoc.content.findDiffStart(nextDoc.content);
-  if (start === null) {
-    return false;
-  }
-
-  const end = previousDoc.content.findDiffEnd(nextDoc.content) ?? { a: start, b: start };
-  return rangeContainsImage(previousDoc, start, end.a) || rangeContainsImage(nextDoc, start, end.b);
 }
 
 function syncRenderedImageDimensions(view: EditorView, entry: ImageDimensionEntry): void {
@@ -382,52 +350,69 @@ export const VerticalPunctuationExtension = Extension.create({
 
   addProseMirrorPlugins() {
     return [
-      new Plugin({
+      new Plugin<DecorationSet>({
+        state: {
+          init: (_config, state) => DecorationSet.create(state.doc, punctuationDecorations(state.doc)),
+          apply: (transaction, previous, oldState, newState) => {
+            if (!transaction.docChanged) {
+              return previous;
+            }
+
+            const mapped = previous.map(transaction.mapping, newState.doc);
+            const start = oldState.doc.content.findDiffStart(newState.doc.content);
+            if (start === null) {
+              return mapped;
+            }
+            const end = oldState.doc.content.findDiffEnd(newState.doc.content)?.b ?? start;
+            const $from = newState.doc.resolve(Math.min(start, end));
+            const $to = newState.doc.resolve(Math.max(start, end));
+            // Rebuild whole changed blocks so split/join and digit-run boundaries stay correct.
+            const from = $from.depth > 0 ? $from.before(1) : $from.pos;
+            const to = $to.depth > 0 ? $to.after(1) : $to.pos;
+            const outdated = mapped.find(from, to).filter((decoration) => decoration.from < to && decoration.to > from);
+            return mapped.remove(outdated).add(newState.doc, punctuationDecorations(newState.doc, from, to));
+          }
+        },
         props: {
-          decorations: (state) => {
-            const decorations: Decoration[] = [];
-
-            state.doc.descendants((node, position) => {
-              if (!node.isText || !node.text) {
-                return;
-              }
-
-              const $position = state.doc.resolve(position);
-              for (let depth = $position.depth; depth > 0; depth -= 1) {
-                if ($position.node(depth).type.name === "horizontalWritingBlock") {
-                  return;
-                }
-              }
-
-              for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]/g)) {
-                const start = position + (match.index ?? 0);
-                const className = /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis";
-                decorations.push(Decoration.inline(start, start + match[0].length, { class: className }));
-              }
-
-              for (const match of node.text.matchAll(/\d+/g)) {
-                if (match[0].length > 2) {
-                  continue;
-                }
-                const start = position + (match.index ?? 0);
-                decorations.push(Decoration.inline(start, start + match[0].length, {
-                  class: "vertical-tate-chu-yoko vertical-tate-chu-yoko-number"
-                }));
-              }
-
-              for (const match of node.text.matchAll(/[!?！？]{2}/g)) {
-                const start = position + (match.index ?? 0);
-                decorations.push(Decoration.inline(start, start + match[0].length, { class: "vertical-tate-chu-yoko" }));
-              }
-            });
-
-            return DecorationSet.create(state.doc, decorations);
+          decorations(state) {
+            return this.getState(state);
           }
         }
       })
     ];
   }
 });
+
+function punctuationDecorations(doc: ProseMirrorNode, from = 0, to = doc.content.size): Decoration[] {
+  const decorations: Decoration[] = [];
+  doc.nodesBetween(from, to, (node, position) => {
+    if (node.type.name === "horizontalWritingBlock") {
+      return false;
+    }
+    if (!node.isText || !node.text) {
+      return;
+    }
+    for (const match of node.text.matchAll(/…+|[.．]{3,}|[―—─]/g)) {
+      const start = position + (match.index ?? 0);
+      decorations.push(Decoration.inline(start, start + match[0].length, {
+        class: /[―—─]/.test(match[0]) ? "vertical-dash" : "vertical-ellipsis"
+      }));
+    }
+    for (const match of node.text.matchAll(/\d+/g)) {
+      if (match[0].length <= 2) {
+        const start = position + (match.index ?? 0);
+        decorations.push(Decoration.inline(start, start + match[0].length, {
+          class: "vertical-tate-chu-yoko vertical-tate-chu-yoko-number"
+        }));
+      }
+    }
+    for (const match of node.text.matchAll(/[!?！？]{2}/g)) {
+      const start = position + (match.index ?? 0);
+      decorations.push(Decoration.inline(start, start + match[0].length, { class: "vertical-tate-chu-yoko" }));
+    }
+  });
+  return decorations;
+}
 
 // 画像ノードに data-asset-id を保持させる。
 // 画像バイナリはIndexedDB側（imageAssets.ts）にあり、srcは実行時のみ有効なblob: URL。
@@ -463,25 +448,25 @@ export const ImageDimensionSyncExtension = Extension.create({
     return [
       new Plugin({
         view: (initialView) => {
-          let dimensions = imageDimensionEntries(initialView.state.doc);
           const initialSyncFrame = window.requestAnimationFrame(() => {
-            dimensions.forEach((entry) => syncRenderedImageDimensions(initialView, entry));
+            imageDimensionEntries(initialView.state.doc).forEach((entry) => syncRenderedImageDimensions(initialView, entry));
             initialView.dom.dispatchEvent(new CustomEvent("manuscript:image-dimensions-synced"));
           });
           return {
             update: (view, previousState) => {
-              if (!imageMayHaveChanged(previousState.doc, view.state.doc)) {
+              if (previousState.doc === view.state.doc) {
                 return;
               }
-
-              const nextDimensions = imageDimensionEntries(view.state.doc);
-              if (sameImageDimensions(dimensions, nextDimensions)) {
+              const start = previousState.doc.content.findDiffStart(view.state.doc.content);
+              if (start === null) {
                 return;
               }
-
-              dimensions = nextDimensions;
-              nextDimensions.forEach((entry) => syncRenderedImageDimensions(view, entry));
-              view.dom.dispatchEvent(new CustomEvent("manuscript:image-dimensions-synced"));
+              const end = previousState.doc.content.findDiffEnd(view.state.doc.content)?.b ?? start;
+              const changedImages = imageDimensionEntries(view.state.doc, Math.min(start, end), Math.max(start, end));
+              if (changedImages.length > 0) {
+                changedImages.forEach((entry) => syncRenderedImageDimensions(view, entry));
+                view.dom.dispatchEvent(new CustomEvent("manuscript:image-dimensions-synced"));
+              }
             },
             destroy: () => window.cancelAnimationFrame(initialSyncFrame)
           };
@@ -844,6 +829,21 @@ export const RubyTextNode = Node.create({
   }
 });
 
+function qrCardAttributes(node: ProseMirrorNode, htmlAttributes: Record<string, unknown>) {
+  return mergeAttributes(htmlAttributes, {
+    "data-type": "qr-card",
+    "data-instance-id": node.attrs.instanceId,
+    "data-url": node.attrs.url,
+    "data-title": node.attrs.title,
+    "data-description": node.attrs.description,
+    "data-src": node.attrs.src,
+    "data-template": node.attrs.template,
+    "data-label": node.attrs.label,
+    ...qrCardTextSizeAttributes(node.attrs.labelFontSizePt, node.attrs.titleFontSizePt, node.attrs.descriptionFontSizePt),
+    class: `qr-card qr-card-${node.attrs.template}`
+  });
+}
+
 export const QrCardNode = Node.create({
   name: "qrCard",
   group: "block",
@@ -916,18 +916,7 @@ export const QrCardNode = Node.create({
   renderHTML({ node, HTMLAttributes }) {
     return [
       "figure",
-      mergeAttributes(HTMLAttributes, {
-        "data-type": "qr-card",
-        "data-instance-id": node.attrs.instanceId,
-        "data-url": node.attrs.url,
-        "data-title": node.attrs.title,
-        "data-description": node.attrs.description,
-        "data-src": node.attrs.src,
-        "data-template": node.attrs.template,
-        "data-label": node.attrs.label,
-        ...qrCardTextSizeAttributes(node.attrs.labelFontSizePt, node.attrs.titleFontSizePt, node.attrs.descriptionFontSizePt),
-        class: `qr-card qr-card-${node.attrs.template}`
-      }),
+      qrCardAttributes(node, HTMLAttributes),
       ["div", { class: "qr-card-label" }, node.attrs.label],
       [
         "div",
@@ -941,6 +930,58 @@ export const QrCardNode = Node.create({
         ]
       ]
     ];
+  },
+
+  addNodeView() {
+    return ({ node, editor }) => {
+      const dom = DOMSerializer.fromSchema(editor.schema).serializeNode(node) as HTMLElement;
+      const attributesFor = (current: ProseMirrorNode) => qrCardAttributes(current, getRenderedAttributes(current, editor.extensionManager.attributes));
+      let attributes = attributesFor(node);
+      const label = dom.querySelector<HTMLElement>(".qr-card-label")!;
+      const title = dom.querySelector<HTMLElement>(".qr-card-title")!;
+      const description = dom.querySelector<HTMLElement>(".qr-card-description")!;
+      const image = dom.querySelector<HTMLImageElement>(".qr-card-image")!;
+      return {
+        dom,
+        update(nextNode) {
+          if (nextNode.type !== node.type) {
+            return false;
+          }
+          const nextAttributes = attributesFor(nextNode);
+          const selected = dom.classList.contains("ProseMirror-selectednode");
+          for (const key of Object.keys(attributes)) {
+            if (!(key in nextAttributes)) {
+              dom.removeAttribute(key);
+            }
+          }
+          for (const [key, value] of Object.entries(nextAttributes)) {
+            if (value === null || value === undefined) {
+              dom.removeAttribute(key);
+              continue;
+            }
+            const nextValue = key === "class" && selected ? `${value} ProseMirror-selectednode` : String(value);
+            if (dom.getAttribute(key) !== nextValue) {
+              dom.setAttribute(key, nextValue);
+            }
+          }
+          attributes = nextAttributes;
+          for (const [element, value] of [[label, nextNode.attrs.label], [title, nextNode.attrs.title], [description, nextNode.attrs.description]] as const) {
+            if (element.textContent !== String(value)) {
+              element.textContent = String(value);
+            }
+          }
+          // Keep the decoded QR image and its DOM alive during slider updates.
+          if (image.getAttribute("src") !== nextNode.attrs.src) {
+            image.setAttribute("src", nextNode.attrs.src);
+          }
+          if (image.alt !== nextNode.attrs.title) {
+            image.alt = nextNode.attrs.title;
+          }
+          return true;
+        },
+        ignoreMutation: (mutation) => mutation.type !== "selection"
+      };
+    };
   },
 
   renderText({ node }) {
