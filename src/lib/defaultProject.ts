@@ -390,14 +390,19 @@ export function stripHtml(html: string): string {
   return template.content.textContent?.replace(/\s+/g, " ").trim() ?? "";
 }
 
-export function countManuscriptCharacters(project: ManuscriptProject): number {
-  return project.chapters
-    .map((chapter) => stripHtml(chapter.content))
-    .join("")
-    .replace(/\s/g, "").length;
+export function manuscriptTextStats(project: ManuscriptProject) {
+  const text = project.chapters.map((chapter) => stripHtml(chapter.content));
+  return {
+    characters: text.join("").replace(/\s/g, "").length,
+    hasEmptyChapter: text.some((chapter) => chapter.length === 0)
+  };
 }
 
-export function estimatePageCount(project: ManuscriptProject): number {
+export function countManuscriptCharacters(project: ManuscriptProject): number {
+  return manuscriptTextStats(project).characters;
+}
+
+export function estimatePageCount(project: ManuscriptProject, characters = countManuscriptCharacters(project)): number {
   const settings = project.pageSettings;
   const textWidthMm = Math.max(20, settings.pageWidthMm - settings.marginLeftMm - settings.marginRightMm);
   const textHeightMm = Math.max(30, settings.pageHeightMm - settings.marginTopMm - settings.marginBottomMm);
@@ -405,27 +410,26 @@ export function estimatePageCount(project: ManuscriptProject): number {
   const charsPerLine = Math.max(12, Math.floor(textWidthMm / fontMm));
   const linesPerPage = Math.max(8, Math.floor(textHeightMm / (fontMm * settings.lineHeight)));
   const charsPerPage = charsPerLine * linesPerPage;
-  const characters = countManuscriptCharacters(project);
   const blockCount = (project.chapters.map((chapter) => chapter.content).join("").match(/data-type="qr-card"|<img/gi) ?? []).length;
   const chapterBreakPages = Math.max(0, project.chapters.length - 1);
 
   return Math.max(1, Math.ceil(characters / charsPerPage + blockCount * 0.45 + chapterBreakPages * 0.35));
 }
 
-export function runManuscriptChecks(project: ManuscriptProject): ManuscriptCheck[] {
+export function runManuscriptChecks(project: ManuscriptProject, textStats = manuscriptTextStats(project)): ManuscriptCheck[] {
   const checks: ManuscriptCheck[] = [];
-  const charCount = countManuscriptCharacters(project);
+  const charCount = textStats.characters;
   const html = project.chapters.map((chapter) => chapter.content).join("\n");
   const qrCount = (html.match(/data-type="qr-card"/g) ?? []).length;
   const imageCount = (html.match(/<img/g) ?? []).length - qrCount;
   const headingCount = (html.match(/<h1\b/gi) ?? []).length;
-  const hasEmptyChapter = project.chapters.some((chapter) => stripHtml(chapter.content).length === 0);
+  const hasEmptyChapter = textStats.hasEmptyChapter;
   const unsafeQr = [...html.matchAll(/data-url="([^"]*)"/g)].some((match) => !isValidUrl(match[1]));
 
   checks.push({
     id: "characters",
     label: "文字数",
-    detail: `${charCount.toLocaleString("ja-JP")}字 / 推定${estimatePageCount(project)}ページ`,
+    detail: `${charCount.toLocaleString("ja-JP")}字 / 推定${estimatePageCount(project, charCount)}ページ`,
     level: "ok"
   });
 

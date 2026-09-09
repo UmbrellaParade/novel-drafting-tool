@@ -1586,6 +1586,104 @@ h1 {
   overflow-anchor: none;
 }
 
+.editor-view-switch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.editor-view-switch button,
+.writing-navigation button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid #c8d3cf;
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.editor-view-switch button[aria-pressed="true"] {
+  color: #155a51;
+  border-color: #278477;
+  background: #eaf3f0;
+}
+
+.workspace-grid.is-writing-workspace {
+  grid-template-columns: minmax(0, 1fr) 260px;
+}
+
+.writing-workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+  border: 1px solid #d6dcd9;
+}
+
+.writing-navigation {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #d6dcd9;
+}
+
+.writing-navigation select {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+}
+
+.writing-navigation span { white-space: nowrap; font-size: 12px; }
+.writing-navigation button { width: 34px; padding: 0; }
+
+.writing-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 28px max(24px, calc((100% - 780px) / 2));
+}
+
+.writing-scroll .editor-stack { width: 100%; }
+
+.writing-scroll .manuscript-prose {
+  width: 100%;
+  height: auto;
+  min-height: 60vh;
+  columns: auto;
+  writing-mode: horizontal-tb;
+  overflow-wrap: anywhere;
+}
+
+.writing-qr-library { padding: 16px; background: #fff; }
+.writing-qr-library h2 { margin: 0 0 16px; font-size: 15px; }
+.writing-qr-library button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 4px;
+  border: 0;
+  border-bottom: 1px solid #e1e6e4;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.writing-qr-library button span { flex: 1; overflow-wrap: anywhere; }
+.writing-qr-library button svg { flex-shrink: 0; }
+
+@media (max-width: 1000px) {
+  .workspace-grid.is-writing-workspace { grid-template-columns: minmax(0, 1fr); }
+  .chapter-heading-row:has(.editor-view-switch) { flex-wrap: wrap; }
+}
+
 .column-controls {
   position: relative;
   z-index: 4;

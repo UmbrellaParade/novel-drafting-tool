@@ -41,12 +41,15 @@ type TiptapEditorProps = {
   onPasteLayoutHints?: (hints: PasteLayoutHints) => void;
   onTableOfContentsLink?: (headingIndex: number) => void;
   onReady?: (editor: Editor | null) => void;
+  scrollToSelection?: boolean;
+  boundedDocument?: boolean;
 };
 
 type TiptapToolbarProps = {
   editor: Editor | null;
   verticalWriting?: boolean;
   onOpenQrLibrary?: () => void;
+  writingScope?: boolean;
 };
 
 type ToolButtonProps = {
@@ -121,7 +124,7 @@ function selectedVerticalPageCenterBlocks(editor: Editor): Array<{ node: ProseMi
   return blocks;
 }
 
-export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayoutHints, onTableOfContentsLink, onReady }: TiptapEditorProps) {
+export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayoutHints, onTableOfContentsLink, onReady, scrollToSelection = false, boundedDocument = false }: TiptapEditorProps) {
   const editorRef = useRef<Editor | null>(null);
   // onChangeをrefで保持することで、useEditor内クロージャが古い参照を持たないようにする
   const onChangeRef = useRef(onChange);
@@ -192,7 +195,9 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        horizontalRule: false
+        horizontalRule: false,
+        // An editing-window boundary is not the end of the manuscript.
+        trailingNode: boundedDocument ? false : undefined,
       }),
       FontSizeMark,
       BlockFontSizeExtension,
@@ -235,6 +240,21 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         "data-gramm": "false",
         lang: "ja",
         spellcheck: "false"
+      },
+      handleDOMEvents: {
+        beforeinput: () => {
+          lastDirectTypingActivityRef.current = Date.now();
+          onTypingActivityRef.current?.();
+          return false;
+        },
+        compositionstart: () => {
+          onTypingActivityRef.current?.();
+          return false;
+        },
+        compositionend: () => {
+          onTypingActivityRef.current?.();
+          return false;
+        }
       },
       handleKeyDown: (_view, event) => {
         const tocLink = event.target instanceof Element
@@ -280,7 +300,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
         onTableOfContentsLinkRef.current?.(targetIndex);
         return true;
       },
-      handleScrollToSelection: () => true,
+      handleScrollToSelection: () => !scrollToSelection,
       handlePaste: (_view, event) => {
         lastDirectTypingActivityRef.current = Date.now();
         onTypingActivityRef.current?.();
@@ -400,7 +420,7 @@ export function TiptapEditor({ content, onChange, onTypingActivity, onPasteLayou
   );
 }
 
-export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary }: TiptapToolbarProps) {
+export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary, writingScope = false }: TiptapToolbarProps) {
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const imageSelectionTargetRef = useRef<ImageReplacementTarget | null>(null);
   const imageReplaceTargetRef = useRef<ImageReplacementTarget | null>(null);
@@ -1406,7 +1426,7 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
         <ToolButton
           label="選択ブロックをページ中央"
           active={toolbarState.selectedVerticalPageCenter}
-          disabled={disabled || !toolbarState.hasVerticalPageCenterTarget}
+          disabled={disabled || writingScope || !toolbarState.hasVerticalPageCenterTarget}
           onClick={toggleVerticalPageCenter}
         >
           <Focus size={18} />
@@ -1421,13 +1441,13 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
             <Rows3 size={18} />
           </ToolButton>
         ) : null}
-        <ToolButton label="ページ内カラム" active={columnPanelOpen || toolbarState.activeColumnCount > 0} disabled={disabled} onClick={() => setColumnPanelOpen((open) => !open)}>
+        <ToolButton label="ページ内カラム" active={columnPanelOpen || toolbarState.activeColumnCount > 0} disabled={disabled || writingScope} onClick={() => setColumnPanelOpen((open) => !open)}>
           <Columns2 size={18} />
         </ToolButton>
         <ToolButton label="画像" disabled={disabled} onClick={() => imageInputRef.current?.click()}>
           <ImagePlus size={18} />
         </ToolButton>
-        <ToolButton label="全画像をページ内最大" disabled={disabled} onClick={fitAllImagesToPages}>
+        <ToolButton label="全画像をページ内最大" disabled={disabled || writingScope} onClick={fitAllImagesToPages}>
           <Scan size={18} />
         </ToolButton>
         <ToolButton label="QRリンク" disabled={!onOpenQrLibrary} onClick={() => onOpenQrLibrary?.()}>
@@ -1505,11 +1525,11 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
       {toolbarState.hasImageSelection ? (
         <div className="image-size-controls" aria-label="画像サイズ">
           <span className="image-size-chip">画像</span>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={fitImageToCurrentPage}>
+          <button type="button" disabled={writingScope} onMouseDown={preserveEditorSelection} onClick={fitImageToCurrentPage}>
             <Scan size={15} />
             ページ内最大
           </button>
-          <button type="button" onMouseDown={preserveEditorSelection} onClick={matchPreviousImageSize}>
+          <button type="button" disabled={writingScope} onMouseDown={preserveEditorSelection} onClick={matchPreviousImageSize}>
             <Copy size={15} />
             前画像と同じ
           </button>
@@ -1653,9 +1673,9 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
           aria-label="文字サイズpt"
         />
         <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedTextSize}>選択部分</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("all")}>全体</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>見出し全体</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>本文のみ</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("all")}>{writingScope ? "表示範囲" : "全体"}</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("headings")}>{writingScope ? "範囲の見出し" : "見出し全体"}</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={() => applyBlockTextSize("body")}>{writingScope ? "範囲の本文" : "本文のみ"}</button>
         <button type="button" onMouseDown={preserveEditorSelection} onClick={clearTextSizes}>サイズ解除</button>
         <span className="toolbar-divider" />
         <span className="image-size-chip">行間</span>
@@ -1672,7 +1692,7 @@ export function TiptapToolbar({ editor, verticalWriting = false, onOpenQrLibrary
         />
         <button type="button" onMouseDown={preserveEditorSelection} onClick={applySelectedLineHeight}>選択ロック</button>
         <button type="button" onMouseDown={preserveEditorSelection} onClick={clearSelectedLineHeight}>行間解除</button>
-        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearAllLineHeights}>全行間解除</button>
+        <button type="button" onMouseDown={preserveEditorSelection} onClick={clearAllLineHeights}>{writingScope ? "範囲の行間解除" : "全行間解除"}</button>
       </div>
       <input
         ref={imageInputRef}

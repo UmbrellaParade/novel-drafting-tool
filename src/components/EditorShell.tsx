@@ -27,7 +27,8 @@ import {
   XCircle
 } from "lucide-react";
 import { TiptapEditor, TiptapToolbar, type PasteLayoutHints } from "./TiptapEditor";
-import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, countManuscriptCharacters, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
+import { WritingWorkspace, type WritingWorkspaceHandle } from "./WritingWorkspace";
+import { MANUSCRIPT_FONTS, PAGE_PRESETS, applyPreset, manuscriptTextStats, createDefaultProject, estimatePageCount, isValidUrl, normalizeProject, runManuscriptChecks, sanitizeFileName } from "@/lib/defaultProject";
 import type { Chapter, ManuscriptFontId, ManuscriptProject, PageNumberPosition, PagePresetId, PageSettings, QrCardTemplateId, QrLink, TocSettings, TocStyleId, TocTitlePosition, WritingMode } from "@/lib/types";
 import { downloadBlob, exportProjectJson, loadProjectFromBrowser, readJsonFile, saveProjectBackupToLocalStorage, saveProjectToBrowser } from "@/lib/storage";
 import { blobToDataUrl } from "@/lib/imageAssets";
@@ -1560,11 +1561,15 @@ function syncTableOfContentsNodes(editor: Editor, settings: TocSettings, entries
   return changed;
 }
 
-export function EditorShell() {
+export function EditorShell({ initialView = "layout" }: { initialView?: "layout" | "write" } = {}) {
   const [project, setProject] = useState<ManuscriptProject | null>(null);
+  const [editorView, setEditorView] = useState(initialView);
+  const [writingSnapshot, setWritingSnapshot] = useState<ManuscriptProject | null>(null);
+  const writingWorkspaceRef = useRef<WritingWorkspaceHandle | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("draft");
   const [statusText, setStatusText] = useState("起動中");
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
+  const activeEditorRef = useRef<Editor | null>(null);
   const [driveClient, setDriveClient] = useState<DriveClient | null>(null);
   const [driveFolders, setDriveFolders] = useState<DriveFolder[]>([]);
   const [driveSettingsDraft, setDriveSettingsDraft] = useState<GoogleDriveSettings>(EMPTY_DRIVE_SETTINGS);
@@ -1575,7 +1580,7 @@ export function EditorShell() {
   const [pageFit, setPageFit] = useState({ scale: 1, width: 0, height: 0, pageStep: 0 });
   const [visibleSpreadIndex, setVisibleSpreadIndex] = useState(0);
   const [verticalActivePageIndex, setVerticalActivePageIndex] = useState(0);
-  const [fastEditing, setFastEditing] = useState(false);
+  const [layoutIdleRevision, setLayoutIdleRevision] = useState(0);
   const bundledDriveSettings = hasBundledGoogleDriveSettings();
   const pageStageRef = useRef<HTMLDivElement | null>(null);
   const verticalPreviewLayerRef = useRef<HTMLDivElement | null>(null);
@@ -1598,6 +1603,8 @@ export function EditorShell() {
   const pageSettingTimerRef = useRef<number | null>(null);
   const pendingPageSettingsRef = useRef<Partial<PageSettings>>({});
 
+  useEffect(() => { activeEditorRef.current = activeEditor; }, [activeEditor]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -1606,21 +1613,25 @@ export function EditorShell() {
         if (!isMounted) {
           return;
         }
-        setProject(normalizeDocumentProject(restored ?? createDefaultProject()));
+        const next = normalizeDocumentProject(restored ?? createDefaultProject());
+        setProject(next);
+        if (initialView === "write") setWritingSnapshot(next);
         setStatusText(restored ? "ブラウザ保存から復元" : "新規原稿");
       })
       .catch(() => {
         if (!isMounted) {
           return;
         }
-        setProject(normalizeDocumentProject(createDefaultProject()));
+        const next = normalizeDocumentProject(createDefaultProject());
+        setProject(next);
+        if (initialView === "write") setWritingSnapshot(next);
         setStatusText("新規原稿");
       });
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [initialView]);
 
   useEffect(() => {
     setDriveSettingsDraft(loadGoogleDriveSettings());
@@ -1647,10 +1658,6 @@ export function EditorShell() {
   }, []);
 
   useEffect(() => {
-    fastEditingRef.current = fastEditing;
-  }, [fastEditing]);
-
-  useEffect(() => {
     if (!project) {
       return;
     }
@@ -1675,13 +1682,15 @@ export function EditorShell() {
     }
     return project.chapters[0] ?? null;
   }, [project]);
-  const layoutPageSettings = project?.pageSettings ?? null;
-  const layoutChapters = project?.chapters ?? null;
+  // Writing commits update the saved book, not the pagination/checking pipeline.
+  const layoutSource = editorView === "write" ? writingSnapshot : project;
+  const layoutPageSettings = layoutSource?.pageSettings ?? null;
+  const layoutChapters = layoutSource?.chapters ?? null;
   const tocSettingsForSync = project?.tocSettings ?? null;
-  const activeChapterContent = activeChapter?.content ?? "";
+  const activeChapterContent = layoutChapters?.[0]?.content ?? "";
   const { value: layoutChapterContent, revision: layoutContentRevision } = useDebouncedVersionedValue(activeChapterContent, LAYOUT_REFRESH_DELAY_MS);
   const layoutProject = useMemo<ManuscriptProject | null>(() => {
-    if (!layoutPageSettings || !layoutChapters || !activeChapter) {
+    if (!layoutPageSettings || !layoutChapters?.[0]) {
       return null;
     }
 
@@ -1693,21 +1702,22 @@ export function EditorShell() {
       author: "",
       pageSettings: layoutPageSettings,
       chapters: layoutChapters.map((chapter, index) => (index === 0 ? { ...chapter, content: layoutChapterContent } : chapter)),
-      activeChapterId: activeChapter.id,
+      activeChapterId: layoutChapters[0].id,
       qrLinks: [],
       tocSettings: { title: "目次", subtitle: "", style: "classic", titlePosition: "center", showPageNumbers: true, enableLinks: false },
       updatedAt: ""
     };
-  }, [activeChapter, layoutChapterContent, layoutChapters, layoutPageSettings]);
+  }, [layoutChapterContent, layoutChapters, layoutPageSettings]);
   const outlineItems = useMemo(() => extractOutlineItems(layoutChapterContent), [layoutChapterContent]);
   const tocEntries = useMemo<TocEntry[]>(
     () => outlineItems.map((item) => ({ ...item, page: headingPageNumbers[item.index] ?? null })),
     [headingPageNumbers, outlineItems]
   );
 
-  const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject) : []), [layoutProject]);
-  const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject) : 1), [layoutProject]);
-  const characterCount = useMemo(() => (layoutProject ? countManuscriptCharacters(layoutProject) : 0), [layoutProject]);
+  const textStats = useMemo(() => layoutProject ? manuscriptTextStats(layoutProject) : { characters: 0, hasEmptyChapter: true }, [layoutProject]);
+  const checks = useMemo(() => (layoutProject ? runManuscriptChecks(layoutProject, textStats) : []), [layoutProject, textStats]);
+  const estimatedPages = useMemo(() => (layoutProject ? estimatePageCount(layoutProject, textStats.characters) : 1), [layoutProject, textStats]);
+  const characterCount = textStats.characters;
   const measuredPageCount =
     measuredPages &&
     activeChapter &&
@@ -1717,7 +1727,12 @@ export function EditorShell() {
     measuredPages.pageSettings === layoutPageSettings
       ? measuredPages.count
       : null;
-  const pageFrameCount = Math.max(1, measuredPageCount ?? estimatedPages);
+  // Keep the measured paper geometry while a changed manuscript is being measured.
+  // Falling back to the estimate here resizes the entire editing surface twice.
+  const previousPageCount = measuredPages?.chapterId === activeChapter?.id && measuredPages?.pageSettings === layoutPageSettings
+    ? measuredPages?.count
+    : null;
+  const pageFrameCount = Math.max(1, measuredPageCount ?? previousPageCount ?? estimatedPages);
   const writingMode = layoutPageSettings?.writingMode ?? "horizontal";
   const verticalWriting = writingMode === "vertical";
   const pageSpreads = useMemo(() => buildPageSpreads(pageFrameCount, writingMode), [pageFrameCount, writingMode]);
@@ -1824,7 +1839,6 @@ export function EditorShell() {
     if (!fastEditingRef.current) {
       editingScrollLockRef.current = stage ? { top: stage.scrollTop, left: stage.scrollLeft } : null;
       fastEditingRef.current = true;
-      setFastEditing(true);
     } else if (!editingScrollLockRef.current && stage) {
       editingScrollLockRef.current = { top: stage.scrollTop, left: stage.scrollLeft };
     }
@@ -1832,17 +1846,26 @@ export function EditorShell() {
     if (fastEditingTimerRef.current !== null) {
       window.clearTimeout(fastEditingTimerRef.current);
     }
-    fastEditingTimerRef.current = window.setTimeout(() => {
+    const finishTyping = () => {
+      const editor = activeEditorRef.current;
+      if (editor && !editor.isDestroyed && editor.view.composing) {
+        fastEditingTimerRef.current = window.setTimeout(finishTyping, 250);
+        return;
+      }
       fastEditingTimerRef.current = null;
       fastEditingRef.current = false;
       editingScrollLockRef.current = null;
-      setFastEditing(false);
-    }, FAST_EDITING_RESET_MS);
+      setLayoutIdleRevision((revision) => revision + 1);
+    };
+    fastEditingTimerRef.current = window.setTimeout(finishTyping, FAST_EDITING_RESET_MS);
   }, [restoreEditingScrollLock]);
 
-  const readLatestEditorContent = useCallback(() => activeEditor && !activeEditor.isDestroyed
-    ? activeEditor.getHTML()
-    : pendingChapterContentRef.current, [activeEditor]);
+  const readLatestEditorContent = useCallback(() => {
+    if (editorView === "write") {
+      return writingWorkspaceRef.current?.getHTML() ?? pendingChapterContentRef.current;
+    }
+    return activeEditor && !activeEditor.isDestroyed ? activeEditor.getHTML() : pendingChapterContentRef.current;
+  }, [activeEditor, editorView]);
 
   const projectWithLatestContent = useCallback(
     (source: ManuscriptProject) => {
@@ -1904,7 +1927,7 @@ export function EditorShell() {
     }
     fastEditingRef.current = false;
     editingScrollLockRef.current = null;
-    setFastEditing(false);
+    setLayoutIdleRevision((revision) => revision + 1);
     pendingChapterContentRef.current = null;
     pendingPageSettingsRef.current = {};
     updateProject((previous) => ({
@@ -2105,7 +2128,7 @@ export function EditorShell() {
         scrollFrameRef.current = null;
       }
     };
-  }, [markUserPageScrollInput, updateVisibleSpreadFromScroll]);
+  }, [editorView, markUserPageScrollInput, updateVisibleSpreadFromScroll]);
 
   useEffect(() => {
     const nextSpreadIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
@@ -2189,7 +2212,7 @@ export function EditorShell() {
       }
       target.replaceChildren();
     };
-  }, [activeEditor, adjacentVerticalPageIndex, layoutContentRevision, layoutPageSettings, pageFrameCount, verticalWriting]);
+  }, [activeEditor, editorView, adjacentVerticalPageIndex, layoutContentRevision, layoutPageSettings, pageFrameCount, verticalWriting]);
 
   useLayoutEffect(() => {
     if (pageFit.pageStep <= 0 || pageSpreads.length === 0) {
@@ -2215,10 +2238,11 @@ export function EditorShell() {
     const nextIndex = Math.max(0, Math.min(visibleSpreadIndexRef.current, pageSpreads.length - 1));
     visibleSpreadIndexRef.current = nextIndex;
     alignStageToSpreadIndex(nextIndex);
-  }, [alignStageToSpreadIndex, fastEditing, pageFit.pageStep, pageSpreads.length, restoreEditingScrollLock]);
+  }, [alignStageToSpreadIndex, editorView, layoutIdleRevision, pageFit.pageStep, pageSpreads.length, restoreEditingScrollLock]);
 
   useEffect(() => {
     const handlePageKey = (event: KeyboardEvent) => {
+      if (editorView === "write") return;
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isTextInputTarget(event.target)) {
         return;
       }
@@ -2235,14 +2259,16 @@ export function EditorShell() {
 
     window.addEventListener("keydown", handlePageKey);
     return () => window.removeEventListener("keydown", handlePageKey);
-  }, [goToSpreadIndex]);
+  }, [editorView, goToSpreadIndex]);
 
   useEffect(() => {
-    if (!activeChapter || !layoutPageSettings || fastEditing) {
+    if (editorView === "write" || !activeEditor || !activeChapter || !layoutPageSettings || fastEditingRef.current || activeEditor.view.composing) {
       return;
     }
 
     const handle = window.requestAnimationFrame(() => {
+      // Input may start after this measurement was scheduled.
+      if (fastEditingRef.current || activeEditor.isDestroyed || activeEditor.view.composing) return;
       const stage = pageStageRef.current;
       const prose = stage?.querySelector<HTMLElement>(".paged-editor-layer .manuscript-prose");
       const activeFrame = stage?.querySelector<HTMLElement>(`.page-frame[data-page-index="${spreadStartPageIndex}"]`)
@@ -2323,7 +2349,7 @@ export function EditorShell() {
     });
 
     return () => window.cancelAnimationFrame(handle);
-  }, [activeChapter, fastEditing, layoutChapterContent, layoutContentRevision, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex, verticalWriting]);
+  }, [activeEditor, activeChapter, editorView, layoutIdleRevision, layoutChapterContent, layoutContentRevision, layoutPageSettings, measuredPageCount, pageFit.scale, pageFrameCount, spreadStartPageIndex, verticalWriting]);
 
   useEffect(() => {
     const stage = pageStageRef.current;
@@ -2389,15 +2415,15 @@ export function EditorShell() {
       resizeObserver.disconnect();
       window.removeEventListener("resize", updatePageFit);
     };
-  }, [maxSpreadPageCount, pageSpreads.length, spreadPageCount]);
+  }, [editorView, maxSpreadPageCount, pageSpreads.length, spreadPageCount]);
 
   useEffect(() => {
-    if (!activeEditor || !tocSettingsForSync || fastEditing) {
+    if (editorView === "write" || !activeEditor || !tocSettingsForSync || fastEditingRef.current || activeEditor.view.composing) {
       return;
     }
 
     syncTableOfContentsNodes(activeEditor, tocSettingsForSync, tocEntries);
-  }, [activeEditor, fastEditing, tocEntries, tocSettingsForSync]);
+  }, [activeEditor, editorView, layoutIdleRevision, tocEntries, tocSettingsForSync]);
 
   if (!project || !activeChapter) {
     return (
@@ -2450,6 +2476,17 @@ export function EditorShell() {
       const targetSpreadIndex = findSpreadIndexForPage(pageSpreads, targetPageIndex);
       goToSpreadIndex(targetSpreadIndex);
     });
+  };
+
+  const changeEditorView = (view: "layout" | "write") => {
+    if (view === editorView || activeEditor?.view.composing) return;
+    const latest = projectWithLatestOutputState(project);
+    flushPendingProjectState();
+    setProject(latest);
+    setWritingSnapshot(view === "write" ? latest : null);
+    lastAlignedPageStepRef.current = 0;
+    setActiveEditor(null);
+    setEditorView(view);
   };
 
   const handlePreset = (preset: PagePresetId) => {
@@ -2661,6 +2698,8 @@ export function EditorShell() {
 
   // 編集途中の内容や編集モードのタイマーを破棄して、原稿の置き換えに備える
   const prepareForProjectReplace = () => {
+    setEditorView("layout");
+    setWritingSnapshot(null);
     if (contentCommitTimerRef.current !== null) {
       window.clearTimeout(contentCommitTimerRef.current);
       contentCommitTimerRef.current = null;
@@ -2669,7 +2708,8 @@ export function EditorShell() {
       window.clearTimeout(fastEditingTimerRef.current);
       fastEditingTimerRef.current = null;
     }
-    setFastEditing(false);
+    fastEditingRef.current = false;
+    setLayoutIdleRevision((revision) => revision + 1);
     pendingChapterContentRef.current = null;
   };
 
@@ -3015,7 +3055,8 @@ export function EditorShell() {
       window.clearTimeout(fastEditingTimerRef.current);
       fastEditingTimerRef.current = null;
     }
-    setFastEditing(false);
+    fastEditingRef.current = false;
+    setLayoutIdleRevision((revision) => revision + 1);
     pendingChapterContentRef.current = null;
     setProject(normalizeDocumentProject(createDefaultProject()));
     setStatusText("新規原稿");
@@ -3055,8 +3096,10 @@ export function EditorShell() {
         </div>
         <div className="topbar-editor-tools">
           <TiptapToolbar
+            key={editorView}
             editor={activeEditor}
-            verticalWriting={project.pageSettings.writingMode === "vertical"}
+            verticalWriting={editorView === "layout" && project.pageSettings.writingMode === "vertical"}
+            writingScope={editorView === "write"}
             onOpenQrLibrary={openQrLibrary}
           />
         </div>
@@ -3118,7 +3161,8 @@ export function EditorShell() {
         ))}
       </nav>
 
-      <div className="workspace-grid">
+      <div className={`workspace-grid ${editorView === "write" ? "is-writing-workspace" : ""}`}>
+        {editorView === "layout" ? (
         <aside className={`left-rail mobile-panel ${mobileTab === "chapters" ? "is-mobile-active" : ""}`}>
           <TableOfContentsPanel
             entries={tocEntries}
@@ -3141,6 +3185,7 @@ export function EditorShell() {
             onReset={resetProject}
           />
         </aside>
+        ) : null}
 
         <section className={`editor-column mobile-panel ${mobileTab === "draft" ? "is-mobile-active" : ""}`} aria-label="本文編集">
           <div className="chapter-heading-row">
@@ -3148,9 +3193,17 @@ export function EditorShell() {
               <FileText size={16} />
             <span>{project.title}</span>
           </div>
-          <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span>
+          <div className="editor-view-switch" role="group" aria-label="編集画面">
+            <button type="button" aria-pressed={editorView === "write"} onClick={() => changeEditorView("write")}><Pencil size={15} />執筆（試作）</button>
+            <button type="button" aria-pressed={editorView === "layout"} onClick={() => changeEditorView("layout")}><BookOpen size={15} />紙面調整</button>
+          </div>
+          {editorView === "layout" ? <span className="chapter-meta">{characterCount.toLocaleString("ja-JP")}字</span> : null}
         </div>
-        <div ref={pageStageRef} className={`page-stage ${fastEditing ? "is-fast-editing" : ""}`}>
+        {editorView === "write" ? (
+          <WritingWorkspace ref={writingWorkspaceRef} key={activeChapter.id} content={writingSnapshot?.chapters[0]?.content ?? activeChapter.content} onChange={updateActiveChapterContent} onReady={setActiveEditor} />
+        ) : (
+        <>
+        <div ref={pageStageRef} className="page-stage">
           <div className="page-viewport" style={pageViewportStyle}>
             <div
               className={`paged-document ${verticalWriting ? "is-vertical" : "is-horizontal"} ${verticalWriting && project.pageSettings.centerChapterHeadings ? "center-chapter-headings" : ""} ${estimatedPages > 1 ? "is-long-manuscript" : ""} ${spreadPageCount > 1 ? "is-spread" : "is-single-page"}`}
@@ -3268,9 +3321,18 @@ export function EditorShell() {
               </select>
             </label>
           </nav>
+        </>
+        )}
         </section>
 
         <aside className={`right-rail mobile-panel ${mobileTab === "check" ? "is-mobile-active" : ""}`}>
+          {editorView === "write" ? (
+            <section className="writing-qr-library" ref={qrPanelRef} aria-label="QRリンク挿入">
+              <h2>QRリンク</h2>
+              {project.qrLinks.map((link) => <button type="button" key={link.id} onClick={() => void insertQrLink(link)} title={`${link.name}を挿入`}><QrCode size={17} /><span>{link.name}</span><Plus size={15} /></button>)}
+            </section>
+          ) : (
+          <>
           <QrLibraryPanel
             panelRef={qrPanelRef}
             links={project.qrLinks}
@@ -3299,6 +3361,8 @@ export function EditorShell() {
             onCreateFolder={() => void createDriveFolder()}
           />
           <CheckPanel checks={checks} characterCount={characterCount} estimatedPages={estimatedPages} collapsed={collapsedPanels.check} onToggle={() => toggleSidebarPanel("check")} />
+          </>
+          )}
         </aside>
       </div>
     </main>
